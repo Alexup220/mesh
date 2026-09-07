@@ -124,8 +124,8 @@ def primitive_mesh(kind: str, params: dict) -> trimesh.Trimesh:
 
 def shape_geometry(shape) -> trimesh.Trimesh:
     """Return the world-space mesh for a shape, transform applied."""
-    if shape.kind in PRIMITIVES:
-        tm = primitive_mesh(shape.kind, shape.params)
+    if shape.kind == "primitive":
+        tm = primitive_mesh(shape.params["primitive"], shape.params)
     elif shape.kind in ("imported", "group"):
         tm = decode_mesh(shape.params["blob"])
     else:

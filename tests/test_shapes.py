@@ -34,7 +34,7 @@ def test_box_dimensions_match_params():
 def test_shape_geometry_applies_transform():
     move = np.eye(4)
     move[:3, 3] = [5.0, 0.0, 0.0]
-    shape = FakeShape("cube", {"width": 2.0, "depth": 2.0, "height": 2.0}, move)
+    shape = FakeShape("primitive", {"primitive": "cube", "width": 2.0, "depth": 2.0, "height": 2.0}, move)
     tm = shape_geometry(shape)
     assert np.isclose(tm.bounds[0][0], 4.0, atol=1e-6)
 
