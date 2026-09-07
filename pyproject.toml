@@ -13,6 +13,7 @@ dependencies = [
     "pycollada>=0.8",
     "scipy>=1.13",
     "networkx>=3.0",
+    "shapely>=2.0",
 ]
 
 [project.scripts]
