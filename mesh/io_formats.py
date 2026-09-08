@@ -1,6 +1,7 @@
 """Reading and writing files: model imports, exports, and .mesh projects."""
 
 import json
+import logging
 import uuid
 from pathlib import Path
 
@@ -9,6 +10,8 @@ import trimesh
 
 from mesh.blobs import encode_mesh
 from mesh.scene import DEFAULT_COLOR, Scene, Shape
+
+logger = logging.getLogger(__name__)
 
 IMPORT_EXTS = (".stl", ".obj", ".3mf", ".ply", ".glb", ".gltf", ".off", ".dae")
 PROJECT_EXT = ".mesh"
@@ -53,7 +56,11 @@ def import_meshes(path) -> list[Shape]:
     try:
         loaded = trimesh.load(path, force=None)
     except Exception as exc:
-        raise MeshImportError(f"{path.name} could not be read: {exc}") from exc
+        logger.warning("failed to load %s: %s", path, exc)
+        raise MeshImportError(
+            f"{path.name} could not be opened. It may be damaged or saved in "
+            "an unsupported variant of that file type."
+        ) from exc
 
     meshes = _as_meshes(loaded)
     if not meshes:

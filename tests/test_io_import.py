@@ -62,3 +62,31 @@ def test_normal_millimetre_model_is_not_flagged():
 
 def test_all_declared_extensions_are_lowercase_with_a_dot():
     assert all(e.startswith(".") and e.islower() for e in IMPORT_EXTS)
+
+
+def test_corrupt_file_message_uses_no_jargon(tmp_path):
+    path = tmp_path / "broken.stl"
+    path.write_bytes(b"not actually a valid stl file at all")
+    with pytest.raises(MeshImportError) as excinfo:
+        import_meshes(path)
+    text = str(excinfo.value).lower()
+    for word in ("manifold", "boolean", "csg", "vertex", "watertight"):
+        assert word not in text
+    assert "traceback" not in text
+    assert "module" not in text
+    assert "exception" not in text
+
+
+def test_body_count_over_max_falls_back_to_a_single_shape(tmp_path, monkeypatch):
+    import mesh.io_formats as io_formats
+
+    monkeypatch.setattr(io_formats, "MAX_BODIES", 2)
+    parts = [trimesh.creation.box(extents=(1.0, 1.0, 1.0)) for _ in range(3)]
+    for i, part in enumerate(parts):
+        part.apply_translation([i * 10.0, 0.0, 0.0])
+    combined = trimesh.util.concatenate(parts)
+    path = tmp_path / "many.stl"
+    combined.export(path)
+
+    shapes = import_meshes(path)
+    assert len(shapes) == 1
