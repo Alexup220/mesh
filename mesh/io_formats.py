@@ -85,3 +85,63 @@ def import_meshes(path) -> list[Shape]:
             )
         )
     return shapes
+
+
+EXPORT_EXTS = (".stl", ".3mf", ".obj")
+
+
+class ExportError(Exception):
+    """A model could not be written."""
+
+
+def export_scene(scene: Scene, path) -> None:
+    """Write the combined model, refusing to emit a broken mesh.
+
+    A beginner cannot tell a bad STL from a good one until a print fails
+    hours in, so a hard refusal here is worth more than a warning.
+    """
+    from mesh.ops import NothingToCombineError, evaluate
+
+    path = Path(path)
+    if path.suffix.lower() not in EXPORT_EXTS:
+        raise ExportError(
+            f"mesh cannot save {path.suffix} files. Try {', '.join(EXPORT_EXTS)}."
+        )
+
+    visible = [s for s in scene.shapes if s.visible]
+    try:
+        result = evaluate(visible)
+    except NothingToCombineError as exc:
+        raise ExportError("There is nothing to save yet — add a shape first.") from exc
+
+    if not result.is_watertight:
+        result = result.copy()
+        result.fill_holes()
+        result.update_faces(result.nondegenerate_faces())
+        result.merge_vertices()
+
+    if not result.is_watertight:
+        raise ExportError(
+            "This model has gaps in it and would not print correctly. "
+            "Try grouping your shapes so they join into one solid piece."
+        )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    result.export(path)
+
+
+def save_project(scene: Scene, path) -> None:
+    path = Path(path)
+    document = {"format_version": PROJECT_FORMAT_VERSION, "scene": scene.to_dict()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document))
+
+
+def load_project(path) -> Scene:
+    path = Path(path)
+    try:
+        document = json.loads(path.read_text())
+        return Scene.from_dict(document["scene"])
+    except (json.JSONDecodeError, KeyError, TypeError, OSError) as exc:
+        logger.warning("failed to load project %s: %s", path, exc)
+        raise ExportError(f"{path.name} is not a mesh project file.") from exc
