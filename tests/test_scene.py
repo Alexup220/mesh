@@ -85,7 +85,40 @@ def test_new_snapshot_discards_the_redo_branch():
 
 def test_history_is_capped_at_fifty():
     doc = Document()
-    for _ in range(80):
-        doc.snapshot("x")
-        doc.scene.add(new_primitive("cube"))
+    # Add 80 snapshots, each with a uniquely-named shape to make snapshots distinguishable
+    for i in range(80):
+        doc.snapshot(f"snapshot_{i}")
+        s = new_primitive("cube")
+        s.name = f"cube_{i}"
+        doc.scene.add(s)
+
+    # Verify history is capped at 50
     assert len(doc._undo) <= 50
+
+    # Verify that the retained snapshots are the MOST RECENT ones, not the oldest.
+    # After adding 80 snapshots and capping at 50, we keep snapshots 30-79.
+    # The oldest retained snapshot (from iteration 30) contains shapes [cube_0, ..., cube_29].
+    # We can verify this by checking that the oldest retained snapshot's newest shape
+    # has index >= 29 (not -1, which would indicate snapshot 0 with no shapes).
+    oldest_retained = doc._undo[0]
+
+    # Find the highest numbered shape in the oldest retained snapshot
+    max_shape_index = -1
+    for shape in oldest_retained.shapes:
+        if shape.name.startswith("cube_"):
+            try:
+                idx = int(shape.name.split("_")[1])
+                max_shape_index = max(max_shape_index, idx)
+            except (ValueError, IndexError):
+                pass
+
+    # With correct trimming (keeping most recent 50 out of 80):
+    # oldest retained is from iteration 30, which has shapes [cube_0, ..., cube_29]
+    # So max_shape_index should be 29.
+    # With incorrect trimming (keeping oldest 50 instead):
+    # oldest retained is from iteration 0, which has no shapes
+    # So max_shape_index would be -1.
+    assert max_shape_index >= 29, (
+        f"oldest retained snapshot has max shape index {max_shape_index}, "
+        f"expected >= 29; likely keeping oldest snapshots instead of recent ones"
+    )
