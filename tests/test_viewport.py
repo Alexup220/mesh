@@ -4,10 +4,10 @@ from mesh.scene import Scene, new_primitive
 
 
 @pytest.fixture
-def viewport(qapp):
+def viewport(qapp, close_qt_widget):
     from mesh.viewport import Viewport
 
-    return Viewport()
+    return close_qt_widget(Viewport())
 
 
 def test_viewport_constructs(viewport):
