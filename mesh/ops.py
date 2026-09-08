@@ -81,3 +81,69 @@ def ungroup(shape: Shape) -> list[Shape]:
     for child in children:
         child.transform = outer @ np.asarray(child.transform, dtype=np.float64)
     return children
+
+
+AXES = {"x": 0, "y": 1, "z": 2}
+ALIGN_MODES = ("min", "center", "max")
+
+
+def duplicate(shape: Shape, offset=(10.0, 10.0, 0.0)) -> Shape:
+    clone = copy.deepcopy(shape)
+    clone.id = uuid.uuid4().hex
+    clone.transform = np.asarray(clone.transform, dtype=np.float64).copy()
+    clone.transform[:3, 3] += np.asarray(offset, dtype=np.float64)
+    return clone
+
+
+def mirror(shape: Shape, axis: str) -> Shape:
+    """Mirror a shape about its own centre, leaving it where it sits."""
+    if axis not in AXES:
+        raise ValueError(f"unknown axis {axis!r}; expected one of {tuple(AXES)}")
+    index = AXES[axis]
+    centre = shape_geometry(shape).bounds.mean(axis=0)
+
+    flip = np.eye(4, dtype=np.float64)
+    flip[index, index] = -1.0
+
+    to_origin = np.eye(4, dtype=np.float64)
+    to_origin[:3, 3] = -centre
+    back = np.eye(4, dtype=np.float64)
+    back[:3, 3] = centre
+
+    shape.transform = back @ flip @ to_origin @ np.asarray(shape.transform, dtype=np.float64)
+    return shape
+
+
+def align(shapes: list[Shape], axis: str, mode: str) -> None:
+    """Line shapes up along one axis. Mutates their transforms."""
+    if axis not in AXES:
+        raise ValueError(f"unknown axis {axis!r}; expected one of {tuple(AXES)}")
+    if mode not in ALIGN_MODES:
+        raise ValueError(f"unknown mode {mode!r}; expected one of {ALIGN_MODES}")
+    if len(shapes) < 2:
+        return
+
+    index = AXES[axis]
+    bounds = [shape_geometry(s).bounds for s in shapes]
+
+    if mode == "min":
+        target = min(b[0][index] for b in bounds)
+        current = [b[0][index] for b in bounds]
+    elif mode == "max":
+        target = max(b[1][index] for b in bounds)
+        current = [b[1][index] for b in bounds]
+    else:
+        values = [(b[0][index] + b[1][index]) / 2.0 for b in bounds]
+        target = sum(values) / len(values)
+        current = values
+
+    for shape, value in zip(shapes, current):
+        shape.transform = np.asarray(shape.transform, dtype=np.float64).copy()
+        shape.transform[index, 3] += target - value
+
+
+def drop_to_plane(shape: Shape) -> None:
+    """Sit a shape on the workplane."""
+    low_z = shape_geometry(shape).bounds[0][2]
+    shape.transform = np.asarray(shape.transform, dtype=np.float64).copy()
+    shape.transform[2, 3] -= low_z
