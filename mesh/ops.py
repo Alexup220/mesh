@@ -56,6 +56,30 @@ def boolean(shapes: list[Shape], op: str) -> trimesh.Trimesh:
     return getattr(trimesh.boolean, op)(meshes, engine=ENGINE)
 
 
+# Plain-language labels for the explicit menu items. Solid/Hole + Group
+# stays the primary path the UI teaches; these are the secondary route
+# for a user who wants the operator directly instead of the flag.
+BOOLEAN_LABELS = {"union": "Join", "difference": "Cut Out", "intersection": "Keep Overlap"}
+
+
+def make_boolean_group(shapes: list[Shape], op: str, name: str | None = None) -> Shape:
+    """Explicit Union/Subtract/Intersect, wrapped as a group shape exactly
+    like make_group() -- same reversible-by-ungroup shape, just built from
+    `boolean()` (which ignores is_hole) instead of `evaluate()`."""
+    result = boolean(shapes, op)
+    return Shape(
+        id=uuid.uuid4().hex,
+        name=name or BOOLEAN_LABELS.get(op, op),
+        kind="group",
+        params={
+            "blob": encode_mesh(result),
+            "children": [s.to_dict() for s in shapes],
+        },
+        transform=np.eye(4, dtype=np.float64),
+        color=shapes[0].color,
+    )
+
+
 def make_group(shapes: list[Shape], name: str = "Group") -> Shape:
     """Combine shapes into one group shape, retaining children for ungroup."""
     result = evaluate(shapes)

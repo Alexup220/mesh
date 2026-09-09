@@ -1,7 +1,15 @@
 import numpy as np
 import pytest
 
-from mesh.ops import NothingToCombineError, boolean, evaluate, make_group, ungroup
+from mesh.ops import (
+    BOOLEAN_LABELS,
+    NothingToCombineError,
+    boolean,
+    evaluate,
+    make_boolean_group,
+    make_group,
+    ungroup,
+)
 from mesh.scene import new_primitive
 
 
@@ -80,3 +88,35 @@ def test_groups_can_nest():
     outer = make_group([inner, cube(6.0, at=(20.0, 0.0, 0.0))])
     assert len(outer.params["children"]) == 2
     assert ungroup(outer)[0].kind == "group"
+
+
+def test_make_boolean_group_produces_a_group_shape():
+    a = cube(10.0)
+    b = cube(10.0, at=(5.0, 0.0, 0.0))
+    group = make_boolean_group([a, b], "union")
+    assert group.kind == "group"
+    assert len(group.params["children"]) == 2
+    assert group.name == "Join"
+
+
+def test_make_boolean_group_uses_the_operator_ignoring_is_hole():
+    solid = cube(10.0)
+    other = cube(10.0, at=(5.0, 0.0, 0.0), hole=True)
+    group = make_boolean_group([solid, other], "difference")
+    # difference() treats operand order literally, unlike evaluate()'s
+    # solid-union-then-hole-subtract -- this is the whole point of the
+    # explicit operator being a *different*, secondary path.
+    from mesh.blobs import decode_mesh
+    result = decode_mesh(group.params["blob"])
+    assert np.isclose(result.volume, 500.0, rtol=1e-3)
+
+
+def test_make_boolean_group_rejects_an_empty_selection():
+    with pytest.raises(NothingToCombineError):
+        make_boolean_group([], "union")
+
+
+def test_boolean_labels_are_plain_language():
+    for label in BOOLEAN_LABELS.values():
+        for word in ("union", "difference", "intersection", "boolean", "csg"):
+            assert word not in label.lower()

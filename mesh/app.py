@@ -122,6 +122,12 @@ class MeshWindow(QMainWindow):
         self.act_ungroup = self._act(shape, "&Ungroup", "Ctrl+Shift+G", self.do_ungroup)
         self._act(shape, "Make &Hole / Solid", "H", self.do_toggle_hole)
         shape.addSeparator()
+        # Explicit Union/Subtract/Intersect: the secondary route to
+        # ops.boolean, for a user who wants the operator directly instead
+        # of the Solid/Hole flag that Group teaches as the primary path.
+        for op, label in ops.BOOLEAN_LABELS.items():
+            self._act(shape, label, None, lambda _c=False, o=op: self.do_boolean(o))
+        shape.addSeparator()
         for axis in ("x", "y", "z"):
             self._act(shape, f"Mirror along {axis.upper()}", None,
                       lambda _c=False, a=axis: self.do_mirror(a))
@@ -254,6 +260,25 @@ class MeshWindow(QMainWindow):
             self._warn("Cannot group", str(exc))
             return
         self.document.snapshot("group")
+        self.document.scene.remove([s.id for s in chosen])
+        self.document.scene.add(group)
+        self.document.scene.select([group.id])
+        self.sync()
+
+    def do_boolean(self, op: str) -> None:
+        """The explicit Join / Cut Out / Keep Overlap menu items: the
+        secondary route to ops.boolean for a user who wants the operator
+        directly rather than the Solid/Hole flag. Solid/Hole + Group stays
+        the primary path."""
+        chosen = self.document.scene.selected()
+        if len(chosen) < 1:
+            return
+        try:
+            group = ops.make_boolean_group(chosen, op)
+        except ops.NothingToCombineError as exc:
+            self._warn("Cannot combine", str(exc))
+            return
+        self.document.snapshot(op)
         self.document.scene.remove([s.id for s in chosen])
         self.document.scene.add(group)
         self.document.scene.select([group.id])

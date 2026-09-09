@@ -293,3 +293,18 @@ def test_editing_the_color_field_sets_the_shapes_color(window):
     shape = window.document.scene.shapes[0]
     window._on_edited(shape.id, "color", "#112233")
     assert window.document.scene.get(shape.id).color == "#112233"
+
+
+def test_do_boolean_join_replaces_selection_with_a_group(window):
+    window.add_primitive("cube")
+    window.add_primitive("sphere")
+    window.document.scene.select([s.id for s in window.document.scene.shapes])
+    window.do_boolean("union")
+    assert len(window.document.scene.shapes) == 1
+    assert window.document.scene.shapes[0].kind == "group"
+    assert window.document.scene.shapes[0].name == "Join"
+
+
+def test_do_boolean_with_nothing_selected_is_a_safe_no_op(window):
+    window.do_boolean("union")
+    assert window.document.scene.shapes == []
