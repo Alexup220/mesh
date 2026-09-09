@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=mesh
+Comment=Easy 3D modeling for 3D printing
+Exec=/home/alexup220/mesh/bin/mesh
+Terminal=false
+Categories=Graphics;3DGraphics;
+StartupNotify=true
