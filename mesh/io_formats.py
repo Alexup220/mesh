@@ -90,8 +90,19 @@ def import_meshes(path) -> list[Shape]:
 EXPORT_EXTS = (".stl", ".3mf", ".obj")
 
 
-class ExportError(Exception):
-    """A model could not be written."""
+class ProjectError(Exception):
+    """A .mesh project or export could not be read or written.
+
+    Covers both directions -- export failures and project load
+    failures -- because both boil down to the same user-facing fact:
+    "this file could not be turned into/from a scene."
+    """
+
+
+# Kept as an alias: this was named ExportError before it also became the
+# exception load_project() raises, and several call sites (and tests)
+# still refer to it by that name.
+ExportError = ProjectError
 
 
 def export_scene(scene: Scene, path) -> None:
@@ -104,7 +115,7 @@ def export_scene(scene: Scene, path) -> None:
 
     path = Path(path)
     if path.suffix.lower() not in EXPORT_EXTS:
-        raise ExportError(
+        raise ProjectError(
             f"mesh cannot save {path.suffix} files. Try {', '.join(EXPORT_EXTS)}."
         )
 
@@ -112,7 +123,7 @@ def export_scene(scene: Scene, path) -> None:
     try:
         result = evaluate(visible)
     except NothingToCombineError as exc:
-        raise ExportError("There is nothing to save yet — add a shape first.") from exc
+        raise ProjectError("There is nothing to save yet — add a shape first.") from exc
 
     if not result.is_watertight:
         result = result.copy()
@@ -121,7 +132,7 @@ def export_scene(scene: Scene, path) -> None:
         result.merge_vertices()
 
     if not result.is_watertight:
-        raise ExportError(
+        raise ProjectError(
             "This model has gaps in it and would not print correctly. "
             "Try grouping your shapes so they join into one solid piece."
         )
@@ -142,6 +153,12 @@ def load_project(path) -> Scene:
     try:
         document = json.loads(path.read_text())
         return Scene.from_dict(document["scene"])
-    except (json.JSONDecodeError, KeyError, TypeError, OSError) as exc:
+    except (
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        OSError,
+        ValueError,  # e.g. np.array() on a malformed "transform" entry
+    ) as exc:
         logger.warning("failed to load project %s: %s", path, exc)
-        raise ExportError(f"{path.name} is not a mesh project file.") from exc
+        raise ProjectError(f"{path.name} is not a mesh project file.") from exc

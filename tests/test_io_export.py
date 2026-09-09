@@ -7,6 +7,7 @@ import trimesh
 from mesh.io_formats import (
     EXPORT_EXTS,
     ExportError,
+    ProjectError,
     export_scene,
     load_project,
     save_project,
@@ -159,3 +160,37 @@ def test_export_repairs_a_mesh_with_one_missing_triangle(tmp_path, monkeypatch):
     reloaded = trimesh.load(path)
     assert reloaded.is_watertight
     assert np.isclose(reloaded.volume, 64.0, rtol=1e-3)
+
+
+def test_project_error_is_exported_and_export_error_is_its_alias():
+    assert ExportError is ProjectError
+
+
+def test_loading_a_project_with_a_malformed_transform_raises_a_plain_error(tmp_path):
+    """np.array() on a ragged/malformed "transform" entry raises
+    ValueError, which used to escape load_project() as a raw traceback
+    instead of the same plain-language error every other bad project
+    file produces."""
+    scene = Scene()
+    scene.add(cube())
+    document = {"format_version": 1, "scene": scene.to_dict()}
+    document["scene"]["shapes"][0]["transform"] = [[1.0, 2.0], [3.0]]  # ragged
+
+    path = tmp_path / "bad_transform.mesh"
+    path.write_text(json.dumps(document))
+
+    with pytest.raises(ProjectError):
+        load_project(path)
+
+
+def test_loading_a_project_with_a_corrupt_embedded_blob_raises_a_plain_error(tmp_path):
+    """A corrupt embedded mesh blob only fails once something actually
+    decodes it (zlib.error from decode_mesh), which happens well after
+    load_project() has already returned successfully -- inside
+    MeshWindow.open_from()'s first sync(). This test exercises the pure
+    decode path directly to pin the failure mode load_project alone
+    cannot see; the app-level guard is covered in tests/test_app.py."""
+    from mesh.blobs import decode_mesh
+
+    with pytest.raises(Exception):
+        decode_mesh("not a valid base64/zlib blob at all")

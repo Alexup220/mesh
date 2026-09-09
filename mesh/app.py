@@ -24,8 +24,8 @@ from mesh.gizmo import Gizmo
 from mesh.io_formats import (
     EXPORT_EXTS,
     IMPORT_EXTS,
-    ExportError,
     MeshImportError,
+    ProjectError,
     export_scene,
     import_meshes,
     load_project,
@@ -389,8 +389,27 @@ class MeshWindow(QMainWindow):
         save_project(self.document.scene, path)
 
     def open_from(self, path) -> None:
-        self.document = Document(load_project(path))
-        self.sync()
+        new_document = Document(load_project(path))
+        # load_project() validates the scene's own structure (shapes,
+        # transforms, ...), but a corrupt embedded mesh blob only fails
+        # later, the first time something actually decodes it -- here,
+        # inside sync()'s viewport.refresh()/update_status(). Guard that
+        # first sync so a bad blob surfaces as the same plain-language
+        # "cannot open" dialog as every other load failure, instead of a
+        # raw zlib.error traceback, and roll back to whatever project (or
+        # empty document) was open before rather than leaving the window
+        # half-switched to a document it couldn't actually display.
+        previous_document = self.document
+        self.document = new_document
+        try:
+            self.sync()
+        except Exception as exc:
+            self.document = previous_document
+            self.sync()
+            raise ProjectError(
+                f"{Path(path).name} contains a model that could not be loaded. "
+                "It may be corrupted."
+            ) from exc
 
     def do_export(self) -> None:
         pattern = "Printable models (" + " ".join(f"*{e}" for e in EXPORT_EXTS) + ")"
@@ -399,7 +418,7 @@ class MeshWindow(QMainWindow):
             return
         try:
             self.export_to(path)
-        except ExportError as exc:
+        except ProjectError as exc:
             self._warn("Cannot save", str(exc))
             return
         self.statusBar().showMessage(f"Saved {Path(path).name}")
@@ -416,7 +435,7 @@ class MeshWindow(QMainWindow):
             return
         try:
             self.open_from(path)
-        except ExportError as exc:
+        except ProjectError as exc:
             self._warn("Cannot open", str(exc))
 
     def _maybe_offer_unit_scale(self, shapes) -> None:

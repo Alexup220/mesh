@@ -308,3 +308,85 @@ def test_do_boolean_join_replaces_selection_with_a_group(window):
 def test_do_boolean_with_nothing_selected_is_a_safe_no_op(window):
     window.do_boolean("union")
     assert window.document.scene.shapes == []
+
+
+def test_open_from_a_project_with_a_corrupt_blob_shows_a_plain_error(window, tmp_path):
+    """Guards MeshWindow.open_from()'s first sync(): a corrupt embedded
+    mesh blob only fails when something actually decodes it, which
+    happens inside sync() (viewport.refresh()/update_status()), not
+    inside load_project(). That failure must surface as the same plain
+    "cannot open" dialog as any other bad project file, and must not
+    leave the window switched to a document it can't actually display."""
+    import json
+
+    from mesh.io_formats import ProjectError
+
+    window.add_primitive("cube")
+    good_shape_id = window.document.scene.shapes[0].id
+
+    document = {
+        "format_version": 1,
+        "scene": {
+            "shapes": [
+                {
+                    "id": "broken1",
+                    "name": "Broken",
+                    "kind": "imported",
+                    "params": {"blob": "not a valid blob"},
+                    "transform": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+                    "color": "#4a90d9",
+                    "is_hole": False,
+                    "visible": True,
+                }
+            ],
+            "selection": [],
+            "build_volume": [220.0, 220.0, 250.0],
+            "snap_mm": 1.0,
+        },
+    }
+    path = tmp_path / "broken.mesh"
+    path.write_text(json.dumps(document))
+
+    with pytest.raises(ProjectError):
+        window.open_from(path)
+
+    # Rolled back: the window still shows the project it had open before.
+    assert window.document.scene.shapes[0].id == good_shape_id
+
+
+def test_do_open_shows_a_warning_for_a_corrupt_project(window, tmp_path, monkeypatch):
+    import json
+
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    document = {
+        "format_version": 1,
+        "scene": {
+            "shapes": [
+                {
+                    "id": "broken1",
+                    "name": "Broken",
+                    "kind": "imported",
+                    "params": {"blob": "not a valid blob"},
+                    "transform": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+                    "color": "#4a90d9",
+                    "is_hole": False,
+                    "visible": True,
+                }
+            ],
+            "selection": [],
+            "build_volume": [220.0, 220.0, 250.0],
+            "snap_mm": 1.0,
+        },
+    }
+    path = tmp_path / "broken.mesh"
+    path.write_text(json.dumps(document))
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(path), "")))
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warnings.append(a[2]))
+
+    window.do_open()
+
+    assert len(warnings) == 1
+    assert "corrupted" in warnings[0].lower()
