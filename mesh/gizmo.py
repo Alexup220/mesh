@@ -56,6 +56,7 @@ class Gizmo(QObject):
         actor = self.viewport.actor_for(shape.id)
         if actor is None:
             self._widget.Off()
+            self._base = None
             return
 
         self._base = np.asarray(shape.transform, dtype=np.float64).copy()
