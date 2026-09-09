@@ -166,3 +166,74 @@ def test_printcheck_is_not_recomputed_for_an_unchanged_scene(window):
         assert calls == []
     finally:
         printcheck._check = original
+
+
+def test_import_offers_unit_scale_when_the_file_looks_like_metres(window, tmp_path, monkeypatch):
+    """Wiring test for suggest_unit_scale: stub the dialog so the test
+    stays headless, and assert both that it was shown with a plain-
+    language message, and that saying yes actually scales the shape."""
+    import trimesh
+    from PySide6.QtWidgets import QMessageBox
+
+    path = tmp_path / "tiny.stl"
+    trimesh.creation.box(extents=(0.02, 0.02, 0.02)).export(path)
+
+    from PySide6.QtWidgets import QFileDialog
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(path), "")))
+
+    seen = {}
+
+    def fake_question(self, title, text, *args, **kwargs):
+        seen["title"] = title
+        seen["text"] = text
+        return QMessageBox.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", fake_question)
+
+    window.do_import()
+
+    assert "metres" in seen["text"]
+    # No modeling jargon in a user-facing dialog.
+    for word in ("boolean", "csg", "manifold", "vertex"):
+        assert word not in seen["text"].lower()
+
+    shape = window.document.scene.shapes[0]
+    from mesh.shapes import shape_geometry
+
+    size = shape_geometry(shape).bounds[1] - shape_geometry(shape).bounds[0]
+    assert np.allclose(size, (20.0, 20.0, 20.0), atol=0.5)
+
+
+def test_import_declining_the_unit_scale_leaves_it_unscaled(window, tmp_path, monkeypatch):
+    import trimesh
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    path = tmp_path / "tiny.stl"
+    trimesh.creation.box(extents=(0.02, 0.02, 0.02)).export(path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(path), "")))
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.No)
+
+    window.do_import()
+
+    shape = window.document.scene.shapes[0]
+    from mesh.shapes import shape_geometry
+
+    size = shape_geometry(shape).bounds[1] - shape_geometry(shape).bounds[0]
+    assert np.allclose(size, (0.02, 0.02, 0.02), atol=1e-6)
+
+
+def test_import_of_a_normal_sized_model_does_not_prompt(window, tmp_path, monkeypatch):
+    import trimesh
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    path = tmp_path / "normal.stl"
+    trimesh.creation.box(extents=(20.0, 20.0, 20.0)).export(path)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(path), "")))
+
+    calls = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: calls.append(1))
+
+    window.do_import()
+
+    assert calls == []

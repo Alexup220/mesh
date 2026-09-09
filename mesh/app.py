@@ -29,10 +29,12 @@ from mesh.io_formats import (
     import_meshes,
     load_project,
     save_project,
+    suggest_unit_scale,
 )
 from mesh.panels import Inspector, ShapeShelf
 from mesh.printcheck import check
 from mesh.scene import Document, new_primitive, transform_with_euler
+from mesh.shapes import shape_geometry
 from mesh.viewport import Viewport
 
 
@@ -350,6 +352,43 @@ class MeshWindow(QMainWindow):
         except ExportError as exc:
             self._warn("Cannot open", str(exc))
 
+    def _maybe_offer_unit_scale(self, shapes) -> None:
+        """A file whose dimensions suggest metres or inches imports as a
+        speck a few hundredths of a millimetre across if we take its
+        numbers at face value. Ask, in plain language, whether to scale it
+        up -- and if so, apply that scale to every shape from this import.
+
+        Imported shapes carry no size params (see panels.Inspector's
+        `_active_size_fields`), so the scale is applied directly to each
+        shape's transform rather than baked into params the way a
+        primitive's gizmo scale is.
+        """
+        if not shapes:
+            return
+        try:
+            suggestion = suggest_unit_scale(shape_geometry(shapes[0]))
+        except Exception:
+            return
+        if suggestion is None:
+            return
+
+        factor, unit_name = suggestion
+        answer = QMessageBox.question(
+            self,
+            "Scale this model?",
+            f"This model looks like it was saved in {unit_name}. "
+            "Scale it up to millimetres?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        for shape in shapes:
+            transform = np.asarray(shape.transform, dtype=np.float64).copy()
+            transform[:3, :3] *= factor
+            transform[:3, 3] *= factor
+            shape.transform = transform
+
     def do_import(self) -> None:
         pattern = "3D models (" + " ".join(f"*{e}" for e in IMPORT_EXTS) + ")"
         path, _ = QFileDialog.getOpenFileName(self, "Add a Model File", "", pattern)
@@ -360,6 +399,8 @@ class MeshWindow(QMainWindow):
         except MeshImportError as exc:
             self._warn("Cannot open", str(exc))
             return
+
+        self._maybe_offer_unit_scale(shapes)
 
         self.document.snapshot("import")
         for shape in shapes:
