@@ -237,3 +237,23 @@ def test_import_of_a_normal_sized_model_does_not_prompt(window, tmp_path, monkey
     window.do_import()
 
     assert calls == []
+
+
+def test_status_bar_turns_red_when_the_model_does_not_fit(window):
+    window.add_primitive("cube")
+    shape = window.document.scene.shapes[0]
+    window.document.snapshot("resize")
+    shape.params.update(width=400.0, depth=400.0, height=400.0)
+    window.update_status()
+    assert window.STATUS_WARNING_COLOR in window.statusBar().styleSheet()
+
+
+def test_status_bar_is_plain_when_the_model_fits(window):
+    window.add_primitive("cube")
+    window.update_status()
+    assert window.statusBar().styleSheet() == ""
+
+
+def test_status_bar_is_plain_when_the_scene_is_empty(window):
+    window.update_status()
+    assert window.statusBar().styleSheet() == ""

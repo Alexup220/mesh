@@ -148,9 +148,18 @@ class MeshWindow(QMainWindow):
         self.gizmo.snap_mm = self.document.scene.snap_mm
         self.update_status()
 
+    # Warm coral, readable on the dark theme's status bar background
+    # (#1b1e22 -- see mesh/theme.py) without being alarm-red.
+    STATUS_WARNING_COLOR = "#ff6b6b"
+
     def update_status(self) -> None:
         report = check(self.document.scene, revision=self.document.revision)
-        self.statusBar().showMessage(report.message)
+        bar = self.statusBar()
+        bar.showMessage(report.message)
+        if not report.empty and (not report.fits or not report.watertight):
+            bar.setStyleSheet(f"QStatusBar {{ color: {self.STATUS_WARNING_COLOR}; }}")
+        else:
+            bar.setStyleSheet("")
 
     def _warn(self, title: str, text: str) -> None:
         QMessageBox.warning(self, title, text)
