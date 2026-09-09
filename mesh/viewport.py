@@ -100,6 +100,13 @@ class Viewport(QWidget):
         super().__init__(parent)
         self._scene: Scene | None = None
         self._actors: dict[str, vtkActor] = {}
+        # What each actor's polydata was last built from. shape_geometry()
+        # runs a per-vertex Python loop to build a vtkPolyData -- rebuilding
+        # every actor on every refresh() call (e.g. once per keystroke while
+        # editing a field on a DIFFERENT shape) is wasted work when a
+        # shape's own parameters and transform have not changed since the
+        # last rebuild.
+        self._geometry_keys: dict[str, tuple] = {}
 
         # QVTKRenderWindowInteractor is a "native"/foreign-window widget
         # (WA_PaintOnScreen); Qt's layout engine treats its sizeHint()
@@ -167,6 +174,13 @@ class Viewport(QWidget):
     def actor_for(self, shape_id: str):
         return self._actors.get(shape_id)
 
+    def _geometry_key(self, shape) -> tuple:
+        """A cheap fingerprint of everything that changes a shape's
+        triangles: its kind, its params, and its transform. Two calls with
+        an equal key are guaranteed to produce the same polydata."""
+        transform = np.asarray(shape.transform, dtype=np.float64)
+        return (shape.kind, repr(shape.params), transform.tobytes())
+
     def refresh(self) -> None:
         if self._scene is None:
             return
@@ -175,6 +189,7 @@ class Viewport(QWidget):
         for shape_id in list(self._actors):
             if shape_id not in wanted:
                 self.renderer.RemoveActor(self._actors.pop(shape_id))
+                self._geometry_keys.pop(shape_id, None)
 
         selected = set(self._scene.selection)
         for shape in self._scene.shapes:
@@ -186,7 +201,11 @@ class Viewport(QWidget):
                 actor.SetMapper(vtkPolyDataMapper())
                 self._actors[shape.id] = actor
                 self.renderer.AddActor(actor)
-            actor.GetMapper().SetInputData(_to_polydata(shape_geometry(shape)))
+
+            key = self._geometry_key(shape)
+            if self._geometry_keys.get(shape.id) != key:
+                actor.GetMapper().SetInputData(_to_polydata(shape_geometry(shape)))
+                self._geometry_keys[shape.id] = key
 
             prop = actor.GetProperty()
             prop.SetColor(*_hex_to_rgb(shape.color))

@@ -20,7 +20,34 @@ class Report:
     message: str
 
 
-def check(scene: Scene) -> Report:
+_cache: dict = {"key": None, "report": None}
+
+
+def check(scene: Scene, revision: object = None) -> Report:
+    """Evaluate printability, in this Report.
+
+    `evaluate()` runs a full manifold boolean over every visible shape --
+    real work, not something to redo on every keystroke of an unrelated
+    edit. When the caller passes a `revision` (mesh.scene.Document.revision
+    changes exactly when the scene's contents change), the last Report for
+    that revision is reused instead of recomputing. Pass nothing (as the
+    tests below do, working directly on a bare Scene with no Document) and
+    it always recomputes -- there's nothing to key a cache on.
+    """
+    if revision is not None:
+        key = (id(scene), revision)
+        if _cache["key"] == key:
+            return _cache["report"]
+
+    report = _check(scene)
+
+    if revision is not None:
+        _cache["key"] = key
+        _cache["report"] = report
+    return report
+
+
+def _check(scene: Scene) -> Report:
     visible = [s for s in scene.shapes if s.visible]
     try:
         result = evaluate(visible)

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 
 from mesh import ops
 from mesh.gizmo import Gizmo
@@ -37,6 +37,8 @@ from mesh.viewport import Viewport
 
 
 class MeshWindow(QMainWindow):
+    EDIT_COALESCE_MS = 400
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("mesh")
@@ -59,6 +61,22 @@ class MeshWindow(QMainWindow):
         self.inspector = Inspector(self)
         self.inspector.edited.connect(self._on_edited)
         self._dock("Details", self.inspector, Qt.RightDockWidgetArea)
+
+        # Coalescing for inspector edits: a spinbox fires valueChanged on
+        # every keystroke, and naively snapshotting/syncing on each one
+        # made one deliberate edit (e.g. typing "125") cost three
+        # snapshots, three full-scene viewport rebuilds, and three
+        # printcheck evaluations -- and three undo entries, so a single
+        # Ctrl+Z only undid the last keystroke. _on_edited now applies the
+        # mutation immediately (so the data model, and any test calling it
+        # directly, stays correct-by-construction) but takes exactly one
+        # snapshot per burst and defers the expensive sync() until typing
+        # has paused for EDIT_COALESCE_MS.
+        self._edit_active = False
+        self._edit_timer = QTimer(self)
+        self._edit_timer.setSingleShot(True)
+        self._edit_timer.setInterval(self.EDIT_COALESCE_MS)
+        self._edit_timer.timeout.connect(self._finish_edit)
 
         self._build_menus()
         self.statusBar().showMessage("Add a shape to get started.")
@@ -129,7 +147,8 @@ class MeshWindow(QMainWindow):
         self.update_status()
 
     def update_status(self) -> None:
-        self.statusBar().showMessage(check(self.document.scene).message)
+        report = check(self.document.scene, revision=self.document.revision)
+        self.statusBar().showMessage(report.message)
 
     def _warn(self, title: str, text: str) -> None:
         QMessageBox.warning(self, title, text)
@@ -250,7 +269,12 @@ class MeshWindow(QMainWindow):
         except KeyError:
             return
 
-        self.document.snapshot("edit")
+        # One snapshot per burst of edits, not one per keystroke: see the
+        # comment on self._edit_timer in __init__.
+        if not self._edit_active:
+            self.document.snapshot("edit")
+            self._edit_active = True
+
         if field == "is_hole":
             shape.is_hole = bool(value)
         elif field in ("x", "y", "z"):
@@ -275,6 +299,16 @@ class MeshWindow(QMainWindow):
             )
         else:
             shape.params[field] = float(value)
+
+        # Defer the expensive part (snapshot already happened above, once
+        # per burst) until typing pauses. Every keystroke restarts the
+        # window instead of firing sync() itself.
+        self._edit_timer.start()
+
+    def _finish_edit(self) -> None:
+        """Fires once, EDIT_COALESCE_MS after the last keystroke in a burst
+        of inspector edits. This is the one sync() the whole burst gets."""
+        self._edit_active = False
         self.sync()
 
     # --- files ---------------------------------------------------------

@@ -127,11 +127,18 @@ class Document:
         self.scene = scene or Scene()
         self._undo: list[Scene] = []
         self._redo: list[Scene] = []
+        # Bumped by every snapshot/undo/redo -- i.e. every point where the
+        # scene identity actually changes. Callers that want to avoid
+        # redoing expensive work (printcheck.check's manifold evaluation)
+        # when nothing has changed can cache against this instead of
+        # re-deriving a content hash of the whole scene themselves.
+        self.revision = 0
 
     def snapshot(self, label: str = "") -> None:
         self._undo.append(copy.deepcopy(self.scene))
         del self._undo[:-HISTORY_LIMIT]
         self._redo.clear()
+        self.revision += 1
 
     def can_undo(self) -> bool:
         return bool(self._undo)
@@ -144,6 +151,7 @@ class Document:
             return False
         self._redo.append(copy.deepcopy(self.scene))
         self.scene = self._undo.pop()
+        self.revision += 1
         return True
 
     def redo(self) -> bool:
@@ -151,6 +159,7 @@ class Document:
             return False
         self._undo.append(copy.deepcopy(self.scene))
         self.scene = self._redo.pop()
+        self.revision += 1
         return True
 
 

@@ -100,3 +100,69 @@ def test_editing_a_rotation_field_changes_the_transform_not_the_params(window):
     after = np.asarray(shape.transform, dtype=np.float64)
     assert not np.allclose(before, after)
     assert "ry" not in shape.params
+
+
+def test_a_burst_of_edits_produces_exactly_one_undo_entry(window):
+    """Typing "125" into a field used to fire valueChanged three times,
+    each taking its own snapshot -- so one Ctrl+Z only undid the last
+    keystroke. A whole burst should coalesce into one snapshot/undo entry,
+    settled by _finish_edit() once typing pauses."""
+    window.add_primitive("cube")
+    shape = window.document.scene.shapes[0]
+    before_undo_depth = len(window.document._undo)
+
+    window._on_edited(shape.id, "width", 1.0)
+    window._on_edited(shape.id, "width", 12.0)
+    window._on_edited(shape.id, "width", 125.0)
+    window._finish_edit()
+
+    assert len(window.document._undo) == before_undo_depth + 1
+    assert shape.params["width"] == 125.0
+
+    window.do_undo()
+    assert window.document.scene.get(shape.id).params["width"] == 20.0
+
+
+def test_edit_burst_defers_sync_until_settled(window):
+    window.add_primitive("cube")
+    shape = window.document.scene.shapes[0]
+    seen = []
+    original_sync = window.sync
+    window.sync = lambda *a, **k: seen.append(True) or original_sync(*a, **k)
+
+    window._on_edited(shape.id, "width", 1.0)
+    window._on_edited(shape.id, "width", 12.0)
+    assert seen == []  # sync deferred while the burst is still active
+
+    window._finish_edit()
+    assert seen == [True]
+
+
+def test_viewport_refresh_does_not_rebuild_an_unchanged_actor(window):
+    window.add_primitive("cube")
+    window.sync()
+    shape = window.document.scene.shapes[0]
+    actor = window.viewport.actor_for(shape.id)
+    mapper = actor.GetMapper()
+    original_input = mapper.GetInput()
+
+    window.viewport.refresh()
+
+    assert mapper.GetInput() is original_input
+
+
+def test_printcheck_is_not_recomputed_for_an_unchanged_scene(window):
+    from mesh import printcheck
+
+    window.add_primitive("cube")
+    window.update_status()
+
+    calls = []
+    original = printcheck._check
+    printcheck._check = lambda scene: calls.append(1) or original(scene)
+    try:
+        window.update_status()
+        window.update_status()
+        assert calls == []
+    finally:
+        printcheck._check = original
