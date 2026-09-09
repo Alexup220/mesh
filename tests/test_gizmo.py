@@ -177,3 +177,68 @@ def test_failed_reattach_clears_stale_base(attached):
 
     assert gizmo.attached_id == other.id
     assert gizmo._base is None
+
+
+# --- Scale/inspector sync: bake scale into params for primitives --------
+
+
+def test_corner_scale_bakes_into_primitive_params_not_the_transform(attached):
+    """Regression: gizmo used to write scale straight into the transform
+    while the Inspector's size fields read from shape.params, so after a
+    corner-handle drag a 20mm cube measured 40mm while the inspector still
+    said 20.00 -- and typing 30 back then produced 60mm."""
+    gizmo, shape, scene, viewport = attached
+
+    scaled = np.eye(4)
+    scaled[0, 0] = scaled[1, 1] = scaled[2, 2] = 2.0
+    gizmo._apply(scaled)
+
+    assert np.isclose(shape.params["width"], 40.0)
+    assert np.isclose(shape.params["depth"], 40.0)
+    assert np.isclose(shape.params["height"], 40.0)
+    # Scale is baked out of the transform's rotation block.
+    assert np.allclose(shape.transform[:3, :3], np.eye(3))
+
+    from mesh.shapes import shape_geometry
+
+    size = shape_geometry(shape).bounds[1] - shape_geometry(shape).bounds[0]
+    assert np.allclose(size, (40.0, 40.0, 40.0))
+
+
+def test_non_uniform_scale_bakes_per_axis_for_a_cube(attached):
+    gizmo, shape, scene, viewport = attached
+
+    scaled = np.eye(4)
+    scaled[0, 0], scaled[1, 1], scaled[2, 2] = 2.0, 3.0, 1.0
+    gizmo._apply(scaled)
+
+    assert np.isclose(shape.params["width"], 40.0)
+    assert np.isclose(shape.params["depth"], 60.0)
+    assert np.isclose(shape.params["height"], 20.0)
+
+
+def test_imported_shape_scale_stays_in_the_transform(qapp, close_qt_widget):
+    from mesh.gizmo import Gizmo
+    from mesh.viewport import Viewport
+    from mesh.scene import Scene, Shape
+
+    viewport = close_qt_widget(Viewport())
+    scene = Scene()
+    shape = Shape(
+        id="imp1",
+        name="Imported",
+        kind="imported",
+        params={"blob": ""},
+        transform=np.eye(4),
+    )
+    scene.add(shape)
+    viewport.set_scene(scene)
+    gizmo = Gizmo(viewport)
+    gizmo._shape = shape  # bypass attach(), which needs a real actor
+
+    scaled = np.eye(4)
+    scaled[0, 0] = scaled[1, 1] = scaled[2, 2] = 2.0
+    gizmo._apply(scaled)
+
+    assert np.isclose(shape.transform[0, 0], 2.0)
+    assert shape.params == {"blob": ""}

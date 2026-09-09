@@ -13,7 +13,22 @@ from PySide6.QtCore import QObject, Signal
 from vtkmodules.vtkCommonTransforms import vtkTransform
 from vtkmodules.vtkInteractionWidgets import vtkBoxRepresentation, vtkBoxWidget2
 
-from mesh.scene import Shape
+from mesh.scene import Shape, _signed_scale
+
+# Which size params a corner-handle scale drag should grow, per axis of
+# the gizmo's local box (x, y, z). "radial" params (diameter, wall
+# thickness) are driven by the average of the two horizontal axes, since
+# a round primitive has no separate X/Y size to keep distinct.
+_PRIMITIVE_SCALE_TARGETS = {
+    "cube": {"width": "x", "depth": "y", "height": "z"},
+    "wedge": {"width": "x", "depth": "y", "height": "z"},
+    "pyramid": {"width": "x", "depth": "y", "height": "z"},
+    "cylinder": {"diameter": "radial", "height": "z"},
+    "cone": {"diameter": "radial", "height": "z"},
+    "sphere": {"diameter": "average"},
+    "torus": {"diameter": "radial", "thickness": "average"},
+    "tube": {"diameter": "radial", "wall": "radial", "height": "z"},
+}
 
 
 class Gizmo(QObject):
@@ -88,5 +103,49 @@ class Gizmo(QObject):
         transform = np.asarray(transform, dtype=np.float64).copy()
         for axis in range(3):
             transform[axis, 3] = self._snap(transform[axis, 3])
+
+        if self._shape.kind == "primitive":
+            transform = self._bake_scale(self._shape, transform)
+
         self._shape.transform = transform
         self.changed.emit(self._shape.id)
+
+    def _bake_scale(self, shape: Shape, transform: np.ndarray) -> np.ndarray:
+        """Fold a corner-handle scale into the shape's size params instead
+        of leaving it in the transform.
+
+        gizmo writes scale straight into the transform, while the
+        Inspector's size fields read from shape.params -- after a
+        corner-handle drag those two disagreed (a 20mm cube dragged to
+        40mm still showed "20.00" in the inspector, and typing 30 there
+        then produced 60mm). Baking the scale into params here, and
+        resetting the transform's rotation block back to unit scale, keeps
+        params the single source of truth for a primitive's size, exactly
+        like every other numeric-inspector field.
+
+        Imported and group shapes have no size params to bake into, so
+        their scale is left in the transform untouched (see the `kind ==
+        "primitive"` guard in _apply above).
+        """
+        r = transform[:3, :3]
+        scale = _signed_scale(r)
+        magnitude = np.abs(scale)
+        sx, sy, sz = magnitude
+
+        primitive = shape.params.get("primitive")
+        targets = _PRIMITIVE_SCALE_TARGETS.get(primitive, {})
+        radial = (sx + sy) / 2.0
+        average = (sx + sy + sz) / 3.0
+        factors = {"x": sx, "y": sy, "z": sz, "radial": radial, "average": average}
+
+        for param, axis_key in targets.items():
+            if param in shape.params:
+                shape.params[param] = float(shape.params[param]) * factors[axis_key]
+
+        # Divide by magnitude only (not the signed scale) so a mirrored
+        # shape's reflection survives: the sign that made det(r) negative
+        # stays on this column instead of being thrown away with the
+        # magnitude baked into params.
+        out = transform.copy()
+        out[:3, :3] = r / magnitude
+        return out
