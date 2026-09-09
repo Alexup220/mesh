@@ -33,3 +33,15 @@ press **Group**, and save a printable STL. Everything is in millimetres.
 
     uv sync
     uv run pytest
+
+## Wayland note
+
+The 3D viewport runs on VTK's `vtkXOpenGLRenderWindow`, which is X11-only:
+it hands the viewport widget's native window id straight to X11 calls, and
+under Qt's native `wayland` platform plugin that id isn't a real X11 window,
+so VTK crashes on its first `XChangeWindowAttributes` call
+(`X Error: BadWindow (invalid Window parameter)`). Because of that, `mesh`
+defaults `QT_QPA_PLATFORM` to `xcb` (i.e. runs through XWayland) before
+`QApplication` is created, unless it's already set in the environment. This
+is why the 3D view works under Hyprland/Wayland today; it can be revisited
+if a native-Wayland VTK backend becomes available for this Qt integration.

@@ -335,7 +335,32 @@ class MeshWindow(QMainWindow):
 
 
 def run(argv: list[str] | None = None) -> int:
+    import os
+
     from mesh.theme import apply_theme
+
+    # VTK's Linux OpenGL backend (vtkXOpenGLRenderWindow) is X11-only: the
+    # viewport widget hands it a native window id via winId()/SetWindowInfo,
+    # and vtkXOpenGLRenderWindow treats that id as a real X11 Window. Under
+    # Qt's native "wayland" platform plugin that id is not an X11 Window at
+    # all, and VTK's very first XChangeWindowAttributes call on it dies with
+    # "X Error: BadWindow (invalid Window parameter)" -- confirmed by
+    # reproducing the crash directly. Running through XWayland (the "xcb"
+    # platform plugin) gives widgets real X11 window ids, which is what lets
+    # VTK create a working GL context and resize the render surface as the
+    # widget resizes.
+    #
+    # A plain setdefault() is not enough: many Wayland desktops (this one
+    # included) export QT_QPA_PLATFORM=wayland;xcb, which is already
+    # "set" -- Qt takes the first platform in that list that connects
+    # successfully, which is wayland, so the xcb fallback never triggers
+    # and VTK still crashes. So this overrides that default, while still
+    # leaving a single explicit platform choice (e.g. "offscreen" for a
+    # headless/scripted run) alone. It must happen before QApplication
+    # exists.
+    platform = os.environ.get("QT_QPA_PLATFORM", "")
+    if platform in ("", "wayland") or ";" in platform:
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
 
     app = QApplication(argv or sys.argv)
     apply_theme(app)

@@ -9,8 +9,22 @@ import vtkmodules.qt
 
 vtkmodules.qt.PyQtImpl = "PySide6"
 
+# Importing only vtkmodules.vtkRenderingCore (below) gives you the ABSTRACT
+# vtkRenderWindow / vtkPolyDataMapper classes: with the monolithic `vtk`
+# package this concrete backend is wired up as a side effect of the
+# package's own __init__, but with the split `vtkmodules` packages nothing
+# registers a concrete OpenGL implementation with VTK's object factory
+# unless this module is imported too. Skip it and vtkRenderWindow()
+# silently instantiates the do-nothing base class instead of
+# vtkXOpenGLRenderWindow: no error, no exception, just a window that
+# reports "Not Implemented" for its capabilities and paints nothing --
+# not even the background colour -- which is indistinguishable from a
+# working renderer pointed at an empty scene. This import must happen
+# before any vtkRenderWindow() is constructed.
+import vtkmodules.vtkRenderingOpenGL2  # noqa: F401
+
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QSizePolicy, QVBoxLayout, QWidget
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtkmodules.vtkCommonCore import vtkPoints
 from vtkmodules.vtkCommonDataModel import vtkCellArray, vtkPolyData
@@ -58,18 +72,49 @@ def _hex_to_rgb(value: str) -> tuple[float, float, float]:
     return tuple(int(value[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
 
 
+def _headless() -> bool:
+    """True under the test suite's Qt "offscreen" platform.
+
+    vtkXOpenGLRenderWindow (see the vtkRenderingOpenGL2 import above) talks
+    to X11 directly through the native window id Qt hands it. Under the
+    real "xcb" platform that id is a real X window and this works; under
+    "offscreen" (what tests/conftest.py selects, precisely so the suite
+    needs no display) there is no real X window behind that id, and
+    Render() segfaults trying to use it. Tests exercise scene/selection
+    logic, not pixels, so skipping the actual Render() call under
+    "offscreen" keeps that logic exercised without touching X11 at all.
+    """
+    app = QApplication.instance()
+    return app is not None and app.platformName() == "offscreen"
+
+
 class Viewport(QWidget):
     picked = Signal(str, bool)
+
+    def _render(self) -> None:
+        if _headless():
+            return
+        self._widget.GetRenderWindow().Render()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._scene: Scene | None = None
         self._actors: dict[str, vtkActor] = {}
 
+        # QVTKRenderWindowInteractor is a "native"/foreign-window widget
+        # (WA_PaintOnScreen); Qt's layout engine treats its sizeHint()
+        # (400x400) as authoritative unless it is explicitly told to claim
+        # all remaining space. Both of the following are required: the
+        # Expanding size policy on this container so QMainWindow's central
+        # widget actually grows to the full central area, and the stretch
+        # factor on addWidget so the child widget is stretched to fill this
+        # container rather than sitting at its sizeHint in a corner.
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._widget = QVTKRenderWindowInteractor(self)
+        self._widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self._widget)
+        layout.addWidget(self._widget, 1)
 
         self.renderer = vtkRenderer()
         self.renderer.SetBackground(*BACKGROUND)
@@ -81,7 +126,24 @@ class Viewport(QWidget):
 
         self._picker = vtkPropPicker()
         self._add_grid()
-        self.view_preset("home")
+        # Position the camera now, but do NOT call Render() here: the
+        # widget's native window is not mapped yet (this runs during
+        # MeshWindow.__init__, well before show()/start()). VTK creates its
+        # OpenGL context/framebuffer on first Render(); doing that against
+        # an unmapped, zero-size native window leaves VTK permanently
+        # rendering into a dead surface, which shows up as a solid black
+        # viewport forever after — the window manager background colour
+        # never even gets a chance to be cleared onto it. The real first
+        # Render() happens in start(), after show() and Initialize().
+        self._apply_view("home")
+
+    def _apply_view(self, name: str) -> None:
+        direction, up = VIEW_PRESETS[name]
+        camera = self.renderer.GetActiveCamera()
+        camera.SetFocalPoint(0.0, 0.0, 0.0)
+        camera.SetPosition(*(np.array(direction) * 200.0))
+        camera.SetViewUp(*up)
+        self.renderer.ResetCamera()
 
     def _add_grid(self) -> None:
         plane = vtkPlaneSource()
@@ -132,7 +194,7 @@ class Viewport(QWidget):
             prop.SetEdgeColor(1.0, 0.85, 0.2)
             prop.SetLineWidth(2.0)
 
-        self._widget.GetRenderWindow().Render()
+        self._render()
 
     def _on_click(self, interactor, _event) -> None:
         x, y = interactor.GetEventPosition()
@@ -148,13 +210,8 @@ class Viewport(QWidget):
     def view_preset(self, name: str) -> None:
         if name not in VIEW_PRESETS:
             raise ValueError(f"unknown view {name!r}; expected one of {tuple(VIEW_PRESETS)}")
-        direction, up = VIEW_PRESETS[name]
-        camera = self.renderer.GetActiveCamera()
-        camera.SetFocalPoint(0.0, 0.0, 0.0)
-        camera.SetPosition(*(np.array(direction) * 200.0))
-        camera.SetViewUp(*up)
-        self.renderer.ResetCamera()
-        self._widget.GetRenderWindow().Render()
+        self._apply_view(name)
+        self._render()
 
     def frame_selection(self) -> None:
         if self._scene is None:
@@ -169,8 +226,14 @@ class Viewport(QWidget):
                 bounds[:, 2].min(), bounds[:, 3].max(),
                 bounds[:, 4].min(), bounds[:, 5].max(),
             )
-        self._widget.GetRenderWindow().Render()
+        self._render()
 
     def start(self) -> None:
         """Call once after the window is shown."""
+        if _headless():
+            return
         self.interactor.Initialize()
+        # First real Render(): the native window is mapped now, so VTK can
+        # create a valid OpenGL context/framebuffer against it. See the
+        # comment in __init__ for why this must not happen any earlier.
+        self._render()
