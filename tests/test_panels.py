@@ -72,12 +72,59 @@ def test_populating_the_inspector_emits_nothing(inspector):
     assert seen == []
 
 
-def test_size_fields_fall_back_for_imported_shapes(inspector):
+def test_imported_shapes_have_no_size_fields(inspector):
     shape = new_primitive("cube")
     shape.kind = "imported"
     shape.params = {"blob": ""}
     inspector.show_shape(shape)
-    assert np.isclose(inspector.field_value("width"), 100.0)
+    assert inspector._active_size_fields(shape) == ()
+    for field in ("width", "depth", "height", "diameter", "thickness", "wall"):
+        assert inspector._layout.isRowVisible(inspector._rows[field]) is False
+
+
+def test_group_shapes_have_no_size_fields(inspector):
+    shape = new_primitive("cube")
+    shape.kind = "group"
+    inspector.show_shape(shape)
+    assert inspector._active_size_fields(shape) == ()
+
+
+@pytest.mark.parametrize("kind", list(PRIMITIVES.keys()))
+def test_inspector_exposes_exactly_this_primitives_size_fields(inspector, kind):
+    shape = new_primitive(kind)
+    inspector.show_shape(shape)
+
+    expected = set(PRIMITIVES[kind]["defaults"].keys())
+    all_size_fields = {"width", "depth", "height", "diameter", "thickness", "wall"}
+    shown = {
+        field
+        for field in all_size_fields
+        if inspector._layout.isRowVisible(inspector._rows[field])
+    }
+    assert shown == expected
+
+    # And every shown field actually reflects the shape's real value.
+    for field in expected:
+        assert np.isclose(inspector.field_value(field), shape.params[field])
+
+
+def test_editing_a_spheres_diameter_changes_its_geometry(inspector):
+    from mesh.shapes import shape_geometry
+
+    shape = new_primitive("sphere")
+    inspector.show_shape(shape)
+
+    before = shape_geometry(shape)
+    seen = []
+    inspector.edited.connect(lambda *args: seen.append(args))
+    inspector.fields["diameter"].setValue(80.0)
+    assert (shape.id, "diameter", 80.0) in seen
+
+    # Mirror what MeshWindow._on_edited does with an emitted size field.
+    shape.params["diameter"] = 80.0
+    after = shape_geometry(shape)
+
+    assert not np.allclose(before.bounds, after.bounds)
 
 
 def test_inspector_shows_rotation_from_the_transform(inspector):

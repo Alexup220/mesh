@@ -42,7 +42,7 @@ from mesh.shapes import shape_geometry
 
 HOLE_OPACITY = 0.35
 BACKGROUND = (0.16, 0.17, 0.20)
-GRID_COLOR = (0.32, 0.34, 0.38)
+GRID_COLOR = (0.50, 0.53, 0.58)
 
 VIEW_PRESETS = {
     "home": ((1.0, -1.0, 0.8), (0.0, 0.0, 1.0)),
@@ -157,6 +157,7 @@ class Viewport(QWidget):
         grid.SetMapper(mapper)
         grid.GetProperty().SetRepresentationToWireframe()
         grid.GetProperty().SetColor(*GRID_COLOR)
+        grid.GetProperty().SetLineWidth(1.25)
         grid.PickableOff()
         self.renderer.AddActor(grid)
 

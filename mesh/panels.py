@@ -19,9 +19,14 @@ from PySide6.QtWidgets import (
 from mesh.scene import Shape, euler_from_transform
 from mesh.shapes import PRIMITIVES
 
-SIZE_FIELDS = ("width", "depth", "height")
 POSITION_FIELDS = ("x", "y", "z")
 ROTATION_FIELDS = ("rx", "ry", "rz")
+
+# Every size parameter that appears in any primitive's defaults (see
+# mesh.shapes.PRIMITIVES). Which of these are shown for a given shape is
+# decided at display time, from that shape's own primitive kind -- not
+# every shape has every field, and imported/group shapes have none.
+SIZE_FIELDS = ("width", "depth", "height", "diameter", "thickness", "wall")
 
 FIELD_LABELS = {
     "x": "Left / right (mm)",
@@ -30,6 +35,9 @@ FIELD_LABELS = {
     "width": "Width (mm)",
     "depth": "Depth (mm)",
     "height": "Height (mm)",
+    "diameter": "Diameter (mm)",
+    "thickness": "Thickness (mm)",
+    "wall": "Wall thickness (mm)",
     "rx": "Tilt X (degrees)",
     "ry": "Tilt Y (degrees)",
     "rz": "Turn (degrees)",
@@ -63,6 +71,7 @@ class Inspector(QWidget):
 
         layout = QFormLayout(self)
         self.fields: dict[str, QDoubleSpinBox] = {}
+        self._rows: dict[str, int] = {}
 
         for field in POSITION_FIELDS + SIZE_FIELDS + ROTATION_FIELDS:
             box = QDoubleSpinBox(self)
@@ -77,7 +86,9 @@ class Inspector(QWidget):
             box.valueChanged.connect(lambda value, f=field: self._emit(f, value))
             layout.addRow(QLabel(FIELD_LABELS[field]), box)
             self.fields[field] = box
+            self._rows[field] = layout.rowCount() - 1
 
+        self._layout = layout
         self.hole_box = QCheckBox("Make this a hole", self)
         self.hole_box.toggled.connect(lambda value: self._emit("is_hole", value))
         layout.addRow(self.hole_box)
@@ -94,6 +105,18 @@ class Inspector(QWidget):
             return self.hole_box.isChecked()
         return self.fields[field].value()
 
+    def _active_size_fields(self, shape: Shape) -> tuple[str, ...]:
+        """The real size parameters for this shape, or none for shapes that
+        don't have any (imported models, groups) -- there is no plain-language
+        substitute for a fallback number that edits nothing."""
+        if shape.kind != "primitive":
+            return ()
+        primitive = shape.params.get("primitive")
+        info = PRIMITIVES.get(primitive)
+        if info is None:
+            return ()
+        return tuple(info["defaults"].keys())
+
     def show_shape(self, shape: Shape | None) -> None:
         self._shape = shape
         self.setEnabled(shape is not None)
@@ -106,8 +129,11 @@ class Inspector(QWidget):
             for axis, field in enumerate(POSITION_FIELDS):
                 self.fields[field].setValue(float(transform[axis, 3]))
 
+            active = self._active_size_fields(shape)
             for field in SIZE_FIELDS:
-                self.fields[field].setValue(float(shape.params.get(field, 100.0)))
+                self._layout.setRowVisible(self._rows[field], field in active)
+                if field in active:
+                    self.fields[field].setValue(float(shape.params.get(field, 0.0)))
 
             # Rotation is authoritative in the transform, not in params:
             # shape_geometry() never reads rotation from params, so reading
