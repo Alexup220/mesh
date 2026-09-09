@@ -154,16 +154,43 @@ class Document:
         return True
 
 
+def _signed_scale(r: np.ndarray) -> np.ndarray:
+    """Column lengths of a 3x3 rotation*scale block, with a mirror's sign
+    folded onto the X scale rather than lost.
+
+    A shape mirrored by mesh.ops.mirror() ends up with a rotation block
+    whose determinant is negative (a reflection, not a proper rotation).
+    Column norms alone are always positive, so normalizing by them turns
+    that reflection into an ordinary-looking rotation — which is exactly
+    the bug this fixes: it made a mirrored cube's inspector angles look
+    like a plain 180-degree turn, and typing those angles back silently
+    un-mirrored it. Putting the negative sign on the X scale instead keeps
+    the decomposition invertible: dividing r by this signed scale always
+    yields a proper rotation (determinant +1), and multiplying that
+    rotation back by the same signed scale reproduces r exactly.
+    """
+    sx = np.linalg.norm(r[:, 0])
+    sy = np.linalg.norm(r[:, 1])
+    sz = np.linalg.norm(r[:, 2])
+    sx = sx if sx > 1e-12 else 1.0
+    sy = sy if sy > 1e-12 else 1.0
+    sz = sz if sz > 1e-12 else 1.0
+    if np.linalg.det(r) < 0.0:
+        sx = -sx
+    return np.array([sx, sy, sz])
+
+
 def euler_from_transform(m) -> tuple[float, float, float]:
     """Extract (rx, ry, rz) degrees from a 4x4 transform.
 
     Convention: the rotation part is R = Rz(rz) @ Ry(ry) @ Rx(rx) — i.e. a
     column vector is rotated about X first, then Y, then Z (extrinsic X-Y-Z
     rotation order, sometimes called intrinsic Z-Y-X). Scale is tolerated:
-    each column of the rotation block is normalized by its own length
-    before angles are extracted, so this works on transforms produced by
-    transform_with_euler() below (translation + rotation + uniform or
-    per-axis scale, no shear).
+    each column of the rotation block is normalized by its own (signed,
+    see _signed_scale) length before angles are extracted, so this works
+    on transforms produced by transform_with_euler() below (translation +
+    rotation + uniform or per-axis scale, no shear) as well as on a
+    mirrored shape's reflection.
 
     Gimbal lock (ry = +/-90 degrees) is handled without raising: rz is
     pinned to 0 and rx absorbs the coupled rotation, matching what
@@ -172,14 +199,7 @@ def euler_from_transform(m) -> tuple[float, float, float]:
     m = np.asarray(m, dtype=np.float64)
     r = m[:3, :3]
 
-    sx = np.linalg.norm(r[:, 0])
-    sy = np.linalg.norm(r[:, 1])
-    sz = np.linalg.norm(r[:, 2])
-    sx = sx if sx > 1e-12 else 1.0
-    sy = sy if sy > 1e-12 else 1.0
-    sz = sz if sz > 1e-12 else 1.0
-
-    rot = r / np.array([sx, sy, sz])
+    rot = r / _signed_scale(r)
 
     sin_ry = np.clip(-rot[2, 0], -1.0, 1.0)
     ry = np.arcsin(sin_ry)
@@ -199,18 +219,19 @@ def transform_with_euler(m, rx: float, ry: float, rz: float) -> np.ndarray:
     """Return a new 4x4 transform with rotation (rx, ry, rz) degrees.
 
     Uses the same convention as euler_from_transform(): R = Rz @ Ry @ Rx.
-    Translation and per-axis scale (the column lengths of the existing
-    rotation block) are preserved; only the rotation itself is replaced.
+    Translation and per-axis scale (the signed column lengths of the
+    existing rotation block — see _signed_scale) are preserved; only the
+    rotation itself is replaced. Preserving the sign, not just the
+    magnitude, is what keeps this the exact inverse of
+    euler_from_transform() for a mirrored shape: reading a mirrored cube's
+    angles and typing them straight back must reproduce the same
+    reflection rather than silently un-mirroring it.
     """
     m = np.asarray(m, dtype=np.float64)
     translation = m[:3, 3].copy()
     r = m[:3, :3]
 
-    scale = np.array([
-        np.linalg.norm(r[:, 0]),
-        np.linalg.norm(r[:, 1]),
-        np.linalg.norm(r[:, 2]),
-    ])
+    scale = _signed_scale(r)
 
     rxr, ryr, rzr = np.radians([rx, ry, rz])
     cx, sx = np.cos(rxr), np.sin(rxr)

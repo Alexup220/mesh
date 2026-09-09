@@ -82,3 +82,27 @@ def test_drop_to_plane_lands_the_shape_on_zero():
     s = cube(at=(0.0, 0.0, 37.0))
     drop_to_plane(s)
     assert np.isclose(shape_geometry(s).bounds[0][2], 0.0, atol=1e-6)
+
+
+def test_mirror_survives_a_rotation_read_write_round_trip():
+    """Regression for the mirror/euler disagreement: mirroring a shape
+    leaves a transform with a negative determinant. The inspector reads
+    that back as rotation angles and can write those same angles back
+    (e.g. because the user tabbed through an unrelated field) — that
+    round trip must not silently undo the mirror."""
+    from mesh.scene import euler_from_transform, transform_with_euler
+
+    s = cube(size=10.0)
+    s.transform[:3, 3] = [3.0, 4.0, 5.0]
+    mirror(s, "x")
+    before = shape_geometry(s)
+
+    rx, ry, rz = euler_from_transform(s.transform)
+    s.transform = transform_with_euler(s.transform, rx, ry, rz)
+    after = shape_geometry(s)
+
+    assert np.allclose(before.bounds, after.bounds, atol=1e-6)
+    assert np.allclose(before.center_mass, after.center_mass, atol=1e-6)
+    # The mirror must still be a mirror, not undone: the reflected
+    # transform keeps a negative determinant on its rotation block.
+    assert np.linalg.det(s.transform[:3, :3]) < 0.0
