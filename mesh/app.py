@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QMainWindow,
     QMessageBox,
+    QToolBar,
 )
 from PySide6.QtCore import QTimer, Qt
 
@@ -81,6 +82,7 @@ class MeshWindow(QMainWindow):
         self._edit_timer.timeout.connect(self._finish_edit)
 
         self._build_menus()
+        self._build_bottom_bar()
         self.statusBar().showMessage("Add a shape to get started.")
 
     def _dock(self, title, widget, area) -> None:
@@ -108,16 +110,16 @@ class MeshWindow(QMainWindow):
         self._act(file_menu, "&Quit", "Ctrl+Q", self.close)
 
         edit = self.menuBar().addMenu("&Edit")
-        self._act(edit, "&Undo", "Ctrl+Z", self.do_undo)
-        self._act(edit, "&Redo", "Ctrl+Shift+Z", self.do_redo)
+        self.act_undo = self._act(edit, "&Undo", "Ctrl+Z", self.do_undo)
+        self.act_redo = self._act(edit, "&Redo", "Ctrl+Shift+Z", self.do_redo)
         edit.addSeparator()
-        self._act(edit, "&Duplicate", "Ctrl+D", self.do_duplicate)
-        self._act(edit, "De&lete", "Delete", self.do_delete)
+        self.act_duplicate = self._act(edit, "&Duplicate", "Ctrl+D", self.do_duplicate)
+        self.act_delete = self._act(edit, "De&lete", "Delete", self.do_delete)
         self._act(edit, "Select &All", "Ctrl+A", self.do_select_all)
 
         shape = self.menuBar().addMenu("&Shape")
-        self._act(shape, "&Group", "Ctrl+G", self.do_group)
-        self._act(shape, "&Ungroup", "Ctrl+Shift+G", self.do_ungroup)
+        self.act_group = self._act(shape, "&Group", "Ctrl+G", self.do_group)
+        self.act_ungroup = self._act(shape, "&Ungroup", "Ctrl+Shift+G", self.do_ungroup)
         self._act(shape, "Make &Hole / Solid", "H", self.do_toggle_hole)
         shape.addSeparator()
         for axis in ("x", "y", "z"):
@@ -130,11 +132,40 @@ class MeshWindow(QMainWindow):
                           lambda _c=False, a=axis, m=mode: self.do_align(a, m))
 
         view = self.menuBar().addMenu("&View")
-        self._act(view, "&Home", "Home", lambda: self.viewport.view_preset("home"))
-        self._act(view, "&Front", "1", lambda: self.viewport.view_preset("front"))
-        self._act(view, "&Right", "3", lambda: self.viewport.view_preset("right"))
-        self._act(view, "&Top", "7", lambda: self.viewport.view_preset("top"))
+        self.act_view_home = self._act(view, "&Home", "Home", lambda: self.viewport.view_preset("home"))
+        self.act_view_front = self._act(view, "&Front", "1", lambda: self.viewport.view_preset("front"))
+        self.act_view_right = self._act(view, "&Right", "3", lambda: self.viewport.view_preset("right"))
+        self.act_view_top = self._act(view, "&Top", "7", lambda: self.viewport.view_preset("top"))
         self._act(view, "&Zoom to Selection", "F", self.viewport.frame_selection)
+
+    def _build_bottom_bar(self) -> None:
+        """A visible bottom bar for the actions and camera presets the
+        spec calls "mandatory, not decorative": a beginner lost in 3D
+        will not go looking in the View menu for Home. Every button here
+        reuses the same QAction created in _build_menus, so there is
+        exactly one place each action's logic lives -- the toolbar just
+        gives it a second, more visible entry point.
+        """
+        bar = QToolBar("Actions", self)
+        bar.setMovable(False)
+        bar.setFloatable(False)
+        bar.setToolButtonStyle(Qt.ToolButtonTextOnly)
+
+        for action in (
+            self.act_undo, self.act_redo, self.act_group, self.act_ungroup,
+            self.act_duplicate, self.act_delete,
+        ):
+            bar.addAction(action)
+
+        bar.addSeparator()
+
+        for action in (
+            self.act_view_home, self.act_view_top,
+            self.act_view_front, self.act_view_right,
+        ):
+            bar.addAction(action)
+
+        self.addToolBar(Qt.BottomToolBarArea, bar)
 
     # --- helpers -------------------------------------------------------
 

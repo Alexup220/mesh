@@ -257,3 +257,32 @@ def test_status_bar_is_plain_when_the_model_fits(window):
 def test_status_bar_is_plain_when_the_scene_is_empty(window):
     window.update_status()
     assert window.statusBar().styleSheet() == ""
+
+
+def test_bottom_bar_exposes_the_mandatory_actions(window):
+    from PySide6.QtWidgets import QToolBar
+
+    bars = window.findChildren(QToolBar)
+    assert bars, "expected a bottom toolbar"
+    bar = bars[0]
+    labels = {a.text().replace("&", "") for a in bar.actions() if not a.isSeparator()}
+    for expected in ("Undo", "Redo", "Group", "Ungroup", "Duplicate", "Delete",
+                      "Home", "Top", "Front", "Right"):
+        assert expected in labels
+
+
+def test_bottom_bar_buttons_reuse_the_menu_actions(window):
+    from PySide6.QtWidgets import QToolBar
+
+    bar = window.findChildren(QToolBar)[0]
+    assert window.act_undo in bar.actions()
+    assert window.act_view_home in bar.actions()
+
+
+def test_bottom_bar_group_button_actually_groups(window):
+    window.add_primitive("cube")
+    window.add_primitive("sphere")
+    window.document.scene.select([s.id for s in window.document.scene.shapes])
+    window.act_group.trigger()
+    assert len(window.document.scene.shapes) == 1
+    assert window.document.scene.shapes[0].kind == "group"
