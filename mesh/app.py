@@ -319,6 +319,8 @@ class MeshWindow(QMainWindow):
 
         if field == "is_hole":
             shape.is_hole = bool(value)
+        elif field == "color":
+            shape.color = str(value)
         elif field in ("x", "y", "z"):
             axis = "xyz".index(field)
             shape.transform = np.asarray(shape.transform, dtype=np.float64).copy()

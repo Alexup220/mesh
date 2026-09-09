@@ -286,3 +286,10 @@ def test_bottom_bar_group_button_actually_groups(window):
     window.act_group.trigger()
     assert len(window.document.scene.shapes) == 1
     assert window.document.scene.shapes[0].kind == "group"
+
+
+def test_editing_the_color_field_sets_the_shapes_color(window):
+    window.add_primitive("cube")
+    shape = window.document.scene.shapes[0]
+    window._on_edited(shape.id, "color", "#112233")
+    assert window.document.scene.get(shape.id).color == "#112233"

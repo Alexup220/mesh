@@ -6,8 +6,10 @@ viewport has a typeable millimetre equivalent here.
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
+    QColorDialog,
     QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
@@ -16,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mesh.scene import Shape, euler_from_transform
+from mesh.scene import DEFAULT_COLOR, Shape, euler_from_transform
 from mesh.shapes import PRIMITIVES
 
 POSITION_FIELDS = ("x", "y", "z")
@@ -41,6 +43,7 @@ FIELD_LABELS = {
     "rx": "Tilt X (degrees)",
     "ry": "Tilt Y (degrees)",
     "rz": "Turn (degrees)",
+    "color": "Colour",
 }
 
 
@@ -89,6 +92,12 @@ class Inspector(QWidget):
             self._rows[field] = layout.rowCount() - 1
 
         self._layout = layout
+
+        self.color_button = QPushButton(self)
+        self.color_button.setFixedHeight(28)
+        self.color_button.clicked.connect(self._pick_color)
+        layout.addRow(QLabel(FIELD_LABELS["color"]), self.color_button)
+
         self.hole_box = QCheckBox("Make this a hole", self)
         self.hole_box.toggled.connect(lambda value: self._emit("is_hole", value))
         layout.addRow(self.hole_box)
@@ -100,9 +109,26 @@ class Inspector(QWidget):
             return
         self.edited.emit(self._shape.id, field, value)
 
+    def _set_color_swatch(self, color: str) -> None:
+        self.color_button.setStyleSheet(f"background-color: {color}; border: 1px solid #3d434b;")
+        self.color_button.setText(color)
+
+    def _pick_color(self) -> None:
+        if self._shape is None:
+            return
+        current = QColor(self._shape.color)
+        chosen = QColorDialog.getColor(current, self, "Choose a colour")
+        if not chosen.isValid():
+            return
+        hex_color = chosen.name(QColor.HexRgb).lower()
+        self._set_color_swatch(hex_color)
+        self._emit("color", hex_color)
+
     def field_value(self, field: str):
         if field == "is_hole":
             return self.hole_box.isChecked()
+        if field == "color":
+            return self.color_button.text()
         return self.fields[field].value()
 
     def _active_size_fields(self, shape: Shape) -> tuple[str, ...]:
@@ -143,5 +169,6 @@ class Inspector(QWidget):
                 self.fields[field].setValue(float(value))
 
             self.hole_box.setChecked(bool(shape.is_hole))
+            self._set_color_swatch(shape.color or DEFAULT_COLOR)
         finally:
             self._loading = False

@@ -136,3 +136,43 @@ def test_inspector_shows_rotation_from_the_transform(inspector):
     assert np.isclose(inspector.field_value("rx"), 15.0, atol=1e-6)
     assert np.isclose(inspector.field_value("ry"), 30.0, atol=1e-6)
     assert np.isclose(inspector.field_value("rz"), 45.0, atol=1e-6)
+
+
+def test_inspector_shows_the_shapes_color(inspector):
+    shape = new_primitive("cube")
+    shape.color = "#ff8800"
+    inspector.show_shape(shape)
+    assert inspector.field_value("color") == "#ff8800"
+
+
+def test_picking_a_color_emits_a_lowercase_hex_string(inspector, monkeypatch):
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QColorDialog
+
+    shape = new_primitive("cube")
+    inspector.show_shape(shape)
+
+    monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *a, **k: QColor("#AABBCC")))
+
+    seen = []
+    inspector.edited.connect(lambda *args: seen.append(args))
+    inspector._pick_color()
+
+    assert (shape.id, "color", "#aabbcc") in seen
+    assert inspector.field_value("color") == "#aabbcc"
+
+
+def test_cancelling_the_color_dialog_emits_nothing(inspector, monkeypatch):
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QColorDialog
+
+    shape = new_primitive("cube")
+    inspector.show_shape(shape)
+
+    monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *a, **k: QColor()))  # invalid
+
+    seen = []
+    inspector.edited.connect(lambda *args: seen.append(args))
+    inspector._pick_color()
+
+    assert seen == []
