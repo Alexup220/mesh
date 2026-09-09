@@ -152,3 +152,78 @@ class Document:
         self._undo.append(copy.deepcopy(self.scene))
         self.scene = self._redo.pop()
         return True
+
+
+def euler_from_transform(m) -> tuple[float, float, float]:
+    """Extract (rx, ry, rz) degrees from a 4x4 transform.
+
+    Convention: the rotation part is R = Rz(rz) @ Ry(ry) @ Rx(rx) — i.e. a
+    column vector is rotated about X first, then Y, then Z (extrinsic X-Y-Z
+    rotation order, sometimes called intrinsic Z-Y-X). Scale is tolerated:
+    each column of the rotation block is normalized by its own length
+    before angles are extracted, so this works on transforms produced by
+    transform_with_euler() below (translation + rotation + uniform or
+    per-axis scale, no shear).
+
+    Gimbal lock (ry = +/-90 degrees) is handled without raising: rz is
+    pinned to 0 and rx absorbs the coupled rotation, matching what
+    transform_with_euler(m, rx, 0.0, +/-90.0) would produce.
+    """
+    m = np.asarray(m, dtype=np.float64)
+    r = m[:3, :3]
+
+    sx = np.linalg.norm(r[:, 0])
+    sy = np.linalg.norm(r[:, 1])
+    sz = np.linalg.norm(r[:, 2])
+    sx = sx if sx > 1e-12 else 1.0
+    sy = sy if sy > 1e-12 else 1.0
+    sz = sz if sz > 1e-12 else 1.0
+
+    rot = r / np.array([sx, sy, sz])
+
+    sin_ry = np.clip(-rot[2, 0], -1.0, 1.0)
+    ry = np.arcsin(sin_ry)
+    cos_ry = np.cos(ry)
+
+    if abs(cos_ry) > 1e-6:
+        rx = np.arctan2(rot[2, 1], rot[2, 2])
+        rz = np.arctan2(rot[1, 0], rot[0, 0])
+    else:
+        rz = 0.0
+        rx = np.arctan2(-rot[1, 2], rot[1, 1])
+
+    return tuple(float(v) for v in np.degrees([rx, ry, rz]))
+
+
+def transform_with_euler(m, rx: float, ry: float, rz: float) -> np.ndarray:
+    """Return a new 4x4 transform with rotation (rx, ry, rz) degrees.
+
+    Uses the same convention as euler_from_transform(): R = Rz @ Ry @ Rx.
+    Translation and per-axis scale (the column lengths of the existing
+    rotation block) are preserved; only the rotation itself is replaced.
+    """
+    m = np.asarray(m, dtype=np.float64)
+    translation = m[:3, 3].copy()
+    r = m[:3, :3]
+
+    scale = np.array([
+        np.linalg.norm(r[:, 0]),
+        np.linalg.norm(r[:, 1]),
+        np.linalg.norm(r[:, 2]),
+    ])
+
+    rxr, ryr, rzr = np.radians([rx, ry, rz])
+    cx, sx = np.cos(rxr), np.sin(rxr)
+    cy, sy = np.cos(ryr), np.sin(ryr)
+    cz, sz = np.cos(rzr), np.sin(rzr)
+
+    rot_x = np.array([[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]])
+    rot_y = np.array([[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]])
+    rot_z = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]])
+
+    rotation = rot_z @ rot_y @ rot_x
+
+    out = np.eye(4, dtype=np.float64)
+    out[:3, :3] = rotation * scale
+    out[:3, 3] = translation
+    return out

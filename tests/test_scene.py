@@ -1,7 +1,14 @@
 import numpy as np
 import pytest
 
-from mesh.scene import Document, Scene, Shape, new_primitive
+from mesh.scene import (
+    Document,
+    Scene,
+    Shape,
+    euler_from_transform,
+    new_primitive,
+    transform_with_euler,
+)
 
 
 def test_new_primitive_has_defaults_and_sits_at_origin():
@@ -122,3 +129,43 @@ def test_history_is_capped_at_fifty():
         f"oldest retained snapshot has max shape index {max_shape_index}, "
         f"expected >= 29; likely keeping oldest snapshots instead of recent ones"
     )
+
+
+def test_euler_from_identity_transform_is_zero():
+    assert np.allclose(euler_from_transform(np.eye(4)), (0.0, 0.0, 0.0))
+
+
+def test_euler_round_trips_through_transform_with_euler():
+    for rx, ry, rz in [(30.0, 0.0, 0.0), (0.0, 20.0, 0.0), (0.0, 0.0, 45.0), (15.0, -25.0, 60.0)]:
+        m = transform_with_euler(np.eye(4), rx, ry, rz)
+        got = euler_from_transform(m)
+        assert np.allclose(got, (rx, ry, rz), atol=1e-6)
+
+
+def test_transform_with_euler_preserves_translation_and_scale():
+    m = np.eye(4)
+    m[:3, 3] = [5.0, -2.0, 9.0]
+    m[0, 0] = 2.0  # scale x by 2
+    m[1, 1] = 3.0  # scale y by 3
+    m[2, 2] = 4.0  # scale z by 4
+
+    out = transform_with_euler(m, 10.0, 20.0, 30.0)
+
+    assert np.allclose(out[:3, 3], [5.0, -2.0, 9.0])
+    scale = np.linalg.norm(out[:3, :3], axis=0)
+    assert np.allclose(scale, [2.0, 3.0, 4.0])
+
+
+def test_transform_with_euler_identity_case():
+    out = transform_with_euler(np.eye(4), 0.0, 0.0, 0.0)
+    assert np.allclose(out, np.eye(4))
+
+
+def test_euler_from_transform_handles_gimbal_lock_without_raising():
+    m = transform_with_euler(np.eye(4), 40.0, 90.0, 0.0)
+    rx, ry, rz = euler_from_transform(m)
+    assert np.isclose(ry, 90.0, atol=1e-6)
+    # rx and rz are coupled at gimbal lock; the reconstructed transform
+    # must still reproduce the same rotation, even if rx/rz individually differ.
+    m2 = transform_with_euler(np.eye(4), rx, ry, rz)
+    assert np.allclose(m, m2, atol=1e-6)
