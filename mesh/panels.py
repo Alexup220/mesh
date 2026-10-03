@@ -24,16 +24,38 @@ from PySide6.QtWidgets import (
 )
 
 from mesh.scene import DEFAULT_COLOR, DEFAULT_FIT, FITS, Shape, euler_from_transform
-from mesh.shapes import PRIMITIVES
+from mesh.shapes import PRIMITIVES, shelf_primitives
 
 POSITION_FIELDS = ("x", "y", "z")
 ROTATION_FIELDS = ("rx", "ry", "rz")
 
-# Every size parameter that appears in any primitive's defaults (see
-# mesh.shapes.PRIMITIVES). Which of these are shown for a given shape is
-# decided at display time, from that shape's own primitive kind -- not
-# every shape has every field, and imported/group shapes have none.
-SIZE_FIELDS = ("width", "depth", "height", "diameter", "thickness", "wall")
+def _param_fields() -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Every parameter that appears in any primitive's defaults (see
+    mesh.shapes.PRIMITIVES), split by the kind of control it needs:
+    numbers get a spin box, params with "choices" a drop-down, and any
+    other text a text box. Which ones are shown for a given shape is
+    decided at display time, from that shape's own primitive kind -- not
+    every shape has every field, and imported/group shapes have none."""
+    numeric, choice, text = [], [], []
+    for info in PRIMITIVES.values():
+        choices = info.get("choices", {})
+        for key, default in info["defaults"].items():
+            if key in numeric or key in choice or key in text:
+                continue
+            if key in choices:
+                choice.append(key)
+            elif isinstance(default, str):
+                text.append(key)
+            else:
+                numeric.append(key)
+    return tuple(numeric), tuple(choice), tuple(text)
+
+
+SIZE_FIELDS, CHOICE_FIELDS, TEXT_FIELDS = _param_fields()
+
+# Size fields that may legitimately be zero (a chamfer or rounding of 0
+# means "none"); every other size must stay positive.
+ZERO_ALLOWED = ("radius", "chamfer")
 
 FIELD_LABELS = {
     "x": "Left / right (mm)",
@@ -50,6 +72,8 @@ FIELD_LABELS = {
     "rz": "Turn (degrees)",
     "color": "Colour",
     "fit": "Fit",
+    "size": "Size",
+    "head": "Screw head",
 }
 
 
@@ -62,8 +86,8 @@ class ShapeShelf(QWidget):
         layout.setAlignment(Qt.AlignTop)
         self.buttons: dict[str, QPushButton] = {}
 
-        for index, (kind, info) in enumerate(PRIMITIVES.items()):
-            button = QPushButton(info["label"], self)
+        for index, kind in enumerate(shelf_primitives()):
+            button = QPushButton(PRIMITIVES[kind]["label"], self)
             button.setMinimumHeight(48)
             button.clicked.connect(lambda _checked=False, k=kind: self.primitive_requested.emit(k))
             layout.addWidget(button, index // 2, index % 2)
@@ -89,7 +113,7 @@ class Inspector(QWidget):
             if field in ROTATION_FIELDS:
                 box.setRange(-360.0, 360.0)
             elif field in SIZE_FIELDS:
-                box.setRange(0.1, 10000.0)
+                box.setRange(0.0 if field in ZERO_ALLOWED else 0.1, 10000.0)
             else:
                 box.setRange(-10000.0, 10000.0)
             box.valueChanged.connect(lambda value, f=field: self._emit(f, value))
@@ -98,6 +122,28 @@ class Inspector(QWidget):
             self._rows[field] = layout.rowCount() - 1
 
         self._layout = layout
+
+        # Non-numeric params: a drop-down per choice field (its items are
+        # filled from the shown primitive's own choices), a text box per
+        # text field.
+        self.choice_boxes: dict[str, QComboBox] = {}
+        for field in CHOICE_FIELDS:
+            combo = QComboBox(self)
+            combo.currentIndexChanged.connect(
+                lambda _i, f=field, c=combo: self._emit(f, c.currentData())
+            )
+            layout.addRow(QLabel(FIELD_LABELS[field]), combo)
+            self.choice_boxes[field] = combo
+            self._rows[field] = layout.rowCount() - 1
+        self.text_boxes: dict[str, QLineEdit] = {}
+        for field in TEXT_FIELDS:
+            line = QLineEdit(self)
+            # Emit once the user is done typing, not per keystroke: half-typed
+            # text is not worth rebuilding geometry for.
+            line.editingFinished.connect(lambda f=field, w=line: self._emit_text(f, w))
+            layout.addRow(QLabel(FIELD_LABELS[field]), line)
+            self.text_boxes[field] = line
+            self._rows[field] = layout.rowCount() - 1
 
         self.color_button = QPushButton(self)
         self.color_button.setFixedHeight(28)
@@ -126,6 +172,13 @@ class Inspector(QWidget):
             return
         self.edited.emit(self._shape.id, field, value)
 
+    def _emit_text(self, field: str, widget: QLineEdit) -> None:
+        if self._shape is None or self._loading:
+            return
+        value = widget.text()
+        if value.strip() and value != self._shape.params.get(field):
+            self._emit(field, value)
+
     def _set_color_swatch(self, color: str) -> None:
         self.color_button.setStyleSheet(f"background-color: {color}; border: 1px solid #3d434b;")
         self.color_button.setText(color)
@@ -148,6 +201,10 @@ class Inspector(QWidget):
             return self.color_button.text()
         if field == "fit":
             return self.fit_box.currentData()
+        if field in self.choice_boxes:
+            return self.choice_boxes[field].currentData()
+        if field in self.text_boxes:
+            return self.text_boxes[field].text()
         return self.fields[field].value()
 
     def _active_size_fields(self, shape: Shape) -> tuple[str, ...]:
@@ -161,6 +218,18 @@ class Inspector(QWidget):
         if info is None:
             return ()
         return tuple(info["defaults"].keys())
+
+    def _choices(self, shape: Shape) -> dict:
+        info = PRIMITIVES.get(shape.params.get("primitive")) if shape.kind == "primitive" else None
+        return info.get("choices", {}) if info else {}
+
+    def visible_param_fields(self) -> set[str]:
+        """The shape params this inspector is currently showing a control for."""
+        return {
+            field
+            for field in SIZE_FIELDS + CHOICE_FIELDS + TEXT_FIELDS
+            if self._layout.isRowVisible(self._rows[field])
+        }
 
     def show_shape(self, shape: Shape | None) -> None:
         self._shape = shape
@@ -179,6 +248,19 @@ class Inspector(QWidget):
                 self._layout.setRowVisible(self._rows[field], field in active)
                 if field in active:
                     self.fields[field].setValue(float(shape.params.get(field, 0.0)))
+            choices = self._choices(shape)
+            for field, combo in self.choice_boxes.items():
+                shown = field in active
+                self._layout.setRowVisible(self._rows[field], shown)
+                combo.clear()
+                if shown:
+                    for value, label in choices.get(field, []):
+                        combo.addItem(label, value)
+                    combo.setCurrentIndex(max(combo.findData(shape.params.get(field)), 0))
+            for field, line in self.text_boxes.items():
+                shown = field in active
+                self._layout.setRowVisible(self._rows[field], shown)
+                line.setText(str(shape.params.get(field, "")) if shown else "")
 
             # Rotation is authoritative in the transform, not in params:
             # shape_geometry() never reads rotation from params, so reading

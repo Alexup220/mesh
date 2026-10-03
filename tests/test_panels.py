@@ -20,7 +20,12 @@ def inspector(qapp, close_qt_widget):
 
 
 def test_shelf_has_a_button_per_primitive(shelf):
-    assert len(shelf.buttons) == len(PRIMITIVES)
+    # Hardware holes and text are added from their own menus, not the
+    # shelf (PRIMITIVES[...]["shelf"] is False for them).
+    from mesh.shapes import shelf_primitives
+
+    assert len(shelf.buttons) == len(shelf_primitives())
+    assert set(shelf.buttons) == {k for k, v in PRIMITIVES.items() if v.get("shelf", True)}
 
 
 def test_shelf_button_emits_its_primitive_kind(shelf):
@@ -95,17 +100,19 @@ def test_inspector_exposes_exactly_this_primitives_size_fields(inspector, kind):
     inspector.show_shape(shape)
 
     expected = set(PRIMITIVES[kind]["defaults"].keys())
-    all_size_fields = {"width", "depth", "height", "diameter", "thickness", "wall"}
-    shown = {
-        field
-        for field in all_size_fields
-        if inspector._layout.isRowVisible(inspector._rows[field])
-    }
+    # Every param control the inspector has -- numeric, drop-down or text --
+    # not just the original six numeric size fields, since primitives can
+    # now have non-numeric params (screw size, text).
+    shown = inspector.visible_param_fields()
     assert shown == expected
 
     # And every shown field actually reflects the shape's real value.
     for field in expected:
-        assert np.isclose(inspector.field_value(field), shape.params[field])
+        value = shape.params[field]
+        if isinstance(value, str):
+            assert inspector.field_value(field) == value
+        else:
+            assert np.isclose(inspector.field_value(field), value)
 
 
 def test_editing_a_spheres_diameter_changes_its_geometry(inspector):

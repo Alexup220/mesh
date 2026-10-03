@@ -72,3 +72,13 @@ def test_fit_clearance_dialog_is_plain_language(qapp, close_qt_widget):
     )
     for text in dialog.labels():
         assert_plain(text)
+
+
+def test_hardware_names_are_plain_language():
+    from mesh import hardware
+
+    for submenu, items in hardware.menu_presets():
+        assert_plain(submenu)
+        for label, primitive, params in items:
+            assert_plain(label)
+            assert_plain(hardware.preset_name(primitive, {**{"head": "plain"}, **params}))

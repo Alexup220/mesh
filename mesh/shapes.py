@@ -11,6 +11,7 @@ import numpy as np
 import trimesh
 from shapely.geometry import Polygon
 
+from mesh import hardware
 from mesh.blobs import decode_mesh
 
 PRIMITIVES: dict[str, dict] = {
@@ -46,7 +47,43 @@ PRIMITIVES: dict[str, dict] = {
         "label": "Pyramid",
         "defaults": {"width": 20.0, "depth": 20.0, "height": 20.0},
     },
+    # Hardware holes (see mesh/hardware.py). Added from the "Add hardware
+    # hole" menu rather than the shape shelf. "choices" lists the allowed
+    # values of a non-numeric param, shown as a drop-down in the inspector.
+    "screw_hole": {
+        "label": "Screw hole",
+        "defaults": {"size": "M3", "head": "plain", "depth": 10.0},
+        "choices": {
+            "size": [(s, s) for s in hardware.SCREW_SIZES],
+            "head": hardware.HEAD_CHOICES,
+        },
+        "shelf": False,
+    },
+    "nut_trap": {
+        "label": "Nut trap",
+        "defaults": {"size": "M3", "depth": 10.0},
+        "choices": {"size": [(s, s) for s in hardware.SCREW_SIZES]},
+        "shelf": False,
+    },
+    "insert_pocket": {
+        "label": "Heat-set insert pocket",
+        "defaults": {"size": "M3"},
+        "choices": {"size": [(s, s) for s in hardware.INSERT_SIZES]},
+        "shelf": False,
+    },
+    "magnet_pocket": {
+        "label": "Magnet pocket",
+        "defaults": {"diameter": 6.0, "depth": 2.0},
+        "shelf": False,
+    },
 }
+
+HARDWARE_PRIMITIVES = ("screw_hole", "nut_trap", "insert_pocket", "magnet_pocket")
+
+
+def shelf_primitives() -> list[str]:
+    """The primitives that get a button on the shape shelf."""
+    return [k for k, info in PRIMITIVES.items() if info.get("shelf", True)]
 
 SEGMENTS = 64
 
@@ -101,6 +138,9 @@ def primitive_mesh(kind: str, params: dict, clearance: float = 0.0) -> trimesh.T
     if kind not in PRIMITIVES:
         raise KeyError(f"unknown primitive: {kind}")
     p = {**default_params(kind), **params}
+    if kind in HARDWARE_PRIMITIVES:
+        # Hardware holes add their clearance themselves, radius by radius.
+        return hardware.build(kind, p, clearance)
     if clearance > 0.0:
         tm = _primitive_mesh(kind, _grow_for_clearance(kind, p, clearance), clearance)
         tm.apply_translation([0.0, 0.0, -clearance])

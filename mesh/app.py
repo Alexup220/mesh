@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QTimer, Qt
 
-from mesh import ops, panels
+from mesh import hardware, ops, panels
 from mesh.gizmo import Gizmo
 from mesh.io_formats import (
     EXPORT_EXTS,
@@ -141,6 +141,14 @@ class MeshWindow(QMainWindow):
                 self._act(shape, f"Align {axis.upper()} {mode}", None,
                           lambda _c=False, a=axis, m=mode: self.do_align(a, m))
 
+        holes = self.menuBar().addMenu("Add hard&ware hole")
+        self.hardware_menu = holes
+        for submenu_label, items in hardware.menu_presets():
+            submenu = holes.addMenu(submenu_label)
+            for label, primitive, params in items:
+                self._act(submenu, label, None,
+                          lambda _c=False, k=primitive, p=params: self.add_hardware(k, dict(p)))
+
         view = self.menuBar().addMenu("&View")
         self.act_view_home = self._act(view, "&Home", "Home", lambda: self.viewport.view_preset("home"))
         self.act_view_front = self._act(view, "&Front", "1", lambda: self.viewport.view_preset("front"))
@@ -208,11 +216,23 @@ class MeshWindow(QMainWindow):
     # --- actions -------------------------------------------------------
 
     def add_primitive(self, kind: str) -> None:
+        self.add_shape(new_primitive(kind))
+
+    def add_shape(self, shape) -> None:
+        """Add one new shape as one undo step and select it. Every "add"
+        (shelf, hardware holes, text) comes through here."""
         self.document.snapshot("add")
-        shape = new_primitive(kind)
         self.document.scene.add(shape)
         self.document.scene.select([shape.id])
         self.sync()
+
+    def add_hardware(self, primitive: str, params: dict) -> None:
+        """Add a ready-made hardware Hole (see mesh/hardware.py)."""
+        shape = new_primitive(primitive, name=hardware.preset_name(primitive, params))
+        shape.params.update(params)
+        shape.is_hole = True
+        shape.fit = hardware.DEFAULT_FIT[primitive]
+        self.add_shape(shape)
 
     def do_undo(self) -> None:
         if self.document.undo():
@@ -403,6 +423,9 @@ class MeshWindow(QMainWindow):
             shape.transform = transform_with_euler(
                 transform, angles["rx"], angles["ry"], angles["rz"]
             )
+        elif isinstance(value, str):
+            # A drop-down choice (screw size, head) or typed text.
+            shape.params[field] = value
         else:
             shape.params[field] = float(value)
 
