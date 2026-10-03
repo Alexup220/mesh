@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 from shapely.geometry import Polygon
 
-from mesh import hardware, solids
+from mesh import hardware, solids, text
 from mesh.blobs import decode_mesh
 
 PRIMITIVES: dict[str, dict] = {
@@ -56,6 +56,13 @@ PRIMITIVES: dict[str, dict] = {
     "rounded_cylinder": {
         "label": "Rounded cylinder",
         "defaults": {"diameter": 20.0, "height": 20.0, "radius": 3.0, "chamfer": 0.0},
+    },
+    # Raised text is a solid; engraved text is the same shape as a Hole.
+    # Added from Shape > Add Text..., where the words are typed.
+    "text": {
+        "label": "Text",
+        "defaults": {"text": "Text", "letter_height": 10.0, "depth": 2.0},
+        "shelf": False,
     },
     # Hardware holes (see mesh/hardware.py). Added from the "Add hardware
     # hole" menu rather than the shape shelf. "choices" lists the allowed
@@ -151,6 +158,9 @@ def primitive_mesh(kind: str, params: dict, clearance: float = 0.0) -> trimesh.T
     if kind in HARDWARE_PRIMITIVES:
         # Hardware holes add their clearance themselves, radius by radius.
         return hardware.build(kind, p, clearance)
+    if kind == "text":
+        # Letters grow outward along their own outline, not by scaling.
+        return text.text_mesh(str(p["text"]), float(p["letter_height"]), float(p["depth"]), clearance)
     if clearance > 0.0:
         tm = _primitive_mesh(kind, _grow_for_clearance(kind, p, clearance), clearance)
         tm.apply_translation([0.0, 0.0, -clearance])

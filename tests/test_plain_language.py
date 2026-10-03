@@ -166,6 +166,7 @@ def _dialogs():
         ("Repeat in a row", panels.repeat_row_fields(), None),
         ("Repeat in a circle", panels.repeat_circle_fields((0.0, 0.0)),
          "Copies go round a vertical line through the circle centre."),
+        ("Add text", panels.text_fields(), None),
         ("Box with lid", panels.box_with_lid_fields(),
          "Makes a box and a lid that drops onto it, side by side and ready to print."),
     ]

@@ -145,6 +145,7 @@ class MeshWindow(QMainWindow):
         self._act(shape, "Repeat in a &Circle...", None, self.do_repeat_circle)
         shape.addSeparator()
         self._act(shape, "Box with &Lid...", None, self.do_box_with_lid)
+        self._act(shape, "Add &Text...", "T", self.do_add_text)
         shape.addSeparator()
         # Explicit Union/Subtract/Intersect: the secondary route to
         # ops.boolean, for a user who wants the operator directly instead
@@ -551,6 +552,24 @@ class MeshWindow(QMainWindow):
         scene.select([p.id for p in parts])
         self.sync()
         return True
+
+    def add_text(self, text: str, letter_height: float = 10.0, depth: float = 2.0,
+                 engraved: bool = False) -> bool:
+        """Raised text is a solid; engraved text is a Hole. One undo step."""
+        if not text.strip():
+            self._warn("Cannot add text", "Type some text first.")
+            return False
+        shape = new_primitive("text", name=f"Text: {text}")
+        shape.params.update(text=text, letter_height=float(letter_height), depth=float(depth))
+        shape.is_hole = bool(engraved)
+        self.add_shape(shape)
+        return True
+
+    def do_add_text(self) -> None:
+        values = panels.ask_text(self)
+        if values is not None:
+            self.add_text(values["text"], values["letter_height"], values["depth"],
+                          values["style"] == "engraved")
 
     def do_box_with_lid(self) -> None:
         values = panels.ask_box_with_lid(self)

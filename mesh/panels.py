@@ -74,6 +74,8 @@ FIELD_LABELS = {
     "fit": "Fit",
     "radius": "Rounding radius (mm)",
     "chamfer": "Bottom chamfer (mm)",
+    "text": "Text",
+    "letter_height": "Letter height (mm)",
     "size": "Size",
     "head": "Screw head",
 }
@@ -495,3 +497,19 @@ def ask_box_with_lid(parent) -> dict | None:
         parent, "Box with lid", box_with_lid_fields(),
         note="Makes a box and a lid that drops onto it, side by side and ready to print.",
     )
+
+
+TEXT_STYLES = [("raised", "Raised (stands up)"), ("engraved", "Engraved (cut in, as a Hole)")]
+
+
+def text_fields():
+    return [
+        ("text", "Text", "Hello", None),
+        ("letter_height", "Letter height (mm)", 10.0, {"min": 1.0, "max": 500.0}),
+        ("depth", "Depth (mm)", 2.0, {"min": 0.2, "max": 100.0}),
+        ("style", "Style", "raised", {"choices": TEXT_STYLES}),
+    ]
+
+
+def ask_text(parent) -> dict | None:
+    return run_form(parent, "Add text", text_fields())
