@@ -28,7 +28,7 @@ from PySide6.QtWidgets import QApplication, QSizePolicy, QVBoxLayout, QWidget
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtkmodules.vtkCommonCore import vtkPoints
 from vtkmodules.vtkCommonDataModel import vtkCellArray, vtkPolyData
-from vtkmodules.vtkFiltersSources import vtkPlaneSource
+from vtkmodules.vtkFiltersSources import vtkLineSource, vtkPlaneSource
 from vtkmodules.vtkInteractionStyle import vtkInteractorStyleTrackballCamera
 from vtkmodules.vtkRenderingCore import (
     vtkActor,
@@ -44,6 +44,7 @@ from mesh.shapes import hole_clearance, shape_geometry
 HOLE_OPACITY = 0.35
 BACKGROUND = (0.16, 0.17, 0.20)
 GRID_COLOR = (0.50, 0.53, 0.58)
+MEASURE_COLOR = (1.0, 0.85, 0.2)
 
 VIEW_PRESETS = {
     "home": ((1.0, -1.0, 0.8), (0.0, 0.0, 1.0)),
@@ -142,6 +143,8 @@ class Viewport(QWidget):
         # None for normal click-to-select; any other value means the next
         # click on a part is reported through surface_picked instead.
         self.pick_mode: str | None = None
+        # The Measure tool's line between its two clicked points, or None.
+        self.measure_actor: vtkActor | None = None
         self._add_grid()
         # Position the camera now, but do NOT call Render() here: the
         # widget's native window is not mapped yet (this runs during
@@ -258,6 +261,31 @@ class Viewport(QWidget):
                 self.surface_picked.emit(shape_id, int(self._cell_picker.GetCellId()), point)
                 return
         self.surface_picked.emit("", -1, point)
+
+    def set_measure_line(self, a, b) -> None:
+        """Draw (or move) the Measure tool's line from a to b."""
+        if self.measure_actor is None:
+            self._measure_source = vtkLineSource()
+            mapper = vtkPolyDataMapper()
+            mapper.SetInputConnection(self._measure_source.GetOutputPort())
+            actor = vtkActor()
+            actor.SetMapper(mapper)
+            prop = actor.GetProperty()
+            prop.SetColor(*MEASURE_COLOR)
+            prop.SetLineWidth(3.0)
+            actor.PickableOff()
+            self.renderer.AddActor(actor)
+            self.measure_actor = actor
+        self._measure_source.SetPoint1(*(float(v) for v in a))
+        self._measure_source.SetPoint2(*(float(v) for v in b))
+        self._measure_source.Update()
+        self._render()
+
+    def clear_measure_line(self) -> None:
+        if self.measure_actor is not None:
+            self.renderer.RemoveActor(self.measure_actor)
+            self.measure_actor = None
+            self._render()
 
     def view_preset(self, name: str) -> None:
         if name not in VIEW_PRESETS:

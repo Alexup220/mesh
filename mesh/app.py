@@ -62,6 +62,8 @@ class MeshWindow(QMainWindow):
         # Where "Place on face" will put the next added shape:
         # (world point, face direction), or None until a face is clicked.
         self._place_target = None
+        # The Measure tool's clicked points (0, 1 or 2 world points).
+        self._measure_points: list = []
 
         self.gizmo = Gizmo(self.viewport, self)
         self.gizmo.changing.connect(lambda: self.document.snapshot("move"))
@@ -169,6 +171,10 @@ class MeshWindow(QMainWindow):
             for label, primitive, params in items:
                 self._act(submenu, label, None,
                           lambda _c=False, k=primitive, p=params: self.add_hardware(k, dict(p)))
+
+        tools = self.menuBar().addMenu("&Tools")
+        self.act_measure = self._act(tools, "&Measure", "M", self.toggle_measure)
+        self.act_measure.setCheckable(True)
 
         view = self.menuBar().addMenu("&View")
         self.act_view_home = self._act(view, "&Home", "Home", lambda: self.viewport.view_preset("home"))
@@ -582,6 +588,8 @@ class MeshWindow(QMainWindow):
         "lay_flat": "Click the face of a part that should rest on the workplane. Esc cancels.",
         "place": "Click a face of a part. The next shape you add will sit on it. Esc cancels.",
         "place_ready": "Now add a shape. It will sit on the face you clicked. Esc cancels.",
+        "measure": "Click the first point on a part. Esc or Measure again to stop.",
+        "measure_second": "Now click the second point.",
     }
 
     def start_tool(self, tool: str) -> None:
@@ -597,10 +605,13 @@ class MeshWindow(QMainWindow):
     def _clear_tool(self) -> None:
         self.tool = None
         self._place_target = None
+        self._measure_points = []
         self.viewport.set_pick_mode(None)
-        self.act_place.blockSignals(True)
-        self.act_place.setChecked(False)
-        self.act_place.blockSignals(False)
+        self.viewport.clear_measure_line()
+        for action in (self.act_place, self.act_measure):
+            action.blockSignals(True)
+            action.setChecked(False)
+            action.blockSignals(False)
 
     def stop_tool(self) -> None:
         if self.tool is None:
@@ -621,6 +632,34 @@ class MeshWindow(QMainWindow):
         self.act_place.setChecked(True)
         self.act_place.blockSignals(False)
 
+    def toggle_measure(self, checked: bool = True) -> None:
+        """Measure never changes the scene: no snapshot, no edit."""
+        if not checked:
+            self.stop_tool()
+            return
+        self.start_tool("measure")
+        self.act_measure.blockSignals(True)
+        self.act_measure.setChecked(True)
+        self.act_measure.blockSignals(False)
+
+    def _measure_picked(self, shape_id: str, point) -> None:
+        if not shape_id:
+            return
+        point = np.asarray(point, dtype=np.float64)
+        if len(self._measure_points) != 1:
+            # First click, or a fresh measurement after a finished one.
+            self._measure_points = [point]
+            self.viewport.clear_measure_line()
+            self.statusBar().showMessage(self.TOOL_PROMPTS["measure_second"])
+            return
+        first = self._measure_points[0]
+        self._measure_points = [first, point]
+        self.viewport.set_measure_line(first, point)
+        self.statusBar().showMessage(
+            f"Distance: {ops.distance(first, point):.2f} mm. "
+            "Click again to measure something else, Esc to stop."
+        )
+
     def start_lay_flat(self) -> None:
         if not self.document.scene.shapes:
             self.statusBar().showMessage("Add a part first, then lay it flat.")
@@ -632,6 +671,8 @@ class MeshWindow(QMainWindow):
             self._lay_flat_picked(shape_id, face_index)
         elif self.tool == "place":
             self._place_picked(shape_id, face_index, point)
+        elif self.tool == "measure":
+            self._measure_picked(shape_id, point)
 
     def _place_picked(self, shape_id: str, face_index: int, point) -> None:
         """Remember the clicked face; nothing in the scene changes until a

@@ -280,3 +280,8 @@ def place_on_face(shape: Shape, point, direction) -> None:
     shape.transform = _canonical(
         to_point @ turn @ to_anchor @ np.asarray(shape.transform, dtype=np.float64)
     )
+
+
+def distance(a, b) -> float:
+    """Straight-line distance between two world points, in mm."""
+    return float(np.linalg.norm(np.asarray(b, dtype=np.float64) - np.asarray(a, dtype=np.float64)))
