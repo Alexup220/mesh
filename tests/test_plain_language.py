@@ -89,3 +89,47 @@ def test_tool_prompts_are_plain_language():
 
     for text in MeshWindow.TOOL_PROMPTS.values():
         assert_plain(text)
+
+
+@pytest.mark.parametrize("exact", [True, False])
+def test_hollow_dialog_is_plain_language(qapp, close_qt_widget, exact):
+    from mesh.panels import APPROXIMATE_HOLLOW_NOTE, FormDialog, hollow_fields
+
+    dialog = close_qt_widget(FormDialog(None, "Hollow out", hollow_fields(exact),
+                                        note=None if exact else APPROXIMATE_HOLLOW_NOTE))
+    for text in dialog.labels():
+        assert_plain(text)
+
+
+def _refusals():
+    """Every way the new tools can refuse, as (callable) -- each must raise
+    BuildError with a plain-language message."""
+    from mesh import builders
+    from mesh.scene import new_primitive
+
+    def box():
+        return new_primitive("cube")
+
+    def hole():
+        s = box()
+        s.is_hole = True
+        return s
+
+    return [
+        lambda: builders.hollow(hole(), 2.0),
+        lambda: builders.hollow(box(), 0.0),
+        lambda: builders.hollow(box(), 2.0, drain=-1.0),
+        lambda: builders.hollow(box(), 30.0),
+        lambda: builders.hollow(box(), 2.0, drain=50.0),
+        lambda: builders.hollow(new_primitive("cone"), 1.0, open_top=True),
+        lambda: builders.hollow(new_primitive("pyramid"), 15.0),
+    ]
+
+
+def test_every_refusal_message_is_plain_language():
+    from mesh.builders import BuildError
+
+    for attempt in _refusals():
+        with pytest.raises(BuildError) as info:
+            attempt()
+        assert_plain(str(info.value))

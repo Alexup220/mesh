@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QTimer, Qt
 
-from mesh import hardware, ops, panels
+from mesh import builders, hardware, ops, panels
 from mesh.gizmo import Gizmo
 from mesh.io_formats import (
     EXPORT_EXTS,
@@ -137,6 +137,8 @@ class MeshWindow(QMainWindow):
         self.act_lay_flat = self._act(shape, "&Lay Flat on a Face", "L", self.start_lay_flat)
         self.act_place = self._act(shape, "&Place Next Shape on a Face", "P", self.toggle_place_on_face)
         self.act_place.setCheckable(True)
+        shape.addSeparator()
+        self._act(shape, "Hollow &Out...", None, self.do_hollow)
         shape.addSeparator()
         # Explicit Union/Subtract/Intersect: the secondary route to
         # ops.boolean, for a user who wants the operator directly instead
@@ -387,6 +389,57 @@ class MeshWindow(QMainWindow):
         self.document.snapshot("align")
         ops.align(chosen, axis, mode)
         self.sync()
+
+    def _one_selected(self, what: str):
+        chosen = self.document.scene.selected()
+        if len(chosen) != 1:
+            self.statusBar().showMessage(f"Select one part to {what}.")
+            return None
+        return chosen[0]
+
+    def _replace_with(self, label: str, old, new_shapes) -> None:
+        """One undo step: swap `old` for the shapes a tool built."""
+        self.document.snapshot(label)
+        self.document.scene.remove([old.id])
+        for shape in new_shapes:
+            self.document.scene.add(shape)
+        self.document.scene.select([s.id for s in new_shapes])
+        self.sync()
+
+    def _attempt(self, title: str, build):
+        """Run a tool that might refuse. On refusal, say why and return None
+        -- before any snapshot, so a failure leaves no undo step behind."""
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            return build()
+        except builders.BuildError as exc:
+            error = str(exc)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._warn(title, error)
+        return None
+
+    def hollow_selected(self, wall: float, open_top: bool = False, drain: float = 0.0) -> bool:
+        shape = self._one_selected("hollow out")
+        if shape is None:
+            return False
+        scene = self.document.scene
+        group = self._attempt(
+            "Cannot hollow out",
+            lambda: builders.hollow(shape, wall, open_top, drain, scene.fit_clearances),
+        )
+        if group is None:
+            return False
+        self._replace_with("hollow out", shape, [group])
+        return True
+
+    def do_hollow(self) -> None:
+        shape = self._one_selected("hollow out")
+        if shape is None:
+            return
+        values = panels.ask_hollow(self, exact=builders.hollows_exactly(shape))
+        if values is not None:
+            self.hollow_selected(values["wall"], values.get("open_top", False), values["drain"])
 
     # --- click-on-a-part tools -----------------------------------------
 

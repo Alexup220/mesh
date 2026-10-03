@@ -388,3 +388,25 @@ def ask_fit_clearances(parent, current: dict) -> dict | None:
         fit_clearance_fields(current),
         note="Extra room added on every side of a Hole, so parts slide in after printing.",
     )
+
+
+APPROXIMATE_HOLLOW_NOTE = (
+    "This shape is hollowed out approximately: the wall follows the outside "
+    "evenly, but may come out a little thinner in places than the number "
+    "you type. Boxes, cylinders and spheres are hollowed out exactly."
+)
+
+
+def hollow_fields(exact: bool):
+    fields = [("wall", "Wall thickness (mm)", 2.0, {"min": 0.1, "max": 100.0})]
+    if exact:
+        fields.append(("open_top", "Open top", False, None))
+    fields.append(("drain", "Drain hole (mm, 0 for none)", 0.0, {"min": 0.0, "max": 100.0}))
+    return fields
+
+
+def ask_hollow(parent, exact: bool) -> dict | None:
+    return run_form(
+        parent, "Hollow out", hollow_fields(exact),
+        note=None if exact else APPROXIMATE_HOLLOW_NOTE,
+    )
