@@ -123,6 +123,10 @@ def _refusals():
         lambda: builders.hollow(box(), 2.0, drain=50.0),
         lambda: builders.hollow(new_primitive("cone"), 1.0, open_top=True),
         lambda: builders.hollow(new_primitive("pyramid"), 15.0),
+        lambda: builders.split(hole(), "z", 10.0),
+        lambda: builders.split(box(), "z", 50.0),
+        lambda: builders.split(box(), "z", 10.0, pegs=True, peg_diameter=0.0),
+        lambda: builders.split(box(), "z", 10.0, pegs=True, peg_diameter=19.0),
     ]
 
 
@@ -133,3 +137,12 @@ def test_every_refusal_message_is_plain_language():
         with pytest.raises(BuildError) as info:
             attempt()
         assert_plain(str(info.value))
+
+
+def test_split_dialog_is_plain_language(qapp, close_qt_widget):
+    from mesh.panels import FormDialog, split_fields, split_note
+
+    size = (20.0, 20.0, 20.0)
+    dialog = close_qt_widget(FormDialog(None, "Split part", split_fields(size), note=split_note(size)))
+    for text in dialog.labels():
+        assert_plain(text)

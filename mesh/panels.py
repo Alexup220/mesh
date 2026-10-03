@@ -410,3 +410,31 @@ def ask_hollow(parent, exact: bool) -> dict | None:
         parent, "Hollow out", hollow_fields(exact),
         note=None if exact else APPROXIMATE_HOLLOW_NOTE,
     )
+
+
+SPLIT_DIRECTIONS = [
+    ("z", "Flat, at a height"),
+    ("x", "Upright, left from right"),
+    ("y", "Upright, front from back"),
+]
+
+
+def split_fields(size: tuple[float, float, float]):
+    return [
+        ("axis", "Cut", "z", {"choices": SPLIT_DIRECTIONS}),
+        ("distance", "Cut this far in from the bottom, left or front (mm)",
+         round(size[2] / 2.0, 2), {"min": 0.0, "max": 10000.0}),
+        ("pegs", "Add alignment pegs", False, None),
+        ("peg_diameter", "Peg size (mm)", 4.0, {"min": 1.0, "max": 50.0}),
+    ]
+
+
+def split_note(size: tuple[float, float, float]) -> str:
+    return (
+        f"This part is {size[0]:.1f} mm left to right, {size[1]:.1f} mm front to back "
+        f"and {size[2]:.1f} mm tall. Both halves are laid out side by side, ready to print."
+    )
+
+
+def ask_split(parent, size: tuple[float, float, float]) -> dict | None:
+    return run_form(parent, "Split part", split_fields(size), note=split_note(size))

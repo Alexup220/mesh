@@ -139,6 +139,7 @@ class MeshWindow(QMainWindow):
         self.act_place.setCheckable(True)
         shape.addSeparator()
         self._act(shape, "Hollow &Out...", None, self.do_hollow)
+        self._act(shape, "S&plit Part...", None, self.do_split)
         shape.addSeparator()
         # Explicit Union/Subtract/Intersect: the secondary route to
         # ops.boolean, for a user who wants the operator directly instead
@@ -440,6 +441,38 @@ class MeshWindow(QMainWindow):
         values = panels.ask_hollow(self, exact=builders.hollows_exactly(shape))
         if values is not None:
             self.hollow_selected(values["wall"], values.get("open_top", False), values["drain"])
+
+    def split_selected(
+        self, axis: str, distance: float, pegs: bool = False, peg_diameter: float = 4.0
+    ) -> bool:
+        """Cut the selected part `distance` mm in from its bottom (axis "z"),
+        left ("x") or front ("y") edge. One undo step on success."""
+        shape = self._one_selected("split")
+        if shape is None:
+            return False
+        scene = self.document.scene
+        low = shape_geometry(shape, scene.fit_clearances).bounds[0]["xyz".index(axis)]
+        halves = self._attempt(
+            "Cannot split",
+            lambda: builders.split(
+                shape, axis, low + float(distance), pegs, peg_diameter, scene.fit_clearances
+            ),
+        )
+        if halves is None:
+            return False
+        self._replace_with("split", shape, list(halves))
+        return True
+
+    def do_split(self) -> None:
+        shape = self._one_selected("split")
+        if shape is None:
+            return
+        tm = shape_geometry(shape, self.document.scene.fit_clearances)
+        values = panels.ask_split(self, tuple(float(v) for v in tm.bounds[1] - tm.bounds[0]))
+        if values is not None:
+            self.split_selected(
+                values["axis"], values["distance"], values["pegs"], values["peg_diameter"]
+            )
 
     # --- click-on-a-part tools -----------------------------------------
 

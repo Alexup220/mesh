@@ -187,3 +187,163 @@ def _approximate_cavity(shape: Shape, t: float, drain: float, clearances) -> lis
             raise BuildError("There is no room for a drain hole under the inside of this part.")
         holes.append(_baked_child(from_manifold(tube), "Drain hole", shape.color, is_hole=True))
     return holes
+
+
+# --- Split part -------------------------------------------------------------
+
+AXIS_VECTORS = {"x": (1.0, 0.0, 0.0), "y": (0.0, 1.0, 0.0), "z": (0.0, 0.0, 1.0)}
+PEG_MARGIN = 1.5     # mm of material kept between a peg and the edge of the cut face
+PEG_EMBED = 1.0      # mm a peg reaches back into its own half, so it joins solidly
+HOLE_EXTRA = 0.5     # mm a peg hole is deeper than the peg, so the halves close fully
+PEG_FIT = "snug"
+SPLIT_GAP = 10.0     # mm between the two halves once they are laid out
+
+
+def _cylinder_along(point, direction, start: float) -> np.ndarray:
+    """Transform for a cylinder primitive whose axis runs along `direction`,
+    its base at `point + start * direction`."""
+    from mesh.ops import rotation_between
+
+    direction = np.asarray(direction, dtype=np.float64)
+    out = np.eye(4, dtype=np.float64)
+    out[:3, :3] = rotation_between((0.0, 0.0, 1.0), direction)
+    out[:3, 3] = np.asarray(point, dtype=np.float64) + start * direction
+    return out
+
+
+def _peg_spots(tm, origin, normal, radius: float) -> list[np.ndarray]:
+    """Up to two points on the cut face with room for a peg of `radius`."""
+    from shapely.geometry import LineString
+    from shapely.ops import unary_union
+
+    section = tm.section(plane_origin=origin, plane_normal=normal)
+    if section is None:
+        return []
+    planar, to_3d = section.to_2D()
+    face = unary_union(list(planar.polygons_full))
+    room = face.buffer(-(radius + PEG_MARGIN))
+    if room.is_empty:
+        return []
+
+    spots_2d = []
+    # Two pegs, spread along the long direction of the face, stop the halves
+    # from turning against each other; fall back to one where only one fits.
+    rect = room.minimum_rotated_rectangle
+    corners = np.asarray(rect.exterior.coords)[:4] if rect.geom_type == "Polygon" else None
+    if corners is not None:
+        edges = [corners[1] - corners[0], corners[2] - corners[1]]
+        long_edge = max(edges, key=np.linalg.norm)
+        centre = np.asarray(room.centroid.coords[0])
+        reach = np.linalg.norm(long_edge)
+        unit = long_edge / max(reach, 1e-9)
+        line = LineString([centre - unit * reach, centre + unit * reach]).intersection(room)
+        segments = [line] if line.geom_type == "LineString" else list(getattr(line, "geoms", []))
+        segments = [s for s in segments if s.geom_type == "LineString" and s.length > 0]
+        if segments:
+            longest = max(segments, key=lambda s: s.length)
+            a = np.asarray(longest.interpolate(0.2, normalized=True).coords[0])
+            b = np.asarray(longest.interpolate(0.8, normalized=True).coords[0])
+            spots_2d = [a, b] if np.linalg.norm(a - b) >= 2.0 * radius + PEG_MARGIN else [(a + b) / 2.0]
+    if not spots_2d:
+        spots_2d = [np.asarray(room.representative_point().coords[0])]
+
+    to_3d = np.asarray(to_3d, dtype=np.float64)
+    return [(to_3d @ np.array([p[0], p[1], 0.0, 1.0]))[:3] for p in spots_2d]
+
+
+def _inside(piece: "m3.Manifold", probe: "m3.Manifold") -> bool:
+    return (piece ^ probe).volume() >= probe.volume() * 0.995
+
+
+def split(
+    shape: Shape,
+    axis: str,
+    position: float,
+    pegs: bool = False,
+    peg_diameter: float = 4.0,
+    clearances: dict | None = None,
+) -> tuple[Shape, Shape]:
+    """Cut a part in two across a flat plane, ready to print.
+
+    `axis` is the direction the cut crosses: "z" cuts flat at height
+    `position`, "x" / "y" cut upright at that X / Y (world mm). With `pegs`,
+    the lower / left / front half gets pegs and the other half gets matching
+    Snug-fit Holes. Both halves come back as groups, laid out side by side
+    on the workplane: each half without pegs rests on its cut face; a half
+    with pegs rests the other way up, pegs pointing up, since pegs facing
+    the bed would not print.
+    """
+    from mesh.ops import lay_flat
+
+    if axis not in AXIS_VECTORS:
+        raise ValueError(f"unknown axis {axis!r}")
+    if shape.is_hole:
+        raise BuildError("Split works on solid parts. This one is a Hole.")
+    normal = np.asarray(AXIS_VECTORS[axis])
+    index = "xyz".index(axis)
+    tm = shape_geometry(shape, clearances)
+    low, high = float(tm.bounds[0][index]), float(tm.bounds[1][index])
+    position = float(position)
+    if not low + 0.01 < position < high - 0.01:
+        raise BuildError(
+            f"That cut misses the part. Pick a position between {low:.1f} and {high:.1f} mm."
+        )
+
+    whole = to_manifold(tm)
+    upper, lower = whole.split_by_plane(tuple(normal), position)
+    if upper.is_empty() or lower.is_empty() or min(upper.volume(), lower.volume()) < 1e-3:
+        raise BuildError("That cut misses the part. Try a position through the middle of it.")
+
+    origin = normal * position
+    peg_children, hole_children = [], []
+    if pegs:
+        radius = float(peg_diameter) / 2.0
+        if radius <= 0.0:
+            raise BuildError("The peg size must be more than 0 mm.")
+        length = float(peg_diameter)
+        c = float((clearances or {}).get(PEG_FIT, 0.0))
+        for spot in _peg_spots(tm, origin, normal, radius):
+            hole_probe = m3.Manifold.cylinder(length + HOLE_EXTRA + c, radius + c, radius + c, 32)
+            hole_probe = hole_probe.transform(_cylinder_along(spot, normal, 0.01)[:3, :])
+            peg_probe = m3.Manifold.cylinder(PEG_EMBED, radius, radius, 32)
+            peg_probe = peg_probe.transform(_cylinder_along(spot, normal, -PEG_EMBED - 0.01)[:3, :])
+            if not (_inside(upper, hole_probe) and _inside(lower, peg_probe)):
+                continue
+            peg = new_primitive("cylinder", name="Peg")
+            peg.params.update(diameter=2.0 * radius, height=PEG_EMBED + length)
+            peg.transform = _cylinder_along(spot, normal, -PEG_EMBED)
+            peg.color = shape.color
+            peg_children.append(peg)
+            hole = _hole_child(
+                "cylinder", {"diameter": 2.0 * radius, "height": length + HOLE_EXTRA + 0.5},
+                _cylinder_along(spot, normal, -0.5), shape.color, "Peg hole",
+            )
+            hole.fit = PEG_FIT
+            hole_children.append(hole)
+        if not peg_children:
+            raise BuildError(
+                "There isn't room for pegs on that cut. Try smaller pegs, a different "
+                "position, or no pegs."
+            )
+
+    first = make_group(
+        [_baked_child(from_manifold(lower), "Part 1", shape.color, False)] + peg_children,
+        name=f"{shape.name} (part 1)", clearances=clearances,
+    )
+    second = make_group(
+        [_baked_child(from_manifold(upper), "Part 2", shape.color, False)] + hole_children,
+        name=f"{shape.name} (part 2)", clearances=clearances,
+    )
+
+    lay_flat(first, -normal if pegs else normal)
+    lay_flat(second, -normal)
+
+    centre = tm.bounds.mean(axis=0)
+    b1, b2 = shape_geometry(first).bounds, shape_geometry(second).bounds
+    w1, w2 = b1[1][0] - b1[0][0], b2[1][0] - b2[0][0]
+    start = centre[0] - (w1 + SPLIT_GAP + w2) / 2.0
+    for part, bounds, x0 in ((first, b1, start), (second, b2, start + w1 + SPLIT_GAP)):
+        part.transform = np.asarray(part.transform, dtype=np.float64).copy()
+        part.transform[0, 3] += x0 - bounds[0][0]
+        part.transform[1, 3] += centre[1] - (bounds[0][1] + bounds[1][1]) / 2.0
+    return first, second
