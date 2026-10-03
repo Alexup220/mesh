@@ -73,6 +73,7 @@ FIELD_LABELS = {
     "color": "Colour",
     "fit": "Fit",
     "radius": "Rounding radius (mm)",
+    "chamfer": "Bottom chamfer (mm)",
     "size": "Size",
     "head": "Screw head",
 }

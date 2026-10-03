@@ -17,7 +17,7 @@ from mesh.blobs import decode_mesh
 PRIMITIVES: dict[str, dict] = {
     "cube": {
         "label": "Box",
-        "defaults": {"width": 20.0, "depth": 20.0, "height": 20.0},
+        "defaults": {"width": 20.0, "depth": 20.0, "height": 20.0, "chamfer": 0.0},
     },
     "sphere": {
         "label": "Sphere",
@@ -25,7 +25,7 @@ PRIMITIVES: dict[str, dict] = {
     },
     "cylinder": {
         "label": "Cylinder",
-        "defaults": {"diameter": 20.0, "height": 20.0},
+        "defaults": {"diameter": 20.0, "height": 20.0, "chamfer": 0.0},
     },
     "cone": {
         "label": "Cone",
@@ -49,11 +49,13 @@ PRIMITIVES: dict[str, dict] = {
     },
     "rounded_box": {
         "label": "Rounded box",
-        "defaults": {"width": 20.0, "depth": 20.0, "height": 20.0, "radius": 3.0},
+        "defaults": {
+            "width": 20.0, "depth": 20.0, "height": 20.0, "radius": 3.0, "chamfer": 0.0,
+        },
     },
     "rounded_cylinder": {
         "label": "Rounded cylinder",
-        "defaults": {"diameter": 20.0, "height": 20.0, "radius": 3.0},
+        "defaults": {"diameter": 20.0, "height": 20.0, "radius": 3.0, "chamfer": 0.0},
     },
     # Hardware holes (see mesh/hardware.py). Added from the "Add hardware
     # hole" menu rather than the shape shelf. "choices" lists the allowed
@@ -212,7 +214,37 @@ def _primitive_mesh(kind: str, p: dict, clearance: float) -> trimesh.Trimesh:
     else:
         raise KeyError(f"unknown primitive: {kind}")
 
-    return _sit_on_plane(tm)
+    tm = _sit_on_plane(tm)
+    if float(p.get("chamfer", 0.0)) > 0.0 and kind in CHAMFER_FOOTPRINTS:
+        tm = _chamfer(kind, p, tm)
+    return tm
+
+
+# Primitives that can have a bottom chamfer, and the shape of their
+# footprint: a rectangle (width x depth) or a circle (diameter).
+CHAMFER_FOOTPRINTS = {
+    "cube": "rect",
+    "rounded_box": "rect",
+    "cylinder": "circle",
+    "rounded_cylinder": "circle",
+}
+
+
+def _chamfer(kind: str, p: dict, tm: trimesh.Trimesh) -> trimesh.Trimesh:
+    """Bevel the bottom edge at 45 degrees, `p["chamfer"]` mm in and up.
+
+    Counters "elephant's foot", the first layer squashing outward. Clamped
+    so it can't eat the whole bottom face or be taller than the part.
+    """
+    height = float(p["height"])
+    if CHAMFER_FOOTPRINTS[kind] == "rect":
+        footprint = (float(p["width"]), float(p["depth"]))
+    else:
+        footprint = (float(p["diameter"]),)
+    chamfer = min(float(p["chamfer"]), height - 1e-3, min(footprint) / 2.0 - 1e-3)
+    if chamfer <= 1e-6:
+        return tm
+    return solids.chamfer_bottom(tm, footprint, chamfer, height, SEGMENTS)
 
 
 def _grow_baked(tm: trimesh.Trimesh, clearance: float) -> trimesh.Trimesh:
