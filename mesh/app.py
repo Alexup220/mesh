@@ -59,6 +59,9 @@ class MeshWindow(QMainWindow):
         # Which click-on-a-part tool is active: None, "lay_flat", "place"
         # or "measure". See start_tool / stop_tool.
         self.tool: str | None = None
+        # Where "Place on face" will put the next added shape:
+        # (world point, face direction), or None until a face is clicked.
+        self._place_target = None
 
         self.gizmo = Gizmo(self.viewport, self)
         self.gizmo.changing.connect(lambda: self.document.snapshot("move"))
@@ -132,6 +135,8 @@ class MeshWindow(QMainWindow):
         self._act(shape, "Fit clearances...", None, self.do_edit_fit_clearances)
         shape.addSeparator()
         self.act_lay_flat = self._act(shape, "&Lay Flat on a Face", "L", self.start_lay_flat)
+        self.act_place = self._act(shape, "&Place Next Shape on a Face", "P", self.toggle_place_on_face)
+        self.act_place.setCheckable(True)
         shape.addSeparator()
         # Explicit Union/Subtract/Intersect: the secondary route to
         # ops.boolean, for a user who wants the operator directly instead
@@ -229,6 +234,11 @@ class MeshWindow(QMainWindow):
         """Add one new shape as one undo step and select it. Every "add"
         (shelf, hardware holes, text) comes through here."""
         self.document.snapshot("add")
+        if self.tool == "place" and self._place_target is not None:
+            point, direction = self._place_target
+            ops.place_on_face(shape, point, direction)
+            # One placement, then back to landing on the workplane.
+            self._clear_tool()
         self.document.scene.add(shape)
         self.document.scene.select([shape.id])
         self.sync()
@@ -382,23 +392,46 @@ class MeshWindow(QMainWindow):
 
     TOOL_PROMPTS = {
         "lay_flat": "Click the face of a part that should rest on the workplane. Esc cancels.",
+        "place": "Click a face of a part. The next shape you add will sit on it. Esc cancels.",
+        "place_ready": "Now add a shape. It will sit on the face you clicked. Esc cancels.",
     }
 
     def start_tool(self, tool: str) -> None:
         """Wait for a click on a part. The gizmo is put away meanwhile so a
         click on the selected part reaches the part, not the drag handles."""
+        self._clear_tool()
         self.tool = tool
         self.viewport.set_pick_mode(tool)
         self.gizmo.attach(None)
         self.statusBar().setStyleSheet("")
         self.statusBar().showMessage(self.TOOL_PROMPTS[tool])
 
+    def _clear_tool(self) -> None:
+        self.tool = None
+        self._place_target = None
+        self.viewport.set_pick_mode(None)
+        self.act_place.blockSignals(True)
+        self.act_place.setChecked(False)
+        self.act_place.blockSignals(False)
+
     def stop_tool(self) -> None:
         if self.tool is None:
             return
-        self.tool = None
-        self.viewport.set_pick_mode(None)
+        self._clear_tool()
         self.sync()
+
+    def toggle_place_on_face(self, checked: bool = True) -> None:
+        if not checked:
+            self.stop_tool()
+            return
+        if not self.document.scene.shapes:
+            self.act_place.setChecked(False)
+            self.statusBar().showMessage("Add a part first, then place shapes on its faces.")
+            return
+        self.start_tool("place")
+        self.act_place.blockSignals(True)
+        self.act_place.setChecked(True)
+        self.act_place.blockSignals(False)
 
     def start_lay_flat(self) -> None:
         if not self.document.scene.shapes:
@@ -409,6 +442,20 @@ class MeshWindow(QMainWindow):
     def _on_surface_picked(self, shape_id: str, face_index: int, point) -> None:
         if self.tool == "lay_flat":
             self._lay_flat_picked(shape_id, face_index)
+        elif self.tool == "place":
+            self._place_picked(shape_id, face_index, point)
+
+    def _place_picked(self, shape_id: str, face_index: int, point) -> None:
+        """Remember the clicked face; nothing in the scene changes until a
+        shape is actually added, so this takes no undo step."""
+        scene = self.document.scene
+        try:
+            direction = ops.face_direction(scene.get(shape_id), face_index, scene.fit_clearances)
+        except (KeyError, IndexError):
+            self.statusBar().showMessage(self.TOOL_PROMPTS["place"])
+            return
+        self._place_target = (np.asarray(point, dtype=np.float64), direction)
+        self.statusBar().showMessage(self.TOOL_PROMPTS["place_ready"])
 
     def _lay_flat_picked(self, shape_id: str, face_index: int) -> None:
         scene = self.document.scene
@@ -421,8 +468,7 @@ class MeshWindow(QMainWindow):
         self.document.snapshot("lay flat")
         ops.lay_flat(shape, direction)
         scene.select([shape.id])
-        self.tool = None
-        self.viewport.set_pick_mode(None)
+        self._clear_tool()
         self.sync()
 
     # --- signals -------------------------------------------------------

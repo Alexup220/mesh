@@ -253,3 +253,30 @@ def lay_flat(shape: Shape, direction) -> None:
     centre = shape_geometry(shape).bounds.mean(axis=0)
     rotate_about(shape, rotation_between(direction, (0.0, 0.0, -1.0)), centre)
     drop_to_plane(shape)
+
+
+def place_on_face(shape: Shape, point, direction) -> None:
+    """Stand a shape on a face of another part.
+
+    The shape is turned so its "up" points along `direction` (the face's
+    outward direction, world space) and moved so the centre of its
+    footprint lands on `point`. A solid sits on the face; a Hole is sunk
+    into it instead, top flush with the face, so a screw hole or engraved
+    text placed this way actually cuts into the part.
+    """
+    point = np.asarray(point, dtype=np.float64)
+    bounds = shape_geometry(shape).bounds
+    anchor = np.array([
+        (bounds[0][0] + bounds[1][0]) / 2.0,
+        (bounds[0][1] + bounds[1][1]) / 2.0,
+        bounds[1][2] if shape.is_hole else bounds[0][2],
+    ])
+    turn = np.eye(4, dtype=np.float64)
+    turn[:3, :3] = rotation_between((0.0, 0.0, 1.0), direction)
+    to_anchor = np.eye(4, dtype=np.float64)
+    to_anchor[:3, 3] = -anchor
+    to_point = np.eye(4, dtype=np.float64)
+    to_point[:3, 3] = point
+    shape.transform = _canonical(
+        to_point @ turn @ to_anchor @ np.asarray(shape.transform, dtype=np.float64)
+    )
