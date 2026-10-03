@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QSpinBox,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -296,17 +297,28 @@ class FormDialog(QDialog):
     is one of these, so the tests can drive them through `values()`.
     """
 
+    NOTE_WIDTH = 380
+
     def __init__(self, parent, title: str, fields, note: str | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
         self.widgets: dict[str, QWidget] = {}
-        layout = QFormLayout(self)
+        outer = QVBoxLayout(self)
         if note:
+            # A word-wrapped label is not reliably given the height its
+            # wrapped lines need (inside a form row it showed half the
+            # note). So it sits above the form, never narrower than
+            # NOTE_WIDTH, and never shorter than its lines at that width.
             self.note = QLabel(note, self)
             self.note.setWordWrap(True)
-            layout.addRow(self.note)
+            self.note.setMinimumWidth(self.NOTE_WIDTH)
+            self.note.ensurePolished()
+            self.note.setMinimumHeight(self.note.heightForWidth(self.NOTE_WIDTH))
+            outer.addWidget(self.note)
         else:
             self.note = None
+        layout = QFormLayout()
+        outer.addLayout(layout)
         for key, label, default, options in fields:
             options = options or {}
             if isinstance(default, bool):
@@ -336,7 +348,7 @@ class FormDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
+        outer.addWidget(buttons)
 
     def values(self) -> dict:
         out = {}
