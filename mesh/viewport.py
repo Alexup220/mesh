@@ -45,6 +45,7 @@ HOLE_OPACITY = 0.35
 BACKGROUND = (0.16, 0.17, 0.20)
 GRID_COLOR = (0.50, 0.53, 0.58)
 MEASURE_COLOR = (1.0, 0.85, 0.2)
+MEASURE_LINE_WIDTH = 4.0  # pixels
 
 VIEW_PRESETS = {
     "home": ((1.0, -1.0, 0.8), (0.0, 0.0, 1.0)),
@@ -132,6 +133,19 @@ class Viewport(QWidget):
         self.renderer = vtkRenderer()
         self.renderer.SetBackground(*BACKGROUND)
         self._widget.GetRenderWindow().AddRenderer(self.renderer)
+
+        # A second layer drawn on top of the parts, sharing their camera,
+        # for the Measure line. Its two points are on a part's surface, so
+        # the line lies on or inside the part: in the parts' own layer it
+        # was hidden inside them or fought with the surface down to a 1 px
+        # sliver.
+        window = self._widget.GetRenderWindow()
+        window.SetNumberOfLayers(2)
+        self.overlay = vtkRenderer()
+        self.overlay.SetLayer(1)
+        self.overlay.InteractiveOff()
+        self.overlay.SetActiveCamera(self.renderer.GetActiveCamera())
+        window.AddRenderer(self.overlay)
 
         self.interactor = self._widget.GetRenderWindow().GetInteractor()
         self.interactor.SetInteractorStyle(vtkInteractorStyleTrackballCamera())
@@ -272,9 +286,13 @@ class Viewport(QWidget):
             actor.SetMapper(mapper)
             prop = actor.GetProperty()
             prop.SetColor(*MEASURE_COLOR)
-            prop.SetLineWidth(3.0)
+            # Drawn as a flat-coloured tube a few pixels wide: plain wide
+            # lines are not supported by every graphics driver.
+            prop.SetLineWidth(MEASURE_LINE_WIDTH)
+            prop.SetRenderLinesAsTubes(True)
+            prop.LightingOff()
             actor.PickableOff()
-            self.renderer.AddActor(actor)
+            self.overlay.AddActor(actor)
             self.measure_actor = actor
         self._measure_source.SetPoint1(*(float(v) for v in a))
         self._measure_source.SetPoint2(*(float(v) for v in b))
@@ -283,7 +301,7 @@ class Viewport(QWidget):
 
     def clear_measure_line(self) -> None:
         if self.measure_actor is not None:
-            self.renderer.RemoveActor(self.measure_actor)
+            self.overlay.RemoveActor(self.measure_actor)
             self.measure_actor = None
             self._render()
 
