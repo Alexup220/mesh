@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 from shapely.geometry import Polygon
 
-from mesh import hardware
+from mesh import hardware, solids
 from mesh.blobs import decode_mesh
 
 PRIMITIVES: dict[str, dict] = {
@@ -46,6 +46,14 @@ PRIMITIVES: dict[str, dict] = {
     "pyramid": {
         "label": "Pyramid",
         "defaults": {"width": 20.0, "depth": 20.0, "height": 20.0},
+    },
+    "rounded_box": {
+        "label": "Rounded box",
+        "defaults": {"width": 20.0, "depth": 20.0, "height": 20.0, "radius": 3.0},
+    },
+    "rounded_cylinder": {
+        "label": "Rounded cylinder",
+        "defaults": {"diameter": 20.0, "height": 20.0, "radius": 3.0},
     },
     # Hardware holes (see mesh/hardware.py). Added from the "Add hardware
     # hole" menu rather than the shape shelf. "choices" lists the allowed
@@ -197,6 +205,10 @@ def _primitive_mesh(kind: str, p: dict, clearance: float) -> trimesh.Trimesh:
             [0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4],
         ])
         tm = trimesh.Trimesh(vertices=vertices, faces=faces)
+    elif kind == "rounded_box":
+        tm = solids.rounded_box(p["width"], p["depth"], p["height"], p["radius"])
+    elif kind == "rounded_cylinder":
+        tm = solids.rounded_cylinder(p["diameter"], p["height"], p["radius"], SEGMENTS)
     else:
         raise KeyError(f"unknown primitive: {kind}")
 

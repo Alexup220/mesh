@@ -72,6 +72,7 @@ FIELD_LABELS = {
     "rz": "Turn (degrees)",
     "color": "Colour",
     "fit": "Fit",
+    "radius": "Rounding radius (mm)",
     "size": "Size",
     "head": "Screw head",
 }
