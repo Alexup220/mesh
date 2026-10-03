@@ -55,6 +55,10 @@ class MeshWindow(QMainWindow):
         self.setCentralWidget(self.viewport)
         self.viewport.set_scene(self.document.scene)
         self.viewport.picked.connect(self._on_picked)
+        self.viewport.surface_picked.connect(self._on_surface_picked)
+        # Which click-on-a-part tool is active: None, "lay_flat", "place"
+        # or "measure". See start_tool / stop_tool.
+        self.tool: str | None = None
 
         self.gizmo = Gizmo(self.viewport, self)
         self.gizmo.changing.connect(lambda: self.document.snapshot("move"))
@@ -115,6 +119,7 @@ class MeshWindow(QMainWindow):
         edit = self.menuBar().addMenu("&Edit")
         self.act_undo = self._act(edit, "&Undo", "Ctrl+Z", self.do_undo)
         self.act_redo = self._act(edit, "&Redo", "Ctrl+Shift+Z", self.do_redo)
+        self.act_stop_tool = self._act(edit, "Stop Current Tool", "Esc", self.stop_tool)
         edit.addSeparator()
         self.act_duplicate = self._act(edit, "&Duplicate", "Ctrl+D", self.do_duplicate)
         self.act_delete = self._act(edit, "De&lete", "Delete", self.do_delete)
@@ -125,6 +130,8 @@ class MeshWindow(QMainWindow):
         self.act_ungroup = self._act(shape, "&Ungroup", "Ctrl+Shift+G", self.do_ungroup)
         self._act(shape, "Make &Hole / Solid", "H", self.do_toggle_hole)
         self._act(shape, "Fit clearances...", None, self.do_edit_fit_clearances)
+        shape.addSeparator()
+        self.act_lay_flat = self._act(shape, "&Lay Flat on a Face", "L", self.start_lay_flat)
         shape.addSeparator()
         # Explicit Union/Subtract/Intersect: the secondary route to
         # ops.boolean, for a user who wants the operator directly instead
@@ -369,6 +376,53 @@ class MeshWindow(QMainWindow):
             return
         self.document.snapshot("align")
         ops.align(chosen, axis, mode)
+        self.sync()
+
+    # --- click-on-a-part tools -----------------------------------------
+
+    TOOL_PROMPTS = {
+        "lay_flat": "Click the face of a part that should rest on the workplane. Esc cancels.",
+    }
+
+    def start_tool(self, tool: str) -> None:
+        """Wait for a click on a part. The gizmo is put away meanwhile so a
+        click on the selected part reaches the part, not the drag handles."""
+        self.tool = tool
+        self.viewport.set_pick_mode(tool)
+        self.gizmo.attach(None)
+        self.statusBar().setStyleSheet("")
+        self.statusBar().showMessage(self.TOOL_PROMPTS[tool])
+
+    def stop_tool(self) -> None:
+        if self.tool is None:
+            return
+        self.tool = None
+        self.viewport.set_pick_mode(None)
+        self.sync()
+
+    def start_lay_flat(self) -> None:
+        if not self.document.scene.shapes:
+            self.statusBar().showMessage("Add a part first, then lay it flat.")
+            return
+        self.start_tool("lay_flat")
+
+    def _on_surface_picked(self, shape_id: str, face_index: int, point) -> None:
+        if self.tool == "lay_flat":
+            self._lay_flat_picked(shape_id, face_index)
+
+    def _lay_flat_picked(self, shape_id: str, face_index: int) -> None:
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+            direction = ops.face_direction(shape, face_index, scene.fit_clearances)
+        except (KeyError, IndexError):
+            self.statusBar().showMessage("Click on a face of a part. Esc cancels.")
+            return
+        self.document.snapshot("lay flat")
+        ops.lay_flat(shape, direction)
+        scene.select([shape.id])
+        self.tool = None
+        self.viewport.set_pick_mode(None)
         self.sync()
 
     # --- signals -------------------------------------------------------

@@ -82,3 +82,10 @@ def test_hardware_names_are_plain_language():
         for label, primitive, params in items:
             assert_plain(label)
             assert_plain(hardware.preset_name(primitive, {**{"head": "plain"}, **params}))
+
+
+def test_tool_prompts_are_plain_language():
+    from mesh.app import MeshWindow
+
+    for text in MeshWindow.TOOL_PROMPTS.values():
+        assert_plain(text)

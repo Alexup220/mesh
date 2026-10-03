@@ -32,6 +32,7 @@ from vtkmodules.vtkFiltersSources import vtkPlaneSource
 from vtkmodules.vtkInteractionStyle import vtkInteractorStyleTrackballCamera
 from vtkmodules.vtkRenderingCore import (
     vtkActor,
+    vtkCellPicker,
     vtkPolyDataMapper,
     vtkPropPicker,
     vtkRenderer,
@@ -90,6 +91,10 @@ def _headless() -> bool:
 
 class Viewport(QWidget):
     picked = Signal(str, bool)
+    # (shape id or "", triangle index or -1, world point (x, y, z)) -- sent
+    # instead of `picked` while a surface tool (Lay flat, Place on face,
+    # Measure) is waiting for a click on a part.
+    surface_picked = Signal(str, int, object)
 
     def _render(self) -> None:
         if _headless():
@@ -132,6 +137,11 @@ class Viewport(QWidget):
         self.interactor.AddObserver("LeftButtonPressEvent", self._on_click)
 
         self._picker = vtkPropPicker()
+        self._cell_picker = vtkCellPicker()
+        self._cell_picker.SetTolerance(0.0005)
+        # None for normal click-to-select; any other value means the next
+        # click on a part is reported through surface_picked instead.
+        self.pick_mode: str | None = None
         self._add_grid()
         # Position the camera now, but do NOT call Render() here: the
         # widget's native window is not mapped yet (this runs during
@@ -222,8 +232,14 @@ class Viewport(QWidget):
 
         self._render()
 
+    def set_pick_mode(self, mode: str | None) -> None:
+        self.pick_mode = mode
+
     def _on_click(self, interactor, _event) -> None:
         x, y = interactor.GetEventPosition()
+        if self.pick_mode is not None:
+            self._on_surface_click(x, y)
+            return
         self._picker.Pick(x, y, 0, self.renderer)
         hit = self._picker.GetActor()
         additive = bool(interactor.GetShiftKey())
@@ -232,6 +248,16 @@ class Viewport(QWidget):
                 self.picked.emit(shape_id, additive)
                 return
         self.picked.emit("", additive)
+
+    def _on_surface_click(self, x: int, y: int) -> None:
+        self._cell_picker.Pick(x, y, 0, self.renderer)
+        hit = self._cell_picker.GetActor()
+        point = tuple(float(v) for v in self._cell_picker.GetPickPosition())
+        for shape_id, actor in self._actors.items():
+            if actor is hit:
+                self.surface_picked.emit(shape_id, int(self._cell_picker.GetCellId()), point)
+                return
+        self.surface_picked.emit("", -1, point)
 
     def view_preset(self, name: str) -> None:
         if name not in VIEW_PRESETS:

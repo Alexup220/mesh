@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 
 from mesh.blobs import encode_mesh
-from mesh.scene import Shape
+from mesh.scene import Shape, euler_from_transform, transform_with_euler
 from mesh.shapes import shape_geometry
 
 ENGINE = "manifold"
@@ -183,3 +183,73 @@ def drop_to_plane(shape: Shape) -> None:
     low_z = shape_geometry(shape).bounds[0][2]
     shape.transform = np.asarray(shape.transform, dtype=np.float64).copy()
     shape.transform[2, 3] -= low_z
+
+
+def rotation_between(a, b) -> np.ndarray:
+    """The 3x3 rotation that turns direction `a` onto direction `b`.
+
+    Always a proper rotation (no mirroring). Turning a direction onto its
+    exact opposite picks a half turn about an axis perpendicular to it.
+    """
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    na, nb = np.linalg.norm(a), np.linalg.norm(b)
+    if na < 1e-12 or nb < 1e-12:
+        raise ValueError("a direction needs a length")
+    a, b = a / na, b / nb
+    axis = np.cross(a, b)
+    s = np.linalg.norm(axis)
+    c = float(np.dot(a, b))
+    if s < 1e-9:
+        if c > 0.0:
+            return np.eye(3)
+        # Opposite: half turn about any axis perpendicular to a.
+        helper = np.array([1.0, 0.0, 0.0]) if abs(a[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        axis = np.cross(a, helper)
+        axis /= np.linalg.norm(axis)
+        return 2.0 * np.outer(axis, axis) - np.eye(3)
+    axis /= s
+    k = np.array([[0.0, -axis[2], axis[1]], [axis[2], 0.0, -axis[0]], [-axis[1], axis[0], 0.0]])
+    return np.eye(3) + s * k + (1.0 - c) * (k @ k)
+
+
+def _canonical(transform: np.ndarray) -> np.ndarray:
+    """Re-express a transform through the euler helpers, so its rotation is
+    exactly what the inspector shows and edits (see mesh.scene)."""
+    rx, ry, rz = euler_from_transform(transform)
+    return transform_with_euler(transform, rx, ry, rz)
+
+
+def rotate_about(shape: Shape, rotation: np.ndarray, centre) -> None:
+    """Turn a shape in place about a world point. Rotation lives in the
+    transform, never in params."""
+    centre = np.asarray(centre, dtype=np.float64)
+    turn = np.eye(4, dtype=np.float64)
+    turn[:3, :3] = rotation
+    to_origin = np.eye(4, dtype=np.float64)
+    to_origin[:3, 3] = -centre
+    back = np.eye(4, dtype=np.float64)
+    back[:3, 3] = centre
+    shape.transform = _canonical(back @ turn @ to_origin @ np.asarray(shape.transform, dtype=np.float64))
+
+
+def face_direction(shape: Shape, face_index: int, clearances: dict | None = None) -> np.ndarray:
+    """Which way a face of the shape points, in world space.
+
+    `face_index` counts triangles in the same order the viewport draws them
+    (the viewport builds its picture from shape_geometry with the same
+    clearances), so a picked triangle maps straight back to a direction.
+    """
+    tm = shape_geometry(shape, clearances)
+    if not 0 <= face_index < len(tm.faces):
+        raise IndexError(face_index)
+    return np.asarray(tm.face_normals[face_index], dtype=np.float64)
+
+
+def lay_flat(shape: Shape, direction) -> None:
+    """Turn the shape so the face pointing along `direction` (world space)
+    rests on the workplane, then sit it on the plane. X/Y stay where the
+    shape's centre was."""
+    centre = shape_geometry(shape).bounds.mean(axis=0)
+    rotate_about(shape, rotation_between(direction, (0.0, 0.0, -1.0)), centre)
+    drop_to_plane(shape)
