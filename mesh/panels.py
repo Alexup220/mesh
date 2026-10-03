@@ -170,7 +170,7 @@ class Inspector(QWidget):
         layout.addRow(QLabel(FIELD_LABELS["fit"]), self.fit_box)
         self._fit_row = layout.rowCount() - 1
 
-        self.setEnabled(False)
+        self.show_shape(None)
 
     def _emit(self, field: str, value) -> None:
         if self._loading or self._shape is None:
@@ -240,6 +240,12 @@ class Inspector(QWidget):
         self._shape = shape
         self.setEnabled(shape is not None)
         if shape is None:
+            # Nothing selected: show only the rows every shape has. Listing
+            # every possible size field made the panel wide enough to
+            # squeeze the 3D view.
+            for field in SIZE_FIELDS + CHOICE_FIELDS + TEXT_FIELDS:
+                self._layout.setRowVisible(self._rows[field], False)
+            self._layout.setRowVisible(self._fit_row, False)
             return
 
         self._loading = True

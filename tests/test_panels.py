@@ -183,3 +183,21 @@ def test_cancelling_the_color_dialog_emits_nothing(inspector, monkeypatch):
     inspector._pick_color()
 
     assert seen == []
+
+
+def test_inspector_with_nothing_selected_shows_no_size_rows(inspector):
+    # At startup the panel listed every possible size field (about 20 rows,
+    # all disabled), which made the dock wide enough to squeeze the 3D view.
+    assert inspector.visible_param_fields() == set()
+    assert inspector._layout.isRowVisible(inspector._fit_row) is False
+
+
+def test_inspector_hides_size_rows_again_when_the_selection_clears(inspector):
+    shape = new_primitive("text")
+    shape.is_hole = True
+    inspector.show_shape(shape)
+    assert inspector.visible_param_fields()
+    inspector.show_shape(None)
+    assert inspector.visible_param_fields() == set()
+    assert inspector._layout.isRowVisible(inspector._fit_row) is False
+    assert inspector._layout.isRowVisible(inspector._rows["x"]) is True
