@@ -22,6 +22,33 @@ class NothingToCombineError(Exception):
     """Raised when a combine has no solid shapes to build from."""
 
 
+class NothingLeftError(NothingToCombineError):
+    """Raised when a combine would leave no solid at all: the holes cover
+    every solid part, or a cut or overlap removes everything."""
+
+
+EVERYTHING_CUT_AWAY = (
+    "The holes cut away all of the solid parts, so nothing would be left. "
+    "Move a hole or make it smaller."
+)
+
+NOTHING_LEFT = {
+    "difference": (
+        "The other shapes cover all of the first one, so cutting them out "
+        "would leave nothing. Move them or make them smaller."
+    ),
+    "intersection": "These shapes do not overlap, so there is nothing to keep.",
+}
+
+
+def _something_left(result: trimesh.Trimesh, message: str) -> trimesh.Trimesh:
+    # manifold3d returns an empty result (no faces, no bounds) rather than
+    # failing; anything downstream that measures it would crash.
+    if result.is_empty or len(result.faces) == 0:
+        raise NothingLeftError(message)
+    return result
+
+
 def _union(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
     if len(meshes) == 1:
         return meshes[0]
@@ -45,7 +72,7 @@ def evaluate(shapes: list[Shape], clearances: dict | None = None) -> trimesh.Tri
     result = _union(solids)
     if holes:
         result = trimesh.boolean.difference([result, _union(holes)], engine=ENGINE)
-    return result
+    return _something_left(result, EVERYTHING_CUT_AWAY)
 
 
 def boolean(shapes: list[Shape], op: str, clearances: dict | None = None) -> trimesh.Trimesh:
@@ -57,7 +84,8 @@ def boolean(shapes: list[Shape], op: str, clearances: dict | None = None) -> tri
         raise NothingToCombineError("Select at least one shape.")
     if len(meshes) == 1:
         return meshes[0]
-    return getattr(trimesh.boolean, op)(meshes, engine=ENGINE)
+    result = getattr(trimesh.boolean, op)(meshes, engine=ENGINE)
+    return _something_left(result, NOTHING_LEFT.get(op, EVERYTHING_CUT_AWAY))
 
 
 # Plain-language labels for the explicit menu items. Solid/Hole + Group

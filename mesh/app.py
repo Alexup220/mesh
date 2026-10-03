@@ -425,7 +425,7 @@ class MeshWindow(QMainWindow):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             return build()
-        except builders.BuildError as exc:
+        except (builders.BuildError, ops.NothingToCombineError) as exc:
             error = str(exc)
         finally:
             QApplication.restoreOverrideCursor()

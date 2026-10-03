@@ -6,7 +6,7 @@ and deliberately avoid modeling jargon.
 
 from dataclasses import dataclass
 
-from mesh.ops import NothingToCombineError, evaluate
+from mesh.ops import NothingLeftError, NothingToCombineError, evaluate
 from mesh.scene import Scene
 
 
@@ -51,14 +51,18 @@ def _check(scene: Scene) -> Report:
     visible = [s for s in scene.shapes if s.visible]
     try:
         result = evaluate(visible, clearances=scene.fit_clearances)
-    except NothingToCombineError:
+    except NothingToCombineError as exc:
+        if isinstance(exc, NothingLeftError):
+            message = "The holes cut away everything — nothing is left to print."
+        else:
+            message = "Nothing to print yet — add a shape."
         return Report(
             empty=True,
             watertight=True,
             size_mm=(0.0, 0.0, 0.0),
             volume_mm3=0.0,
             fits=True,
-            message="Nothing to print yet — add a shape.",
+            message=message,
         )
 
     size = tuple(float(v) for v in (result.bounds[1] - result.bounds[0]))
