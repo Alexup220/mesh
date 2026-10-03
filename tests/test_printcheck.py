@@ -83,7 +83,7 @@ def test_message_uses_no_jargon(monkeypatch, build_scene, expected_snippet):
     scene = build_scene()
 
     if expected_snippet == "gaps":
-        monkeypatch.setattr("mesh.printcheck.evaluate", lambda shapes: _open_sheet())
+        monkeypatch.setattr("mesh.printcheck.evaluate", lambda shapes, **_kw: _open_sheet())
 
     report = check(scene)
     assert expected_snippet in report.message.lower()

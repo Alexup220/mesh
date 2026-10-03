@@ -50,7 +50,7 @@ def check(scene: Scene, revision: object = None) -> Report:
 def _check(scene: Scene) -> Report:
     visible = [s for s in scene.shapes if s.visible]
     try:
-        result = evaluate(visible)
+        result = evaluate(visible, clearances=scene.fit_clearances)
     except NothingToCombineError:
         return Report(
             empty=True,

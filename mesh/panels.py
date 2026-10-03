@@ -10,15 +10,20 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
+    QSpinBox,
     QWidget,
 )
 
-from mesh.scene import DEFAULT_COLOR, Shape, euler_from_transform
+from mesh.scene import DEFAULT_COLOR, DEFAULT_FIT, FITS, Shape, euler_from_transform
 from mesh.shapes import PRIMITIVES
 
 POSITION_FIELDS = ("x", "y", "z")
@@ -44,6 +49,7 @@ FIELD_LABELS = {
     "ry": "Tilt Y (degrees)",
     "rz": "Turn (degrees)",
     "color": "Colour",
+    "fit": "Fit",
 }
 
 
@@ -102,6 +108,17 @@ class Inspector(QWidget):
         self.hole_box.toggled.connect(lambda value: self._emit("is_hole", value))
         layout.addRow(self.hole_box)
 
+        # How snugly the hole fits what goes into it. Only meaningful for a
+        # Hole, so the row is hidden for solids (see show_shape).
+        self.fit_box = QComboBox(self)
+        for key, label in FITS.items():
+            self.fit_box.addItem(label, key)
+        self.fit_box.currentIndexChanged.connect(
+            lambda _i: self._emit("fit", self.fit_box.currentData())
+        )
+        layout.addRow(QLabel(FIELD_LABELS["fit"]), self.fit_box)
+        self._fit_row = layout.rowCount() - 1
+
         self.setEnabled(False)
 
     def _emit(self, field: str, value) -> None:
@@ -129,6 +146,8 @@ class Inspector(QWidget):
             return self.hole_box.isChecked()
         if field == "color":
             return self.color_button.text()
+        if field == "fit":
+            return self.fit_box.currentData()
         return self.fields[field].value()
 
     def _active_size_fields(self, shape: Shape) -> tuple[str, ...]:
@@ -169,6 +188,121 @@ class Inspector(QWidget):
                 self.fields[field].setValue(float(value))
 
             self.hole_box.setChecked(bool(shape.is_hole))
+            self._layout.setRowVisible(self._fit_row, bool(shape.is_hole))
+            index = self.fit_box.findData(getattr(shape, "fit", DEFAULT_FIT))
+            self.fit_box.setCurrentIndex(max(index, 0))
             self._set_color_swatch(shape.color or DEFAULT_COLOR)
         finally:
             self._loading = False
+
+
+class FormDialog(QDialog):
+    """A small form of named fields with OK / Cancel.
+
+    `fields` is a list of (key, label, default, options) tuples:
+    - a float default makes a millimetre spin box; options may hold
+      "min", "max", "decimals", "step";
+    - an int default makes a whole-number spin box ("min", "max");
+    - a bool default makes a check box;
+    - a str default with options["choices"] = [(value, label), ...] makes a
+      drop-down; any other str default makes a text box.
+    Every tool dialog (fits, hollow out, split, patterns, box with lid, text)
+    is one of these, so the tests can drive them through `values()`.
+    """
+
+    def __init__(self, parent, title: str, fields, note: str | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.widgets: dict[str, QWidget] = {}
+        layout = QFormLayout(self)
+        if note:
+            self.note = QLabel(note, self)
+            self.note.setWordWrap(True)
+            layout.addRow(self.note)
+        else:
+            self.note = None
+        for key, label, default, options in fields:
+            options = options or {}
+            if isinstance(default, bool):
+                widget = QCheckBox(label, self)
+                widget.setChecked(default)
+                layout.addRow(widget)
+            else:
+                if isinstance(default, int):
+                    widget = QSpinBox(self)
+                    widget.setRange(int(options.get("min", 0)), int(options.get("max", 1000)))
+                    widget.setValue(default)
+                elif isinstance(default, float):
+                    widget = QDoubleSpinBox(self)
+                    widget.setDecimals(int(options.get("decimals", 2)))
+                    widget.setSingleStep(float(options.get("step", 1.0)))
+                    widget.setRange(float(options.get("min", 0.0)), float(options.get("max", 10000.0)))
+                    widget.setValue(default)
+                elif "choices" in options:
+                    widget = QComboBox(self)
+                    for value, text in options["choices"]:
+                        widget.addItem(text, value)
+                    widget.setCurrentIndex(max(widget.findData(default), 0))
+                else:
+                    widget = QLineEdit(default, self)
+                layout.addRow(QLabel(label, self), widget)
+            self.widgets[key] = widget
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def values(self) -> dict:
+        out = {}
+        for key, widget in self.widgets.items():
+            if isinstance(widget, QCheckBox):
+                out[key] = widget.isChecked()
+            elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                out[key] = widget.value()
+            elif isinstance(widget, QComboBox):
+                out[key] = widget.currentData()
+            else:
+                out[key] = widget.text()
+        return out
+
+    def labels(self) -> list[str]:
+        """Every piece of text this dialog shows (for the plain-language tests)."""
+        texts = [self.windowTitle()]
+        if self.note is not None:
+            texts.append(self.note.text())
+        for label in self.findChildren(QLabel):
+            texts.append(label.text())
+        for widget in self.widgets.values():
+            if isinstance(widget, QCheckBox):
+                texts.append(widget.text())
+            elif isinstance(widget, QComboBox):
+                texts.extend(widget.itemText(i) for i in range(widget.count()))
+        return texts
+
+
+def run_form(parent, title: str, fields, note: str | None = None) -> dict | None:
+    """Show a FormDialog; return its values, or None if cancelled."""
+    dialog = FormDialog(parent, title, fields, note)
+    try:
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return dialog.values()
+    finally:
+        dialog.deleteLater()
+
+
+def fit_clearance_fields(current: dict):
+    return [
+        (key, f"{FITS[key]} clearance per side (mm)", float(current[key]),
+         {"min": 0.0, "max": 2.0, "decimals": 2, "step": 0.05})
+        for key in current
+    ]
+
+
+def ask_fit_clearances(parent, current: dict) -> dict | None:
+    return run_form(
+        parent,
+        "Fit clearances",
+        fit_clearance_fields(current),
+        note="Extra room added on every side of a Hole, so parts slide in after printing.",
+    )

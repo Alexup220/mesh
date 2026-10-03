@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QTimer, Qt
 
-from mesh import ops
+from mesh import ops, panels
 from mesh.gizmo import Gizmo
 from mesh.io_formats import (
     EXPORT_EXTS,
@@ -37,6 +37,9 @@ from mesh.printcheck import check
 from mesh.scene import Document, new_primitive, transform_with_euler
 from mesh.shapes import shape_geometry
 from mesh.viewport import Viewport
+
+
+MAX_FIT_CLEARANCE = 2.0
 
 
 class MeshWindow(QMainWindow):
@@ -121,6 +124,7 @@ class MeshWindow(QMainWindow):
         self.act_group = self._act(shape, "&Group", "Ctrl+G", self.do_group)
         self.act_ungroup = self._act(shape, "&Ungroup", "Ctrl+Shift+G", self.do_ungroup)
         self._act(shape, "Make &Hole / Solid", "H", self.do_toggle_hole)
+        self._act(shape, "Fit clearances...", None, self.do_edit_fit_clearances)
         shape.addSeparator()
         # Explicit Union/Subtract/Intersect: the secondary route to
         # ops.boolean, for a user who wants the operator directly instead
@@ -255,7 +259,7 @@ class MeshWindow(QMainWindow):
         if len(chosen) < 1:
             return
         try:
-            group = ops.make_group(chosen)
+            group = ops.make_group(chosen, clearances=self.document.scene.fit_clearances)
         except ops.NothingToCombineError as exc:
             self._warn("Cannot group", str(exc))
             return
@@ -274,7 +278,9 @@ class MeshWindow(QMainWindow):
         if len(chosen) < 1:
             return
         try:
-            group = ops.make_boolean_group(chosen, op)
+            group = ops.make_boolean_group(
+                chosen, op, clearances=self.document.scene.fit_clearances
+            )
         except ops.NothingToCombineError as exc:
             self._warn("Cannot combine", str(exc))
             return
@@ -298,6 +304,35 @@ class MeshWindow(QMainWindow):
             restored.extend(children)
         self.document.scene.select([s.id for s in restored])
         self.sync()
+
+    def set_fit_clearances(self, values: dict) -> bool:
+        """Change how much room Press / Snug / Loose fits add (mm per side).
+
+        One undo step. Returns False (and changes nothing, adds no undo
+        step) if a value is not a sensible clearance.
+        """
+        current = self.document.scene.fit_clearances
+        cleaned = {}
+        for key in current:
+            value = float(values.get(key, current[key]))
+            if not 0.0 <= value <= MAX_FIT_CLEARANCE:
+                self._warn(
+                    "Cannot change fits",
+                    f"A fit's clearance must be between 0 and {MAX_FIT_CLEARANCE:g} mm.",
+                )
+                return False
+            cleaned[key] = value
+        if cleaned == current:
+            return False
+        self.document.snapshot("fit clearances")
+        self.document.scene.fit_clearances = cleaned
+        self.sync()
+        return True
+
+    def do_edit_fit_clearances(self) -> None:
+        values = panels.ask_fit_clearances(self, self.document.scene.fit_clearances)
+        if values is not None:
+            self.set_fit_clearances(values)
 
     def do_mirror(self, axis: str) -> None:
         chosen = self.document.scene.selected()
@@ -344,6 +379,8 @@ class MeshWindow(QMainWindow):
 
         if field == "is_hole":
             shape.is_hole = bool(value)
+        elif field == "fit":
+            shape.fit = str(value)
         elif field == "color":
             shape.color = str(value)
         elif field in ("x", "y", "z"):

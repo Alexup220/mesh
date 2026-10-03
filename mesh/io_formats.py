@@ -121,7 +121,7 @@ def export_scene(scene: Scene, path) -> None:
 
     visible = [s for s in scene.shapes if s.visible]
     try:
-        result = evaluate(visible)
+        result = evaluate(visible, clearances=scene.fit_clearances)
     except NothingToCombineError as exc:
         raise ProjectError("There is nothing to save yet — add a shape first.") from exc
 

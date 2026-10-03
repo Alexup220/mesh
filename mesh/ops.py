@@ -28,10 +28,14 @@ def _union(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
     return trimesh.boolean.union(meshes, engine=ENGINE)
 
 
-def evaluate(shapes: list[Shape]) -> trimesh.Trimesh:
-    """Union every solid, then subtract every hole."""
-    solids = [shape_geometry(s) for s in shapes if not s.is_hole]
-    holes = [shape_geometry(s) for s in shapes if s.is_hole]
+def evaluate(shapes: list[Shape], clearances: dict | None = None) -> trimesh.Trimesh:
+    """Union every solid, then subtract every hole.
+
+    `clearances` is the scene's fit_clearances: Holes with a fit are cut at
+    their fitted size (see mesh.shapes.hole_clearance).
+    """
+    solids = [shape_geometry(s, clearances) for s in shapes if not s.is_hole]
+    holes = [shape_geometry(s, clearances) for s in shapes if s.is_hole]
 
     if not solids:
         raise NothingToCombineError(
@@ -44,11 +48,11 @@ def evaluate(shapes: list[Shape]) -> trimesh.Trimesh:
     return result
 
 
-def boolean(shapes: list[Shape], op: str) -> trimesh.Trimesh:
+def boolean(shapes: list[Shape], op: str, clearances: dict | None = None) -> trimesh.Trimesh:
     """Explicit boolean, ignoring the is_hole flag."""
     if op not in OPS:
         raise ValueError(f"unknown operation {op!r}; expected one of {OPS}")
-    meshes = [shape_geometry(s) for s in shapes]
+    meshes = [shape_geometry(s, clearances) for s in shapes]
     if not meshes:
         raise NothingToCombineError("Select at least one shape.")
     if len(meshes) == 1:
@@ -62,11 +66,13 @@ def boolean(shapes: list[Shape], op: str) -> trimesh.Trimesh:
 BOOLEAN_LABELS = {"union": "Join", "difference": "Cut Out", "intersection": "Keep Overlap"}
 
 
-def make_boolean_group(shapes: list[Shape], op: str, name: str | None = None) -> Shape:
+def make_boolean_group(
+    shapes: list[Shape], op: str, name: str | None = None, clearances: dict | None = None
+) -> Shape:
     """Explicit Union/Subtract/Intersect, wrapped as a group shape exactly
     like make_group() -- same reversible-by-ungroup shape, just built from
     `boolean()` (which ignores is_hole) instead of `evaluate()`."""
-    result = boolean(shapes, op)
+    result = boolean(shapes, op, clearances)
     return Shape(
         id=uuid.uuid4().hex,
         name=name or BOOLEAN_LABELS.get(op, op),
@@ -80,9 +86,15 @@ def make_boolean_group(shapes: list[Shape], op: str, name: str | None = None) ->
     )
 
 
-def make_group(shapes: list[Shape], name: str = "Group") -> Shape:
-    """Combine shapes into one group shape, retaining children for ungroup."""
-    result = evaluate(shapes)
+def make_group(
+    shapes: list[Shape], name: str = "Group", clearances: dict | None = None
+) -> Shape:
+    """Combine shapes into one group shape, retaining children for ungroup.
+
+    The stored result is evaluated once, here, with the given fit
+    clearances; the children keep their fit so Ungroup restores it.
+    """
+    result = evaluate(shapes, clearances)
     return Shape(
         id=uuid.uuid4().hex,
         name=name,

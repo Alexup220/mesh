@@ -38,7 +38,7 @@ from vtkmodules.vtkRenderingCore import (
 )
 
 from mesh.scene import Scene
-from mesh.shapes import shape_geometry
+from mesh.shapes import hole_clearance, shape_geometry
 
 HOLE_OPACITY = 0.35
 BACKGROUND = (0.16, 0.17, 0.20)
@@ -179,7 +179,11 @@ class Viewport(QWidget):
         triangles: its kind, its params, and its transform. Two calls with
         an equal key are guaranteed to produce the same polydata."""
         transform = np.asarray(shape.transform, dtype=np.float64)
-        return (shape.kind, repr(shape.params), transform.tobytes())
+        clearance = hole_clearance(shape, self._clearances())
+        return (shape.kind, repr(shape.params), transform.tobytes(), clearance)
+
+    def _clearances(self) -> dict | None:
+        return getattr(self._scene, "fit_clearances", None)
 
     def refresh(self) -> None:
         if self._scene is None:
@@ -204,7 +208,9 @@ class Viewport(QWidget):
 
             key = self._geometry_key(shape)
             if self._geometry_keys.get(shape.id) != key:
-                actor.GetMapper().SetInputData(_to_polydata(shape_geometry(shape)))
+                actor.GetMapper().SetInputData(
+                    _to_polydata(shape_geometry(shape, self._clearances()))
+                )
                 self._geometry_keys[shape.id] = key
 
             prop = actor.GetProperty()
