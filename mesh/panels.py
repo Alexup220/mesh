@@ -440,3 +440,40 @@ def split_note(size: tuple[float, float, float]) -> str:
 
 def ask_split(parent, size: tuple[float, float, float]) -> dict | None:
     return run_form(parent, "Split part", split_fields(size), note=split_note(size))
+
+
+ROW_DIRECTIONS = [("x", "Left to right (X)"), ("y", "Front to back (Y)")]
+
+
+def repeat_row_fields():
+    return [
+        ("count", "How many in total", 3, {"min": 2, "max": 500}),
+        ("spacing", "Spacing, centre to centre (mm)", 25.0, {"min": 0.1}),
+        ("axis", "Direction", "x", {"choices": ROW_DIRECTIONS}),
+    ]
+
+
+def ask_repeat_row(parent) -> dict | None:
+    return run_form(parent, "Repeat in a row", repeat_row_fields())
+
+
+def repeat_circle_fields(part_centre: tuple[float, float], radius: float = 30.0):
+    # By default the circle's centre sits `radius` to the left of the part,
+    # so the part is already on the circle and stays put.
+    return [
+        ("count", "How many in total", 6, {"min": 2, "max": 500}),
+        ("radius", "Radius (mm)", radius, {"min": 0.1}),
+        ("angle", "Angle to fill (degrees, 360 for a full circle)", 360.0,
+         {"min": 1.0, "max": 360.0}),
+        ("centre_x", "Circle centre, left / right (mm)", round(part_centre[0] - radius, 2),
+         {"min": -10000.0}),
+        ("centre_y", "Circle centre, forward / back (mm)", round(part_centre[1], 2),
+         {"min": -10000.0}),
+    ]
+
+
+def ask_repeat_circle(parent, part_centre: tuple[float, float]) -> dict | None:
+    return run_form(
+        parent, "Repeat in a circle", repeat_circle_fields(part_centre),
+        note="Copies go round a vertical line through the circle centre.",
+    )

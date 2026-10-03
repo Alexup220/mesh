@@ -16,7 +16,8 @@ and no slicer-style print analysis is added.
     watertight is built through manifold3d.
   - `mesh/hardware.py`: the one hardware dimension table, with sources.
   - `mesh/text.py`: text outlines from a bundled font, extruded.
-  - `mesh/builders.py`: multi-part generators (hollow out, split, box with lid).
+  - `mesh/builders.py`: multi-part generators (hollow out, split, patterns,
+    box with lid).
 - **Non-numeric primitive params.** `PRIMITIVES[name]` may carry a `choices`
   map (`{param: [(value, label), ...]}`); the Inspector builds a combo box for
   those, a text box for any other string default, and spin boxes for numbers.
@@ -143,8 +144,9 @@ and no slicer-style print analysis is added.
 
 ## 9. Patterns
 
-- **Logic (core):** `ops.repeat_row(shape, count, spacing, axis)` and
-  `ops.repeat_circle(shape, count, radius, centre, angle)` return new copies
+- **Logic (core):** `builders.repeat_row(shape, count, spacing, axis)` and
+  `builders.repeat_circle(shape, count, radius, centre, angle)` (in builders,
+  next to the other tools that refuse with a plain `BuildError`) return new copies
   (deep copies, so `is_hole` and `fit` carry over). The circle turns each copy
   about a vertical axis through the centre; the original is moved onto the
   circle at its current angle. `count` includes the original.

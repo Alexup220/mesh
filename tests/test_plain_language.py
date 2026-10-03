@@ -127,6 +127,11 @@ def _refusals():
         lambda: builders.split(box(), "z", 50.0),
         lambda: builders.split(box(), "z", 10.0, pegs=True, peg_diameter=0.0),
         lambda: builders.split(box(), "z", 10.0, pegs=True, peg_diameter=19.0),
+        lambda: builders.repeat_row(box(), 1, 10.0),
+        lambda: builders.repeat_row(box(), 10_000, 10.0),
+        lambda: builders.repeat_row(box(), 3, 0.0),
+        lambda: builders.repeat_circle(box(), 3, 0.0, (0, 0)),
+        lambda: builders.repeat_circle(box(), 3, 10.0, (0, 0), 0.0),
     ]
 
 
@@ -146,3 +151,22 @@ def test_split_dialog_is_plain_language(qapp, close_qt_widget):
     dialog = close_qt_widget(FormDialog(None, "Split part", split_fields(size), note=split_note(size)))
     for text in dialog.labels():
         assert_plain(text)
+
+
+def _dialogs():
+    from mesh import panels
+
+    return [
+        ("Repeat in a row", panels.repeat_row_fields(), None),
+        ("Repeat in a circle", panels.repeat_circle_fields((0.0, 0.0)),
+         "Copies go round a vertical line through the circle centre."),
+    ]
+
+
+def test_pattern_dialogs_are_plain_language(qapp, close_qt_widget):
+    from mesh.panels import FormDialog
+
+    for title, fields, note in _dialogs():
+        dialog = close_qt_widget(FormDialog(None, title, fields, note=note))
+        for text in dialog.labels():
+            assert_plain(text)

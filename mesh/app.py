@@ -141,6 +141,9 @@ class MeshWindow(QMainWindow):
         self._act(shape, "Hollow &Out...", None, self.do_hollow)
         self._act(shape, "S&plit Part...", None, self.do_split)
         shape.addSeparator()
+        self._act(shape, "Repeat in a &Row...", None, self.do_repeat_row)
+        self._act(shape, "Repeat in a &Circle...", None, self.do_repeat_circle)
+        shape.addSeparator()
         # Explicit Union/Subtract/Intersect: the secondary route to
         # ops.boolean, for a user who wants the operator directly instead
         # of the Solid/Hole flag that Group teaches as the primary path.
@@ -472,6 +475,61 @@ class MeshWindow(QMainWindow):
         if values is not None:
             self.split_selected(
                 values["axis"], values["distance"], values["pegs"], values["peg_diameter"]
+            )
+
+    def _add_copies(self, label: str, shape, copies, new_transform=None) -> None:
+        """One undo step for a whole pattern."""
+        self.document.snapshot(label)
+        if new_transform is not None:
+            shape.transform = new_transform
+        for clone in copies:
+            self.document.scene.add(clone)
+        self.document.scene.select([shape.id] + [c.id for c in copies])
+        self.sync()
+
+    def repeat_row_selected(self, count: int, spacing: float, axis: str = "x") -> bool:
+        shape = self._one_selected("repeat")
+        if shape is None:
+            return False
+        copies = self._attempt(
+            "Cannot repeat", lambda: builders.repeat_row(shape, count, spacing, axis)
+        )
+        if copies is None:
+            return False
+        self._add_copies("repeat in a row", shape, copies)
+        return True
+
+    def repeat_circle_selected(self, count: int, radius: float, centre, angle: float = 360.0) -> bool:
+        shape = self._one_selected("repeat")
+        if shape is None:
+            return False
+        result = self._attempt(
+            "Cannot repeat",
+            lambda: builders.repeat_circle(shape, count, radius, centre, angle),
+        )
+        if result is None:
+            return False
+        transform, copies = result
+        self._add_copies("repeat in a circle", shape, copies, transform)
+        return True
+
+    def do_repeat_row(self) -> None:
+        if self._one_selected("repeat") is None:
+            return
+        values = panels.ask_repeat_row(self)
+        if values is not None:
+            self.repeat_row_selected(values["count"], values["spacing"], values["axis"])
+
+    def do_repeat_circle(self) -> None:
+        shape = self._one_selected("repeat")
+        if shape is None:
+            return
+        centre = shape_geometry(shape).bounds.mean(axis=0)
+        values = panels.ask_repeat_circle(self, (float(centre[0]), float(centre[1])))
+        if values is not None:
+            self.repeat_circle_selected(
+                values["count"], values["radius"],
+                (values["centre_x"], values["centre_y"]), values["angle"],
             )
 
     # --- click-on-a-part tools -----------------------------------------

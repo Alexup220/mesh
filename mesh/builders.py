@@ -347,3 +347,88 @@ def split(
         part.transform[0, 3] += x0 - bounds[0][0]
         part.transform[1, 3] += centre[1] - (bounds[0][1] + bounds[1][1]) / 2.0
     return first, second
+
+
+# --- Patterns ---------------------------------------------------------------
+
+MAX_COPIES = 500
+
+
+def _check_count(count: int) -> int:
+    count = int(count)
+    if count < 2:
+        raise BuildError("A pattern needs at least 2 parts.")
+    if count > MAX_COPIES:
+        raise BuildError(f"That is too many copies. Try {MAX_COPIES} or fewer.")
+    return count
+
+
+def _copy(shape: Shape) -> Shape:
+    """An independent copy: new id, its own params and transform, and the
+    same Solid/Hole flag and fit."""
+    clone = copy.deepcopy(shape)
+    clone.id = uuid.uuid4().hex
+    clone.transform = np.asarray(clone.transform, dtype=np.float64).copy()
+    return clone
+
+
+def repeat_row(shape: Shape, count: int, spacing: float, axis: str = "x") -> list[Shape]:
+    """`count` parts in a straight line, `spacing` mm apart (centre to centre)
+    along X or Y. `count` includes the original; returns the new copies."""
+    count = _check_count(count)
+    if axis not in ("x", "y"):
+        raise ValueError(f"unknown axis {axis!r}")
+    if float(spacing) <= 0.0:
+        raise BuildError("The spacing must be more than 0 mm.")
+    index = "xyz".index(axis)
+    copies = []
+    for i in range(1, count):
+        clone = _copy(shape)
+        clone.transform[index, 3] += i * float(spacing)
+        copies.append(clone)
+    return copies
+
+
+def repeat_circle(
+    shape: Shape, count: int, radius: float, centre, angle: float = 360.0
+) -> tuple[np.ndarray, list[Shape]]:
+    """`count` parts around a vertical line through `centre` (X, Y).
+
+    The original is moved straight out (or in) to `radius` from the centre,
+    keeping its direction from it; the copies follow round the circle, each
+    turned to face out the same way. A full 360 degrees spaces them evenly
+    all the way round; a smaller angle puts the first and last part exactly
+    that far apart. `count` includes the original.
+
+    Returns (the original's new transform, the new copies). Nothing is
+    changed until the caller applies them.
+    """
+    from mesh.ops import rotate_about
+
+    count = _check_count(count)
+    radius, angle = float(radius), float(angle)
+    if radius <= 0.0:
+        raise BuildError("The circle's radius must be more than 0 mm.")
+    if not 0.0 < angle <= 360.0:
+        raise BuildError("The angle must be more than 0 and at most 360 degrees.")
+
+    centre = np.asarray(centre, dtype=np.float64)[:2]
+    position = shape_geometry(shape).bounds.mean(axis=0)
+    outward = position[:2] - centre
+    length = float(np.linalg.norm(outward))
+    outward = outward / length if length > 1e-9 else np.array([1.0, 0.0])
+
+    placed = _copy(shape)
+    placed.transform[:2, 3] += centre + outward * radius - position[:2]
+
+    full = angle >= 360.0 - 1e-9
+    step = angle / count if full else angle / (count - 1)
+    pivot = (centre[0], centre[1], 0.0)
+    copies = []
+    for i in range(1, count):
+        clone = _copy(placed)
+        turn = np.radians(i * step)
+        c, s = np.cos(turn), np.sin(turn)
+        rotate_about(clone, np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]), pivot)
+        copies.append(clone)
+    return placed.transform, copies
