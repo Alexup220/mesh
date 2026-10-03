@@ -477,3 +477,21 @@ def ask_repeat_circle(parent, part_centre: tuple[float, float]) -> dict | None:
         parent, "Repeat in a circle", repeat_circle_fields(part_centre),
         note="Copies go round a vertical line through the circle centre.",
     )
+
+
+def box_with_lid_fields():
+    return [
+        ("width", "Outside width (mm)", 60.0, {"min": 5.0}),
+        ("depth", "Outside depth (mm)", 40.0, {"min": 5.0}),
+        ("height", "Outside height, lid on (mm)", 30.0, {"min": 5.0}),
+        ("wall", "Wall thickness (mm)", 2.0, {"min": 0.4, "max": 50.0}),
+        ("lid_height", "Lid height (mm)", 6.0, {"min": 0.4}),
+        ("fit", "Lid fit", "snug", {"choices": list(FITS.items())}),
+    ]
+
+
+def ask_box_with_lid(parent) -> dict | None:
+    return run_form(
+        parent, "Box with lid", box_with_lid_fields(),
+        note="Makes a box and a lid that drops onto it, side by side and ready to print.",
+    )

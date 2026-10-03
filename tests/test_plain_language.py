@@ -132,6 +132,12 @@ def _refusals():
         lambda: builders.repeat_row(box(), 3, 0.0),
         lambda: builders.repeat_circle(box(), 3, 0.0, (0, 0)),
         lambda: builders.repeat_circle(box(), 3, 10.0, (0, 0), 0.0),
+        lambda: builders.box_with_lid(0, 40, 30, 2, 6),
+        lambda: builders.box_with_lid(60, 40, 30, 0, 6),
+        lambda: builders.box_with_lid(10, 10, 30, 5, 6),
+        lambda: builders.box_with_lid(60, 40, 30, 2, 1),
+        lambda: builders.box_with_lid(60, 40, 8, 2, 6),
+        lambda: builders.box_with_lid(60, 40, 30, 0.6, 6, "loose", {"loose": 0.4}),
     ]
 
 
@@ -160,6 +166,8 @@ def _dialogs():
         ("Repeat in a row", panels.repeat_row_fields(), None),
         ("Repeat in a circle", panels.repeat_circle_fields((0.0, 0.0)),
          "Copies go round a vertical line through the circle centre."),
+        ("Box with lid", panels.box_with_lid_fields(),
+         "Makes a box and a lid that drops onto it, side by side and ready to print."),
     ]
 
 

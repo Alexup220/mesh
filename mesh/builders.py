@@ -432,3 +432,82 @@ def repeat_circle(
         rotate_about(clone, np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]), pivot)
         copies.append(clone)
     return placed.transform, copies
+
+
+# --- Box with lid -----------------------------------------------------------
+
+LID_GAP = 10.0   # mm between the box and its lid once laid out
+MAX_LIP = 3.0    # mm the lid's lip reaches down into the box
+
+
+def _box(name: str, width: float, depth: float, height: float, z: float,
+         color: str, is_hole: bool = False) -> Shape:
+    part = new_primitive("cube", name=name)
+    part.params.update(width=width, depth=depth, height=height)
+    part.transform[2, 3] = z
+    part.color = color
+    part.is_hole = is_hole
+    return part
+
+
+def box_with_lid(
+    width: float,
+    depth: float,
+    height: float,
+    wall: float,
+    lid_height: float,
+    fit: str = "snug",
+    clearances: dict | None = None,
+    color: str = "#4a90d9",
+) -> tuple[Shape, Shape]:
+    """A hollow box and a lid that drops onto it, ready to print.
+
+    `height` is the closed box's total outside height; the lid takes
+    `lid_height` of it. The inner half of the box's wall is cut away at the
+    top (a recess), and the lid has a matching lip that drops into it,
+    `fit` clearance smaller on every side. Returns (box, lid) as groups,
+    side by side on the workplane, the lid upside down so its lip points up.
+    """
+    from mesh.ops import drop_to_plane, rotate_about
+
+    w, d, h, t, hl = (float(v) for v in (width, depth, height, wall, lid_height))
+    c = float((clearances or {}).get(fit, 0.0)) if fit != "exact" else 0.0
+    if min(w, d, h) <= 0.0:
+        raise BuildError("The box's width, depth and height must all be more than 0 mm.")
+    if t <= 0.0:
+        raise BuildError("The wall thickness must be more than 0 mm.")
+    if 2.0 * t >= min(w, d) - 1.0:
+        raise BuildError("That wall is too thick for a box this size. Try a thinner wall.")
+    if hl < t:
+        raise BuildError("The lid must be at least as tall as the wall is thick.")
+    body_h = h - hl
+    if body_h < t + 1.0:
+        raise BuildError("The lid is too tall for this box. Try a shorter lid or a taller box.")
+    lip_wall = t / 2.0 - c
+    if lip_wall < 0.4:
+        raise BuildError(
+            f"The wall is too thin for a lip with that fit. "
+            f"Try a wall of at least {2.0 * (0.4 + c):.1f} mm."
+        )
+    lip = min(MAX_LIP, (body_h - t) / 2.0)
+
+    inner_w, inner_d = w - 2.0 * t, d - 2.0 * t
+    body = make_group([
+        _box("Box", w, d, body_h, 0.0, color),
+        _box("Inside", inner_w, inner_d, body_h - t + 1.0, t, color, is_hole=True),
+        _box("Lip recess", w - t, d - t, lip + 1.0, body_h - lip, color, is_hole=True),
+    ], name="Box", clearances=clearances)
+
+    # Built closed (the lid's underside at Z = 0, lip hanging below it), then
+    # flipped for printing.
+    lip_drop = lip - c
+    lid = make_group([
+        _box("Lid", w, d, hl, 0.0, color),
+        _box("Lip", w - t - 2.0 * c, d - t - 2.0 * c, lip_drop + 0.5, -lip_drop, color),
+        _box("Inside", inner_w, inner_d, (hl - t) + lip_drop + 1.0, -lip_drop - 1.0, color,
+             is_hole=True),
+    ], name="Lid", clearances=clearances)
+    rotate_about(lid, np.diag([1.0, -1.0, -1.0]), (0.0, 0.0, 0.0))
+    drop_to_plane(lid)
+    lid.transform[0, 3] += w + LID_GAP
+    return body, lid

@@ -144,6 +144,8 @@ class MeshWindow(QMainWindow):
         self._act(shape, "Repeat in a &Row...", None, self.do_repeat_row)
         self._act(shape, "Repeat in a &Circle...", None, self.do_repeat_circle)
         shape.addSeparator()
+        self._act(shape, "Box with &Lid...", None, self.do_box_with_lid)
+        shape.addSeparator()
         # Explicit Union/Subtract/Intersect: the secondary route to
         # ops.boolean, for a user who wants the operator directly instead
         # of the Solid/Hole flag that Group teaches as the primary path.
@@ -531,6 +533,29 @@ class MeshWindow(QMainWindow):
                 values["count"], values["radius"],
                 (values["centre_x"], values["centre_y"]), values["angle"],
             )
+
+    def make_box_with_lid(self, width, depth, height, wall, lid_height, fit="snug") -> bool:
+        """Add a box and its lid as one undo step."""
+        scene = self.document.scene
+        parts = self._attempt(
+            "Cannot make the box",
+            lambda: builders.box_with_lid(
+                width, depth, height, wall, lid_height, fit, scene.fit_clearances
+            ),
+        )
+        if parts is None:
+            return False
+        self.document.snapshot("box with lid")
+        for part in parts:
+            scene.add(part)
+        scene.select([p.id for p in parts])
+        self.sync()
+        return True
+
+    def do_box_with_lid(self) -> None:
+        values = panels.ask_box_with_lid(self)
+        if values is not None:
+            self.make_box_with_lid(**values)
 
     # --- click-on-a-part tools -----------------------------------------
 
