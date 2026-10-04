@@ -8,8 +8,12 @@ copied here. A request that can't be met raises BuildError with a plain
 message.
 
     rectangular  rows and columns along two of the world's directions
+    circular     round a line through a point, along one of the world's
+                 directions (Repeat in a Circle, extended: any of the three
+                 lines, several parts at once, and the parts stay where
+                 they are)
 
-Exact: copies are the same shapes moved.
+Exact: copies are the same shapes moved or turned.
 """
 
 import math
@@ -17,7 +21,7 @@ import math
 import numpy as np
 
 from mesh.builders import MAX_COPIES, BuildError, _check_count, _copy
-from mesh.modify import MOVE_LIMIT
+from mesh.modify import MOVE_LIMIT, _axis_turn
 from mesh.ops import AXES, _canonical
 from mesh.shapes import is_reference
 
@@ -87,4 +91,35 @@ def rectangular(shapes, count: int, spacing: float, axis: str = "x",
             matrix = np.eye(4)
             matrix[:3, 3] = i * step + j * step2
             out += _moved(parts, matrix, canonical=False)
+    return out
+
+
+# --- Circular -----------------------------------------------------------------------
+
+
+def circular(shapes, count: int, axis: str = "z", centre=(0.0, 0.0, 0.0), angle: float = 360.0) -> list:
+    """Copies of the parts turned round the line along `axis` through
+    `centre`, anticlockwise seen from the line's positive end. A full 360
+    degrees spaces them evenly all the way round; a smaller angle puts the
+    first and last exactly that far apart. The parts stay where they are,
+    and `count` includes them."""
+    parts = _parts(shapes)
+    if axis not in AXES:
+        raise ValueError(f"unknown direction {axis!r}")
+    count = _check_count(count)
+    _check_total(count, parts)
+    angle = float(angle)
+    if not math.isfinite(angle) or not 0.0 < angle <= 360.0:
+        raise BuildError("The angle must be more than 0 and at most 360 degrees.")
+    centre = np.asarray([float(v) for v in centre], dtype=np.float64)
+    if centre.shape != (3,) or not np.isfinite(centre).all():
+        raise BuildError("Type ordinary numbers for the centre.")
+    full = angle >= 360.0 - 1e-9
+    step = angle / count if full else angle / (count - 1)
+    out = []
+    for i in range(1, count):
+        matrix = np.eye(4)
+        matrix[:3, :3] = _axis_turn(axis, i * step)
+        matrix[:3, 3] = centre - matrix[:3, :3] @ centre
+        out += _moved(parts, matrix)
     return out

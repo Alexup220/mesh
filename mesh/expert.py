@@ -86,6 +86,12 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_rectangular_pattern",
     ),
     ExpertTool(
+        "circular_pattern", "create", "Pattern Aro&und a Line (Circular)...",
+        "Copy the selected parts round a line through a point you type, turning each copy "
+        "with it: all the way round or over a set angle. The parts stay where they are.",
+        "do_circular_pattern",
+    ),
+    ExpertTool(
         "move_copy", "modify", "&Move or Copy...",
         "Move or turn the selected parts by exact amounts, or make moved copies of them. "
         "A turn goes around a line through their middle.",

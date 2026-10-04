@@ -173,13 +173,14 @@ tools do the closest honest version of their Fusion counterparts:
 
 ## Expert mode, Phase 3 (Patterns): approximations and limits
 
-The copies themselves are exact: each is the same part moved. What differs
-from Fusion is how the pattern is chosen.
+The copies themselves are exact: each is the same part moved or turned. What
+differs from Fusion is how the pattern is chosen.
 
 - **Directions are the world's.** Pattern in Rows goes along left/right,
-  forward/back or up/down. Fusion also lets an edge, a sloping face or a
-  construction axis set the direction; picking one is not offered
-  (construction axes come in Phase 4).
+  forward/back or up/down, and Pattern Around a Line turns round a line
+  along one of those three, through a point typed in millimetres. Fusion
+  also lets an edge, a sloping face or a construction axis set the
+  direction; picking one is not offered (construction axes come in Phase 4).
 - **No suppressing single copies**, no "symmetric" (both ways from the
   part) option, and no spacing by total extent in Rows: spacing is from one
   copy to the next.

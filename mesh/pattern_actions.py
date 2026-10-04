@@ -7,7 +7,8 @@ copies on success, as one undo step.
 
 from mesh import patterns
 from mesh.builders import MAX_COPIES
-from mesh.modify import MOVE_LIMIT
+from mesh.modify import MOVE_LIMIT, _bounds
+from mesh.modify_actions import TURN_AXES
 from mesh.panels import run_form
 from mesh.shapes import is_reference
 
@@ -34,6 +35,29 @@ RECTANGULAR_NOTE = (
 
 def ask_rectangular(parent) -> dict | None:
     return run_form(parent, "Pattern in Rows", rectangular_fields(), note=RECTANGULAR_NOTE)
+
+
+def circular_fields(centre):
+    coordinate = {"min": -MOVE_LIMIT, "max": MOVE_LIMIT}
+    return [
+        ("count", "How many in total", 6, {"min": 2, "max": MAX_COPIES}),
+        ("angle", "Angle to fill (degrees, 360 for a full circle)", 360.0, {"min": 1.0, "max": 360.0}),
+        ("axis", "Turn around", "z", {"choices": TURN_AXES}),
+        ("centre_x", "The line goes through: left / right (mm)", round(float(centre[0]), 2), coordinate),
+        ("centre_y", "The line goes through: forward / back (mm)", round(float(centre[1]), 2), coordinate),
+        ("centre_z", "The line goes through: height (mm)", round(float(centre[2]), 2), coordinate),
+    ]
+
+
+CIRCULAR_NOTE = (
+    "Copies the selected parts round a line, turning each copy with it, like Repeat in a Circle "
+    "but round any of the three lines and with the parts left where they are. The count "
+    "includes the parts themselves."
+)
+
+
+def ask_circular(parent, centre) -> dict | None:
+    return run_form(parent, "Pattern Around a Line", circular_fields(centre), note=CIRCULAR_NOTE)
 
 
 class PatternActions:
@@ -85,3 +109,28 @@ class PatternActions:
         values = ask_rectangular(self)
         if values is not None:
             self.rectangular_pattern_selected(**values)
+
+    # --- Around a line ------------------------------------------------------------
+
+    def circular_pattern_selected(self, count: int = 6, axis: str = "z", centre=(0.0, 0.0, 0.0),
+                                  angle: float = 360.0) -> bool:
+        parts = self._pattern_parts()
+        if parts is None:
+            return False
+        return self._add_pattern(
+            "pattern around a line", parts,
+            lambda: patterns.circular(parts, count, axis, centre, angle),
+        )
+
+    def do_circular_pattern(self) -> None:
+        parts = self._pattern_parts()
+        if parts is None:
+            return
+        # As Repeat in a Circle does: the line starts 30 mm to the left.
+        middle = _bounds(parts).mean(axis=0) - (30.0, 0.0, 0.0)
+        values = ask_circular(self, middle)
+        if values is not None:
+            self.circular_pattern_selected(
+                values["count"], values["axis"],
+                (values["centre_x"], values["centre_y"], values["centre_z"]), values["angle"],
+            )
