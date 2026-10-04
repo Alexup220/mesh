@@ -143,6 +143,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "inside edge is filled in flat.",
         "do_chamfer",
     ),
+    ExpertTool(
+        "draft", "modify", "Slope the Sides (&Draft)...",
+        "Select an Extrusion, box, cylinder or tube, then type an angle: every side slopes in "
+        "(or out) by it, going away from its sketch or base. A box, cylinder or tube becomes "
+        "an Extrusion. Single faces can't be sloped on their own.",
+        "do_draft",
+    ),
 )
 
 

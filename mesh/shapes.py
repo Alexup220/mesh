@@ -98,7 +98,7 @@ PRIMITIVES: dict[str, dict] = {
     # Details panel field: Sketch > Change Sketch edits them.
     "extrude": {
         "label": "Extrusion",
-        "defaults": {"distance": 20.0, "side": "one"},
+        "defaults": {"distance": 20.0, "side": "one", "taper": 0.0},
         "choices": {"side": features.SIDES},
         "shelf": False,
     },

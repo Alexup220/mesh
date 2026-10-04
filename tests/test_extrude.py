@@ -76,7 +76,7 @@ def test_extrude_refuses_plainly(entities, distance, side, words):
 def test_extrusion_is_an_off_the_shelf_primitive_with_editable_numbers():
     info = PRIMITIVES["extrude"]
     assert info["shelf"] is False
-    assert info["defaults"] == {"distance": 20.0, "side": "one"}
+    assert info["defaults"] == {"distance": 20.0, "side": "one", "taper": 0.0}
     assert [value for value, _label in info["choices"]["side"]] == ["one", "other", "both"]
     assert features.default_entities("extrude") == features.DEFAULT_EXTRUDE
 
@@ -211,7 +211,7 @@ def test_an_extrusions_numbers_are_in_the_details_panel(window):
     add_sketch(window)
     window.extrude_selected(5.0)
     shape = window.document.scene.shapes[0]
-    assert window.inspector.visible_param_fields() == {"distance", "side"}
+    assert window.inspector.visible_param_fields() == {"distance", "side", "taper"}
     window._on_edited(shape.id, "distance", 12.0)
     window._finish_edit()
     assert shape_geometry(shape).bounds[1][2] == pytest.approx(12.0)
@@ -246,7 +246,7 @@ def test_an_extrusion_stays_editable_with_expert_mode_off(window):
     add_sketch(window)
     window.extrude_selected(5.0)
     window.set_expert_mode(False)
-    assert window.inspector.visible_param_fields() == {"distance", "side"}
+    assert window.inspector.visible_param_fields() == {"distance", "side", "taper"}
     assert window.gizmo._widget.GetEnabled()
 
 

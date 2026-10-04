@@ -159,6 +159,17 @@ tools do the closest honest version of their Fusion counterparts:
   the edge cut flat, set back the same distance on both faces. A bevel set
   back a different distance on each face, or given by an angle, is not
   offered.
+- **Slope the Sides (Draft)** slopes every side of an Extrusion by one angle
+  (at most 60 degrees), going away from its sketch's plane; a box, cylinder
+  or tube becomes an Extrusion first (its base's outline pushed up its
+  height), so a bottom chamfer is refused. Fusion's Draft slopes chosen faces
+  from any plane; here all the sides slope together from the sketch, and
+  other parts (a wedge, a group, a part with a pushed face) can't be sloped:
+  sketch the outline and extrude it instead. Each straight side moves in
+  keeping its direction, so corners stay sharp and a round outline slopes as
+  its many narrow flat sides. A sloped fitted Hole grows square to its sides
+  with sharp corners (a straight one's corners are rounded). Stretching a
+  sloped Extrusion up or across changes its angle so its sides stay flat.
 
 ## Platform notes
 

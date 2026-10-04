@@ -38,7 +38,7 @@ from mesh.ops import (
     rotation_between,
 )
 from mesh.scene import new_primitive
-from mesh.shapes import HARDWARE_PRIMITIVES, is_reference, primitive_mesh, shape_geometry
+from mesh.shapes import HARDWARE_PRIMITIVES, default_params, is_reference, primitive_mesh, shape_geometry
 from mesh.solids import from_manifold, m3, to_manifold
 
 MOVE_LIMIT = 10000.0  # mm: the furthest one move may go along each line
@@ -246,6 +246,11 @@ def _scaled_params(shape, own: np.ndarray) -> dict:
             raise _stretch_refusal(shape.name, "is made from a sketch's curves", across=True)
         entities = params.get("entities") or features.default_entities("extrude")
         params["entities"] = _scaled_entities(shape, entities, own[0])
+        taper = float(params.get("taper", 0.0))
+        if taper and not uniform:
+            # Sloped sides stay flat: how far in they go per mm along
+            # stretches with the outline, and the mm along with the distance.
+            params["taper"] = math.degrees(math.atan(math.tan(math.radians(taper)) * own[0] / own[2]))
     elif kind == "revolve":
         entities = params.get("entities") or features.default_entities("revolve")
         params["entities"] = _scaled_entities(shape, entities, own[0])
@@ -650,3 +655,64 @@ def push_pull(shape, face_index: int, distance: float, clearances: dict | None =
         raise BuildError(
             "Pushing the face in that far would leave nothing of the part. Try a shorter distance."
         ) from exc
+
+
+# --- Draft: sloped sides ----------------------------------------------------------------
+
+DRAFT_KINDS = ("extrude", "cube", "cylinder", "tube")
+
+
+def can_draft(shape) -> bool:
+    return shape.kind == "primitive" and shape.params.get("primitive") in DRAFT_KINDS
+
+
+def _outline_and_height(shape) -> tuple[list, float]:
+    """A box, cylinder or tube as the outline of its base and its height."""
+    kind = shape.params["primitive"]
+    p = {**default_params(kind), **shape.params}
+    if float(p.get("chamfer", 0.0)) > 0.0:
+        raise BuildError(
+            f"{shape.name} has a bottom chamfer, which sloped sides can't keep. Set its "
+            "Bottom chamfer to 0 first."
+        )
+    if kind == "cube":
+        w, d = float(p["width"]), float(p["depth"])
+        return [{"type": "rectangle", "corner": [-w / 2.0, -d / 2.0], "width": w, "height": d}], float(p["height"])
+    outline = [{"type": "circle", "centre": [0.0, 0.0], "diameter": float(p["diameter"])}]
+    if kind == "tube":
+        inside = float(p["diameter"]) - 2.0 * float(p["wall"])
+        if inside > 0.0:
+            outline.append({"type": "circle", "centre": [0.0, 0.0], "diameter": inside})
+    return outline, float(p["height"])
+
+
+def drafted(shape, angle: float, clearances: dict | None = None):
+    """`shape` with its sides sloping in by `angle` degrees going away from
+    its sketch's plane, or out for less than 0 (Fusion's Draft, on every side
+    at once). An Extrusion gets that slope. A box, cylinder or tube becomes
+    an Extrusion of the same size first: its base's outline pushed up its
+    height, so its sides slope in from the base. A changed copy with the
+    same id; nothing is changed here."""
+    if is_reference(shape):
+        raise BuildError(GUIDES_ARE_NOT_PARTS.format(tool="Slope the Sides"))
+    if not can_draft(shape):
+        raise BuildError(
+            "Slope the Sides works on Extrusions, boxes, cylinders and tubes. To slope "
+            "other sides, sketch the outline and extrude it."
+        )
+    angle = float(angle)
+    limit = features.TAPER_LIMIT
+    if not math.isfinite(angle) or abs(angle) > limit:
+        raise BuildError(f"Type an angle between 0 and {limit:g} degrees.")
+    changed = copy.deepcopy(shape)
+    if shape.params["primitive"] != "extrude":
+        if angle == 0.0:
+            raise BuildError("Type an angle more than 0 to slope the sides.")
+        entities, height = _outline_and_height(shape)
+        changed.params = {"primitive": "extrude", "entities": entities, "distance": height, "side": "one"}
+    changed.params["taper"] = angle
+    try:
+        shape_geometry(changed, clearances)
+    except sketch.SketchError as exc:
+        raise BuildError(str(exc)) from exc
+    return changed

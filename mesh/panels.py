@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mesh.features import TAPER_LIMIT
 from mesh.scene import DEFAULT_COLOR, DEFAULT_FIT, FITS, Shape, euler_from_transform
 from mesh.shapes import PRIMITIVES, is_reference, shelf_primitives
 from mesh.text import has_letters
@@ -83,6 +84,7 @@ FIELD_LABELS = {
     "distance": "Distance (mm)",
     "side": "Direction",
     "angle": "Angle (degrees)",
+    "taper": "Sides slope in (degrees)",
 }
 
 
@@ -124,6 +126,9 @@ class Inspector(QWidget):
             elif field == "angle":
                 # How far a Revolve turns: at most one whole turn.
                 box.setRange(0.1, 360.0)
+            elif field == "taper":
+                # How far an Extrusion's sides slope in (out, below 0).
+                box.setRange(-TAPER_LIMIT, TAPER_LIMIT)
             elif field in SIZE_FIELDS:
                 box.setRange(0.0 if field in ZERO_ALLOWED else 0.1, 10000.0)
             else:

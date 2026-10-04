@@ -125,6 +125,21 @@ def fit_refusal(shapes, clearances: dict | None) -> str | None:
     return None
 
 
+def edit_refusal(shape, field: str, value, clearances: dict | None) -> str | None:
+    """Why `shape`, a part made from a sketch, can't take `value` for its
+    number or choice `field` (typed in the Details panel, say: sloped sides
+    can meet); None if it can, or if `shape` is not made from a sketch."""
+    if shape.kind != "primitive" or shape.params.get("primitive") not in features.SOLIDS:
+        return None
+    trial = copy.deepcopy(shape)
+    trial.params[field] = value if isinstance(value, str) else float(value)
+    try:
+        shape_geometry(trial, clearances)
+    except sketch.SketchError as exc:
+        return str(exc)
+    return None
+
+
 # --- Solids from sketches -----------------------------------------------------------
 
 

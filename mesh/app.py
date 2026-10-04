@@ -845,6 +845,12 @@ class MeshWindow(ExpertActions, QMainWindow):
             if not self._fits_build([trial], "Cannot change the fit"):
                 self.inspector.show_shape(shape)
                 return
+        elif field not in ("color", "x", "y", "z", "rx", "ry", "rz"):
+            problem = create.edit_refusal(shape, field, value, self.document.scene.fit_clearances)
+            if problem is not None:
+                self._warn("Cannot change that", problem)
+                self.inspector.show_shape(shape)
+                return
 
         # One snapshot per burst of edits, not one per keystroke: see the
         # comment on self._edit_timer in __init__.

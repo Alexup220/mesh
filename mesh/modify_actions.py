@@ -7,7 +7,7 @@ this is only the wiring: ask, try, then snapshot and apply on success.
 
 from PySide6.QtCore import QTimer
 
-from mesh import edges, modify
+from mesh import edges, features, modify
 from mesh.builders import GUIDES_ARE_NOT_PARTS, BuildError
 from mesh.panels import run_form
 from mesh.shapes import is_reference
@@ -154,6 +154,30 @@ CHAMFER_NOTE = EDGE_NOTE.format(what="Bevels flat", done="bevelled")
 
 def ask_chamfer(parent) -> dict | None:
     return run_form(parent, "Bevel an Edge", chamfer_fields(), note=CHAMFER_NOTE)
+
+
+DRAFT_DIRECTIONS = [
+    ("in", "In: narrower going away from the sketch or base"),
+    ("out", "Out: wider going away from the sketch or base"),
+]
+
+
+def draft_fields(angle: float = 5.0, direction: str = "in"):
+    return [
+        ("angle", "Slope (degrees)", float(angle), {"min": 0.0, "max": features.TAPER_LIMIT}),
+        ("direction", "Sides slope", direction, {"choices": DRAFT_DIRECTIONS}),
+    ]
+
+
+DRAFT_NOTE = (
+    "Slopes every side of the part by the same angle, starting from the sketch it was made "
+    "from (the base, for a box, cylinder or tube). A box, cylinder or tube becomes an "
+    "Extrusion, which shows the slope in its Details. Single faces can't be sloped on their own."
+)
+
+
+def ask_draft(parent, angle: float, direction: str) -> dict | None:
+    return run_form(parent, "Slope the Sides", draft_fields(angle, direction), note=DRAFT_NOTE)
 
 
 def ask_move_copy(parent) -> dict | None:
@@ -562,3 +586,40 @@ class ModifyActions:
             "chamfer edge", "Cannot bevel the edge", shape_id,
             lambda shape, fits: edges.chamfer(shape, face_index, point, distance, fits),
         )
+
+    # --- Draft: sloped sides -------------------------------------------------------------
+
+    DRAFT_HINT = "Select one Extrusion, box, cylinder or tube, then slope its sides."
+
+    def _draft_target(self):
+        chosen = self.document.scene.selected()
+        if len(chosen) != 1 or not modify.can_draft(chosen[0]):
+            self.statusBar().showMessage(self.DRAFT_HINT)
+            return None
+        return chosen[0]
+
+    def do_draft(self) -> None:
+        shape = self._draft_target()
+        if shape is None:
+            return
+        taper = float(shape.params.get("taper", 0.0)) if shape.params["primitive"] == "extrude" else 0.0
+        values = ask_draft(self, abs(taper) or 5.0, "out" if taper < 0.0 else "in")
+        if values is not None:
+            self.draft_selected(values["angle"] * (-1.0 if values["direction"] == "out" else 1.0))
+
+    def draft_selected(self, angle: float) -> bool:
+        """Slope the selected part's sides in by `angle` degrees (out, for
+        less than 0). One undo step on success."""
+        shape = self._draft_target()
+        if shape is None:
+            return False
+        scene = self.document.scene
+        changed = self._attempt(
+            "Cannot slope the sides", lambda: modify.drafted(shape, angle, scene.fit_clearances)
+        )
+        if changed is None:
+            return False
+        self.document.snapshot("slope sides")
+        shape.params = changed.params
+        self.sync()
+        return True

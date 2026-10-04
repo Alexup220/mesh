@@ -6,10 +6,12 @@ is always rebuilt from them. `build(kind, params, clearance)` turns those
 params into a closed solid in the shape's own coordinates, which are its
 sketch's: the shape's transform is the sketch's plane.
 
-    extrude  entities (sketch coordinates), distance, side
+    extrude  entities (sketch coordinates), distance, side, taper
              The outline pushed straight out of its plane: the way the
              sketch faces ("one"), the other way ("other"), or half each
-             way ("both").
+             way ("both"). With a taper (degrees), the sides slope in by
+             that angle going away from the sketch's plane (out, for less
+             than 0); missing in older files, where it is 0.
     revolve  entities, axis [x, y, dx, dy] (a line in the sketch), angle
              The outline turned about the axis line, anticlockwise seen
              from the line's far end. The solid's own Z is the axis, so a
@@ -37,7 +39,7 @@ import math
 
 import numpy as np
 import trimesh
-from shapely.geometry import LinearRing, LineString
+from shapely.geometry import LinearRing, LineString, Point, Polygon
 
 from mesh.sketch import SEGMENTS, SketchError, profile, signed_area, single_path, to_world
 from mesh.solids import from_manifold, m3
@@ -51,6 +53,8 @@ SIDES = [
     ("other", "The other way"),
     ("both", "Both ways, evenly"),
 ]
+
+TAPER_LIMIT = 60.0  # degrees: the steepest an extrusion's sides may slope
 
 DEFAULT_EXTRUDE = [{"type": "rectangle", "corner": [-10.0, -10.0], "width": 20.0, "height": 20.0}]
 # Turned about the sketch's Y line: a tube 10 mm across inside, 20 outside.
@@ -101,7 +105,7 @@ def default_entities(kind: str) -> list[dict]:
 def build(kind: str, params: dict, clearance: float = 0.0) -> trimesh.Trimesh:
     if kind == "extrude":
         return extrude(params.get("entities", DEFAULT_EXTRUDE), params["distance"],
-                       params.get("side", "one"), clearance)
+                       params.get("side", "one"), clearance, params.get("taper", 0.0))
     if kind == "revolve":
         return revolve(params.get("entities", DEFAULT_REVOLVE), params.get("axis", DEFAULT_AXIS),
                        params["angle"], clearance)
@@ -119,17 +123,108 @@ def build(kind: str, params: dict, clearance: float = 0.0) -> trimesh.Trimesh:
 # --- Extrude --------------------------------------------------------------------
 
 
-def extrude(entities, distance: float, side: str = "one", clearance: float = 0.0) -> trimesh.Trimesh:
-    """The sketch's closed outlines pushed `distance` mm out of its plane."""
+def extrude(entities, distance: float, side: str = "one", clearance: float = 0.0,
+            taper: float = 0.0) -> trimesh.Trimesh:
+    """The sketch's closed outlines pushed `distance` mm out of its plane,
+    their sides sloping in by `taper` degrees (see _tapered)."""
     distance = float(distance)
     if not math.isfinite(distance) or distance <= 0.0:
         raise SketchError("The distance must be more than 0 mm.")
     low = {"one": 0.0, "other": -distance, "both": -distance / 2.0}.get(side)
     if low is None:
         raise SketchError("Choose which way to extrude: the way the sketch faces, the other way, or both.")
+    taper = float(taper)
+    if not math.isfinite(taper) or abs(taper) > TAPER_LIMIT:
+        raise SketchError(f"The side slope must be between -{TAPER_LIMIT:g} and {TAPER_LIMIT:g} degrees.")
+    if taper != 0.0:
+        return _tapered(profile(entities), low, distance, side, taper, clearance)
     area = _grow(profile(entities), clearance)
     solid = m3.Manifold.extrude(area, distance + 2.0 * clearance).translate((0.0, 0.0, low - clearance))
     return _closed(solid, "extrusion")
+
+
+TOO_STEEP = (
+    "The sides slope so steeply that they would meet before the far end. Use a smaller "
+    "angle or a shorter distance."
+)
+
+
+def _mitred(outlines: list, amount: float) -> list:
+    """`outlines` (anticlockwise round areas, clockwise round holes) with
+    every straight piece moved `amount` mm into the area (out of it, for
+    less than 0), keeping its direction, so corners stay sharp."""
+    moved = []
+    for points in outlines:
+        leaving = np.roll(points, -1, axis=0) - points
+        leaving /= np.linalg.norm(leaving, axis=1)[:, None]
+        arriving = np.roll(leaving, 1, axis=0)
+        n_out = np.column_stack([-leaving[:, 1], leaving[:, 0]])
+        n_in = np.column_stack([-arriving[:, 1], arriving[:, 0]])
+        bend = 1.0 + np.einsum("ij,ij->i", n_in, n_out)
+        if bend.min() < 1e-9:
+            raise SketchError("An outline turns straight back on itself, so its sides can't slope.")
+        moved.append(points + amount * (n_in + n_out) / bend[:, None])
+    return moved
+
+
+def _nesting(outlines: list) -> list:
+    """Which outlines lie inside which: [i][j] is True when j is inside i."""
+    areas = [Polygon(o) for o in outlines]
+    return [[i != j and areas[i].contains(Point(outlines[j][0])) for j in range(len(outlines))]
+            for i in range(len(outlines))]
+
+
+def _still_apart(outlines: list, moved: list) -> bool:
+    """Whether the moved outlines kept the shape of the originals: every
+    piece still runs the same way, no outline touches itself or another,
+    and each still lies inside the same others (a hole that grew past the
+    outside around it would not touch it, but has crossed it)."""
+    for before, after in zip(outlines, moved):
+        along = np.einsum("ij,ij->i", np.roll(before, -1, axis=0) - before, np.roll(after, -1, axis=0) - after)
+        if along.min() <= 1e-12:
+            return False
+    rings = [LinearRing(m) for m in moved]
+    if not all(r.is_simple for r in rings):
+        return False
+    if any(a.intersects(b) for i, a in enumerate(rings) for b in rings[i + 1:]):
+        return False
+    return len(outlines) == 1 or _nesting(outlines) == _nesting(moved)
+
+
+def _tapered(area, low: float, distance: float, side: str, taper: float, clearance: float) -> trimesh.Trimesh:
+    """An extrusion whose sides slope in by `taper` degrees going away from
+    the sketch's plane (out, for less than 0): at each height, every straight
+    piece of the outline is moved in by the height times tan(taper), keeping
+    its direction, so the sides are flat and the corners sharp ("both" slopes
+    each way from the plane). A fitted Hole is `clearance` bigger square to
+    every side, and reaches that far past both ends."""
+    slope = math.tan(math.radians(taper))
+    grow = clearance / math.cos(math.radians(taper))
+    outlines = []
+    for polygon in area.to_polygons():
+        points = np.asarray(polygon, dtype=np.float64)
+        keep = np.linalg.norm(np.roll(points, -1, axis=0) - points, axis=1) > 1e-9
+        outlines.append(points[keep])
+    if not outlines:
+        raise SketchError("The sketch has no closed outline to extrude.")
+    high = low + distance
+    heights = [low - clearance, 0.0, high + clearance] if side == "both" else [low - clearance, high + clearance]
+    away = {"one": lambda z: z, "other": lambda z: -z, "both": abs}[side]
+    steps = []
+    for z in heights:
+        moved = _mitred(outlines, away(z) * slope - grow)
+        if not _still_apart(outlines, moved):
+            raise SketchError(TOO_STEEP)
+        steps.append(moved)
+    rings = [[np.column_stack([m, np.full(len(m), z)]) for m in moved] for moved, z in zip(steps, heights)]
+    vertices = np.vstack([ring for step in rings for ring in step])
+    top = sum(len(ring) for ring in rings[0]) * (len(rings) - 1)
+    faces = [
+        _skin(rings, False),
+        _cap(steps[0], np.vstack(rings[0]), 0, (0.0, 0.0, -1.0)),
+        _cap(steps[-1], np.vstack(rings[-1]), top, (0.0, 0.0, 1.0)),
+    ]
+    return _solid_from(vertices, np.vstack(faces), "extrusion")
 
 
 # --- Revolve --------------------------------------------------------------------
