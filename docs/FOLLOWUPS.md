@@ -78,16 +78,23 @@ tools do the closest honest version of their Fusion counterparts:
 - **Extrude** has no taper angle and no "up to a face". Joining or cutting
   other parts goes through Make Hole + Group (or Join / Cut Out), not inside
   Extrude.
-- **Revolve**: a fitted Hole made with less than a whole turn gets its
-  clearance on its round sides only, not on its two flat ends.
-- **Sweep** has no twist, scale or guide rails. An outline that is not drawn
-  across the start of the path is moved there (its middle onto the start), so
-  an outline deliberately drawn beside the path is not swept at a distance.
-  Change Sketch redraws a sweep's outline, not its path.
+- **Sweep** has no twist, scale or guide rails. An outline drawn across
+  either end of an open path, or anywhere round a closed one, is used where it
+  is. Any other outline is moved to the nearer end (its middle onto the path),
+  so an outline deliberately drawn beside the path is not swept at a distance.
+  A path that crosses itself is refused, but one that only passes closer to
+  itself than the outline's size is not caught, and makes a part that overlaps
+  itself. Change Sketch redraws a sweep's outline, not its path.
 - **Loft**: each sketch must hold one closed outline with no holes; no rails
   and no single point at an end. A loft's outlines can't be redrawn after it
-  is made (undo, change the sketches, loft again). A fitted Hole loft's
-  slanted sides get slightly less than the full clearance.
+  is made (undo, change the sketches, loft again). Sides that would pass
+  through each other are refused by checking seven in-between outlines per
+  step, so a very brief crossing near an outline could slip through. A fitted
+  Hole loft grows each outline in its own plane by more where the sides
+  slope, so the gap square to the sides is at least the fit's clearance; it is
+  larger than that on the gentler sides, and on sides almost flat (growth is
+  capped at three times the clearance) it is less. Growing it exactly in 3D
+  took 5 to 10 seconds for curved outlines, too slow to redraw.
 - **Corner-drag scaling** does nothing to the size of a part made from a
   sketch: its size comes from the sketch and the Details panel numbers.
 - **Pre-existing: drag handles can linger.** Putting the handles away (for

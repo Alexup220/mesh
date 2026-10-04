@@ -77,9 +77,66 @@ def test_a_square_to_a_circle_through_three_outlines():
     assert 0 < tm.volume < 400 * 40
 
 
-def test_a_fitted_hole_loft_grows_on_every_side_and_past_each_end():
-    tm = features.loft([section(BIG, 0), section(SMALL, 10)], clearance=0.2)
-    assert np.allclose(tm.bounds, [[-10.2, -10.2, -0.2], [10.2, 10.2, 10.2]], atol=1e-5)
+def winding(tm, points):
+    """How many times the closed surface wraps each point: 1 inside, 0 outside."""
+    a, b, c = (tm.triangles[:, i][None, :, :] - np.asarray(points)[:, None, :] for i in range(3))
+    la, lb, lc = (np.linalg.norm(v, axis=2) for v in (a, b, c))
+    top = np.einsum("pti,pti->pt", a, np.cross(b, c))
+    bottom = (la * lb * lc + np.einsum("pti,pti->pt", a, b) * lc
+              + np.einsum("pti,pti->pt", b, c) * la + np.einsum("pti,pti->pt", c, a) * lb)
+    return np.round(np.arctan2(top, bottom).sum(axis=1) / (2 * np.pi), 3)
+
+
+@pytest.mark.parametrize("small, height", [(SMALL, 10), ([{"type": "rectangle", "corner": [-1, -1],
+                                                          "width": 2, "height": 2}], 5)],
+                         ids=["gentle", "steep"])
+def test_a_fitted_hole_loft_leaves_the_clearance_on_every_side(small, height):
+    exact = features.loft([section(BIG, 0), section(small, height)])
+    fitted = features.loft([section(BIG, 0), section(small, height)], clearance=0.4)
+    assert fitted.is_watertight
+    # Every side of the exact loft, pushed out 0.39 mm square to itself, is
+    # still inside the fitted hole.
+    pushed = exact.triangles_center + 0.39 * exact.face_normals
+    assert np.all(winding(fitted, pushed) == 1)
+    low, high = fitted.bounds[:, 2]
+    assert low == pytest.approx(-0.4) and high == pytest.approx(height + 0.4)
+
+
+def test_a_fitted_hole_loft_never_grows_more_than_three_times_the_fit():
+    flat_step = [section(BIG, 0), section(SMALL, 0.5)]
+    fitted = features.loft(flat_step, clearance=0.4)
+    assert fitted.bounds[1][0] == pytest.approx(10 + 3 * 0.4, abs=1e-5)
+
+
+def test_a_fit_that_closes_a_narrow_gap_is_refused():
+    # A C shape whose 0.5 mm slot leads into a pocket: a 0.4 mm fit closes it.
+    c_shape = [
+        {"type": "line", "start": [0.25, 5], "end": [0.25, 10]},
+        {"type": "line", "start": [0.25, 10], "end": [10, 10]},
+        {"type": "line", "start": [10, 10], "end": [10, -10]},
+        {"type": "line", "start": [10, -10], "end": [-10, -10]},
+        {"type": "line", "start": [-10, -10], "end": [-10, 10]},
+        {"type": "line", "start": [-10, 10], "end": [-0.25, 10]},
+        {"type": "line", "start": [-0.25, 10], "end": [-0.25, 5]},
+        {"type": "line", "start": [-0.25, 5], "end": [-5, 5]},
+        {"type": "line", "start": [-5, 5], "end": [-5, -5]},
+        {"type": "line", "start": [-5, -5], "end": [5, -5]},
+        {"type": "line", "start": [5, -5], "end": [5, 5]},
+        {"type": "line", "start": [5, 5], "end": [0.25, 5]},
+    ]
+    sections = [section(c_shape, 0), section(c_shape, 20)]
+    assert features.loft(sections, clearance=0.1).is_watertight
+    with pytest.raises(sketch.SketchError) as err:
+        features.loft(sections, clearance=0.4)
+    assert "narrow gap" in str(err.value)
+    assert_plain(str(err.value))
+
+
+# A thin L: lofted from a 20 mm circle its sides would pass through each
+# other, turning part of it inside out.
+L_SHAPE = [{"type": "line", "start": a, "end": b} for a, b in zip(
+    [[-10, -10], [10, -10], [10, -8], [-8, -8], [-8, 10], [-10, 10]],
+    [[10, -10], [10, -8], [-8, -8], [-8, 10], [-10, 10], [-10, -10]])]
 
 
 @pytest.mark.parametrize("sections, words", [
@@ -89,6 +146,9 @@ def test_a_fitted_hole_loft_grows_on_every_side_and_past_each_end():
     ([section(BIG, 0), section(BIG + [{"type": "circle", "centre": [0, 0], "diameter": 4}], 9)], "no holes"),
     ([section(BIG, 0), section([{"type": "line", "start": [0, 0], "end": [1, 1]}], 9)], "no closed outline"),
     ([section(BIG, 0), "damaged"], "damaged"),
+    ([section([{"type": "circle", "centre": [0, 0], "diameter": 20}], 0), section(L_SHAPE, 20)],
+     "pass through each other"),
+    ([section(BIG, 0), section(ROUND, 20), section(SMALL, 10)], "fold back"),
 ])
 def test_loft_refuses_plainly(sections, words):
     with pytest.raises(sketch.SketchError) as err:
@@ -165,12 +225,19 @@ def test_loft_replaces_the_sketches_in_one_undo_step(window):
 
 
 def test_loft_follows_the_order_the_sketches_were_picked(window):
-    sketches = add_three(window, pick=(2, 0, 1))
+    sketches = add_three(window, pick=(2, 1, 0))
     window.loft_selected(keep_sketch=True)
     loft = window.document.scene.shapes[-1]
-    assert loft.name == "Loft of Sketch 3 to Sketch 2"
+    assert loft.name == "Loft of Sketch 3 to Sketch 1"
     assert [s["entities"] for s in loft.params["sections"]] == [
-        sketches[i].params["entities"] for i in (2, 0, 1)]
+        sketches[i].params["entities"] for i in (2, 1, 0)]
+
+
+def test_sketches_picked_out_of_order_are_refused(window, warnings):
+    add_three(window, pick=(2, 0, 1))
+    assert not window.loft_selected()
+    assert len(window.document.scene.shapes) == 3
+    assert warnings and "fold back" in warnings[0]
 
 
 def test_a_refused_loft_changes_nothing(window, warnings):

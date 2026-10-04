@@ -63,7 +63,7 @@ def ask_sweep(parent, sketches, path_id: str) -> dict | None:
     return run_form(
         parent, "Sweep", sweep_fields(sketches, path_id),
         note="Carries the other sketch's closed outlines along the path, square to it. "
-             "If the outline is not drawn across the start of the path, it is moved there. "
+             "If the outline is not drawn across an end of the path, it is moved to the nearer end. "
              "Curved paths are followed in short straight steps.",
     )
 

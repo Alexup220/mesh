@@ -75,6 +75,17 @@ def test_a_fitted_hole_revolve_grows_but_never_past_the_line():
     assert solid.volume == pytest.approx(math.pi * 5.2**2 * 20.4, rel=0.01)
 
 
+@pytest.mark.parametrize("corner, exact", [
+    ([5, 0], [[0, 0, 0], [10, 10, 20]]),
+    ([-10, 0], [[-10, -10, 0], [0, 0, 20]]),
+], ids=["right of the line", "left of the line"])
+def test_a_fitted_hole_part_turn_also_grows_past_both_flat_ends(corner, exact):
+    band = [{"type": "rectangle", "corner": corner, "width": 5, "height": 20}]
+    grown = features.revolve(band, Y_AXIS, 90, clearance=0.4)
+    assert grown.is_watertight
+    assert np.allclose(grown.bounds, np.add(exact, [[-0.4] * 3, [0.4] * 3]), atol=1e-6)
+
+
 def test_axis_frame_puts_z_along_the_line():
     frame = features.axis_frame([3, 4, 1, 1])
     assert np.allclose(frame[:3, 2], [math.sqrt(0.5), math.sqrt(0.5), 0])

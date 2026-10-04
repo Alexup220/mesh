@@ -76,6 +76,66 @@ def test_an_outline_drawn_around_the_start_stays_where_it_is():
     assert np.allclose(tm.bounds, [[-1, -1, 0], [5, 1, 20]])
 
 
+# The elbow drawn the other way round: across first, then down.
+ELBOW_BACKWARDS = [
+    {"type": "line", "start": [30, 20], "end": [0, 20]},
+    {"type": "line", "start": [0, 0], "end": [0, 20]},
+]
+OFF_CENTRE = [{"type": "rectangle", "corner": [-1, -1], "width": 6, "height": 2}]
+
+
+@pytest.mark.parametrize("path", [ELBOW, ELBOW_BACKWARDS], ids=["drawn from the start", "drawn backwards"])
+def test_the_order_a_path_was_drawn_in_does_not_matter(path):
+    tm = features.sweep(OFF_CENTRE, FLAT, path, UPRIGHT)
+    # Used where it is, across the bottom end: x -1 to 5 up the first leg,
+    # so the second leg runs from 1 mm above the corner to 5 mm below it.
+    assert np.allclose(tm.bounds, [[-1, -1, 0], [30, 1, 21]], atol=1e-6)
+
+
+def test_an_outline_drawn_across_the_far_end_is_used_there():
+    far_end = np.eye(4)
+    far_end[:3, :3] = [[0, 0, 1], [0, 1, 0], [-1, 0, 0]]  # facing along the second leg
+    far_end[:3, 3] = [30, 0, 20]
+    tm = features.sweep(OFF_CENTRE, far_end, ELBOW, UPRIGHT)
+    # The same part as the outline drawn across the bottom end, not
+    # moved and centred (which would reach z = 23).
+    assert np.allclose(tm.bounds, [[-1, -1, 0], [30, 1, 21]], atol=1e-6)
+
+
+def test_an_outline_away_from_the_path_moves_to_the_nearer_end():
+    brick = [{"type": "rectangle", "corner": [-2, -1], "width": 4, "height": 2}]
+    beside_the_end = sketch.named_plane_frame("xz")
+    beside_the_end[:3, 3] = [40, 0, 20]
+    tm = features.sweep(brick, beside_the_end, ELBOW, UPRIGHT)
+    # Turned to face along the second leg, its 4 mm side lies across the
+    # path's plane (y -2 to 2). Moved to the start, it would lie in it.
+    assert np.allclose(tm.bounds, [[-1, -2, 0], [30, 2, 21]], atol=1e-6)
+
+
+def test_an_outline_across_a_closed_path_is_used_where_it_is():
+    loop = [{"type": "rectangle", "corner": [0, 0], "width": 40, "height": 30}]
+    # Drawn across the middle of the bottom side, all above the path.
+    across = [{"type": "rectangle", "corner": [-2, 0], "width": 4, "height": 3}]
+    tm = features.sweep(across, sketch.named_plane_frame("yz", 20), loop, FLAT)
+    assert tm.is_watertight
+    assert np.allclose(tm.bounds, [[-2, -2, 0], [42, 32, 3]], atol=1e-6)
+
+
+@pytest.mark.parametrize("path", [
+    [{"type": "line", "start": [0, 0], "end": [0, 30]},
+     {"type": "line", "start": [0, 30], "end": [20, 30]},
+     {"type": "line", "start": [20, 30], "end": [20, 15]},
+     {"type": "line", "start": [20, 15], "end": [-15, 15]}],
+    [{"type": "spline", "closed": True,
+      "points": [[0, 0], [20, 15], [40, 0], [20, -15], [0, 0.5], [-20, 15], [-40, 0], [-20, -15]]}],
+], ids=["open", "figure of eight"])
+def test_a_path_that_crosses_itself_is_refused(path):
+    with pytest.raises(sketch.SketchError) as err:
+        features.sweep(DOT, FLAT, path, UPRIGHT)
+    assert "crosses itself" in str(err.value)
+    assert_plain(str(err.value))
+
+
 def test_a_closed_path_makes_a_closed_ring():
     loop = [{"type": "circle", "centre": [0, 0], "diameter": 40}]
     tm = features.sweep(DOT, FLAT, loop, FLAT)
