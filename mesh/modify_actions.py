@@ -145,6 +145,17 @@ def ask_fillet(parent) -> dict | None:
     return run_form(parent, "Round an Edge", fillet_fields(), note=FILLET_NOTE)
 
 
+def chamfer_fields():
+    return [("distance", "Set back along each face (mm)", 1.0, {"min": 0.01, "max": 1000.0})]
+
+
+CHAMFER_NOTE = EDGE_NOTE.format(what="Bevels flat", done="bevelled")
+
+
+def ask_chamfer(parent) -> dict | None:
+    return run_form(parent, "Bevel an Edge", chamfer_fields(), note=CHAMFER_NOTE)
+
+
 def ask_move_copy(parent) -> dict | None:
     return run_form(
         parent, "Move or Copy", move_copy_fields(),
@@ -159,13 +170,14 @@ class ModifyActions:
 
     # The click-on-a-part tools of the Modify menu, their prompts, and the
     # method each click goes to.
-    MODIFY_CLICK_TOOLS = ("align_from", "align_to", "shell", "push_pull", "fillet")
+    MODIFY_CLICK_TOOLS = ("align_from", "align_to", "shell", "push_pull", "fillet", "chamfer")
     MODIFY_TOOL_PROMPTS = {
         "align_from": "Click the flat face of the part to move. Esc cancels.",
         "align_to": "Now click the face to put it against. Esc cancels.",
         "shell": "Click the flat face of a part to leave open. Esc cancels.",
         "push_pull": "Click the flat face of a part to push in or pull out. Esc cancels.",
         "fillet": "Click a face of a part, next to the edge to round. Esc cancels.",
+        "chamfer": "Click a face of a part, next to the edge to bevel. Esc cancels.",
     }
     MODIFY_CLICK_HANDLERS = {
         "align_from": "_align_from_picked",
@@ -173,6 +185,7 @@ class ModifyActions:
         "shell": "_shell_picked",
         "push_pull": "_push_pull_picked",
         "fillet": "_edge_picked",
+        "chamfer": "_edge_picked",
     }
 
     # --- Move or Copy ------------------------------------------------------------
@@ -490,6 +503,9 @@ class ModifyActions:
     def do_fillet(self) -> None:
         self._start_face_tool("fillet")
 
+    def do_chamfer(self) -> None:
+        self._start_face_tool("chamfer")
+
     def _edge_picked(self, shape_id: str, face_index: int, point=None) -> None:
         """A click next to an edge: if it found one, ask for the size once
         the click is over. Nothing changes yet: no undo step."""
@@ -510,9 +526,14 @@ class ModifyActions:
 
     def _ask_edge(self, tool: str, shape, face_index: int, point) -> None:
         self.viewport.end_drag()
-        values = ask_fillet(self)
-        if values is not None:
-            self.round_edge(shape.id, face_index, point, values["radius"])
+        if tool == "fillet":
+            values = ask_fillet(self)
+            if values is not None:
+                self.round_edge(shape.id, face_index, point, values["radius"])
+        else:
+            values = ask_chamfer(self)
+            if values is not None:
+                self.bevel_edge(shape.id, face_index, point, values["distance"])
 
     def _change_edge(self, label: str, title: str, shape_id: str, build) -> bool:
         scene = self.document.scene
@@ -534,3 +555,10 @@ class ModifyActions:
             lambda shape, fits: edges.fillet(shape, face_index, point, radius, fits),
         )
 
+    def bevel_edge(self, shape_id: str, face_index: int, point, distance: float) -> bool:
+        """Bevel the edge of the clicked face nearest `point`, and the run
+        it belongs to. One undo step on success."""
+        return self._change_edge(
+            "chamfer edge", "Cannot bevel the edge", shape_id,
+            lambda shape, fits: edges.chamfer(shape, face_index, point, distance, fits),
+        )

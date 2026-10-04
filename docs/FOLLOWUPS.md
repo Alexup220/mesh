@@ -155,6 +155,10 @@ tools do the closest honest version of their Fusion counterparts:
   corner. A radius that would run off the faces next to the edge is refused
   with the largest that fits. Variable radius and setback corners are not
   offered.
+- **Bevel an Edge (Chamfer)** works the same way and has the same limits, with
+  the edge cut flat, set back the same distance on both faces. A bevel set
+  back a different distance on each face, or given by an angle, is not
+  offered.
 
 ## Platform notes
 

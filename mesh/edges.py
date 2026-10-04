@@ -315,3 +315,9 @@ def fillet(shape, face_index: int, point, radius: float, clearances: dict | None
     outside edge) or added (an inside edge)."""
     return _edge_group(shape, face_index, point, radius, True, clearances)
 
+
+def chamfer(shape, face_index: int, point, distance: float, clearances: dict | None = None):
+    """The edge next to the click bevelled flat, set back `distance` mm on
+    both faces, along its run (see the module notes). A group of the part
+    and the piece cut away (an outside edge) or added (an inside edge)."""
+    return _edge_group(shape, face_index, point, distance, False, clearances)

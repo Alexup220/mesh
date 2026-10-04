@@ -136,6 +136,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "not blended into a ball.",
         "do_fillet",
     ),
+    ExpertTool(
+        "chamfer", "modify", "Bevel an Edge (C&hamfer)",
+        "Click a face of a part next to an edge, then type how far back to bevel it on both "
+        "faces. The edge is cut flat along with the edges it runs on into smoothly; an "
+        "inside edge is filled in flat.",
+        "do_chamfer",
+    ),
 )
 
 
