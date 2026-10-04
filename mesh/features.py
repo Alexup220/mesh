@@ -1,4 +1,4 @@
-"""Solids made from sketches (Expert mode): Extrude, Revolve and Sweep.
+"""Solids made from sketches (Expert mode): Extrude, Revolve, Sweep and Loft.
 
 Each is a primitive (see mesh.shapes.PRIMITIVES) whose params keep a copy of
 the sketch it was made from, so its numbers stay editable and its geometry
@@ -19,6 +19,9 @@ sketch's: the shape's transform is the sketch's plane.
     sweep    entities + profile_frame, path_entities + path_frame
              The outline carried along the path. Each frame is a 4x4 list
              placing that sketch in the sweep's own coordinates.
+    loft     sections: [{entities, frame}, ...]
+             A skin through two or more outlines, in order, each placed by
+             its frame like a sweep's sketches.
 
 A shape with no sketch of its own (a new primitive) uses a small built-in
 one (DEFAULT_*), so every kind has a sensible default, standing on the
@@ -35,10 +38,12 @@ import math
 import numpy as np
 import trimesh
 
-from mesh.sketch import SEGMENTS, SketchError, profile, single_path, to_world
+from mesh.sketch import SEGMENTS, SketchError, profile, signed_area, single_path, to_world
 from mesh.solids import from_manifold, m3
 
-SOLIDS = ("extrude", "revolve", "sweep")
+SOLIDS = ("extrude", "revolve", "sweep", "loft")
+# The ones made from one outline, which Change Sketch can redraw.
+ONE_OUTLINE = ("extrude", "revolve", "sweep")
 
 SIDES = [
     ("one", "The way the sketch faces"),
@@ -55,6 +60,13 @@ DEFAULT_SWEEP_PROFILE = [{"type": "circle", "centre": [0.0, 0.0], "diameter": 10
 DEFAULT_SWEEP_PATH = [{"type": "line", "start": [0.0, 0.0], "end": [0.0, 20.0]}]
 _UPRIGHT = [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
 _FLAT = np.eye(4).tolist()
+# A 20 mm square on the workplane up to a 16 mm circle 20 mm above it.
+DEFAULT_LOFT = [
+    {"entities": [{"type": "rectangle", "corner": [-10.0, -10.0], "width": 20.0, "height": 20.0}],
+     "frame": _FLAT},
+    {"entities": [{"type": "circle", "centre": [0.0, 0.0], "diameter": 16.0}],
+     "frame": [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 20.0], [0.0, 0.0, 0.0, 1.0]]},
+]
 
 
 def _frame(values) -> np.ndarray:
@@ -98,6 +110,8 @@ def build(kind: str, params: dict, clearance: float = 0.0) -> trimesh.Trimesh:
             params.get("path_entities", DEFAULT_SWEEP_PATH), params.get("path_frame", _UPRIGHT),
             clearance,
         )
+    if kind == "loft":
+        return loft(params.get("sections") or DEFAULT_LOFT, clearance)
     raise KeyError(f"unknown sketch solid: {kind}")
 
 
@@ -346,3 +360,103 @@ def sweep(entities, profile_frame, path_entities, path_frame, clearance: float =
         faces.append(_cap(outlines, np.vstack(rings[0]), 0, -directions[0]))
         faces.append(_cap(outlines, np.vstack(rings[-1]), end, directions[-1]))
     return _solid_from(vertices, np.vstack(faces), "sweep")
+
+
+# --- Loft ---------------------------------------------------------------------------
+
+
+def _section(section) -> tuple[np.ndarray, np.ndarray]:
+    """One loft outline: (its 2D points, its frame)."""
+    if not isinstance(section, dict):
+        raise SketchError("A loft outline is damaged.")
+    frame = _frame(section.get("frame"))
+    polygons = profile(section.get("entities", [])).to_polygons()
+    if len(polygons) != 1:
+        raise SketchError(
+            "Each sketch in a loft must hold one closed outline, with no holes or separate pieces."
+        )
+    return np.asarray(polygons[0], dtype=np.float64), frame
+
+
+def _resample(points: np.ndarray, at: np.ndarray) -> np.ndarray:
+    """Points along a closed outline at fractions `at` of its length from
+    its first point."""
+    loop = np.vstack([points, points[:1]])
+    lengths = np.linalg.norm(np.diff(loop, axis=0), axis=1)
+    t = np.concatenate([[0.0], np.cumsum(lengths)]) / lengths.sum()
+    return np.column_stack([np.interp(at, t, loop[:, i]) for i in range(loop.shape[1])])
+
+
+def _fractions(points: np.ndarray) -> np.ndarray:
+    """Where each corner of a closed outline is, as a fraction of its length."""
+    lengths = np.linalg.norm(np.diff(np.vstack([points, points[:1]]), axis=0), axis=1)
+    return np.concatenate([[0.0], np.cumsum(lengths)[:-1]]) / lengths.sum()
+
+
+def loft(sections, clearance: float = 0.0) -> trimesh.Trimesh:
+    """A skin through two or more outlines, in order, closed at both ends.
+
+    Every corner of every outline is kept: each outline is walked from a
+    matching start point and gets a point at every place (as a fraction of
+    its length) where any outline has a corner, so the skin joins them with
+    straight lines from one outline to the next.
+    """
+    if not isinstance(sections, (list, tuple)) or len(sections) < 2:
+        raise SketchError("A loft needs at least two sketches, each with one closed outline.")
+    parsed = [_section(s) for s in sections]
+    centres = [to_world(frame, points).mean(axis=0) for points, frame in parsed]
+    heading = centres[-1] - centres[0]
+    if np.linalg.norm(heading) < 1e-6:
+        raise SketchError("The first and last outlines are in the same place, so there is nothing to join.")
+    heading = _unit(heading)
+
+    outlines = []
+    for points, frame in parsed:
+        if clearance > 0.0:
+            grown = _grow(m3.CrossSection([np.ascontiguousarray(points)]), clearance)
+            points = np.asarray(grown.to_polygons()[0], dtype=np.float64)
+        # Every outline runs anticlockwise seen from behind, looking along
+        # the heading, so the skin's sides face outwards.
+        facing = np.cross(frame[:3, 0], frame[:3, 1])
+        if signed_area(points) * np.dot(facing, heading) < 0.0:
+            points = points[::-1]
+        outlines.append((points, frame))
+
+    # Start each outline at the point lying the same way from its middle
+    # as the previous outline's start, so the skin does not twist.
+    lined_up = []
+    for index, (points, frame) in enumerate(outlines):
+        world = to_world(frame, points)
+        middle = world.mean(axis=0)
+        if index > 0:
+            reference = lined_up[-1][2]
+            across = world - middle
+            across = across - np.outer(across @ heading, heading)
+            score = across @ reference / np.maximum(np.linalg.norm(across, axis=1), 1e-12)
+            shift = int(np.argmax(score))
+            points = np.roll(points, -shift, axis=0)
+            world = np.roll(world, -shift, axis=0)
+        start = world[0] - middle
+        start = start - np.dot(start, heading) * heading
+        lined_up.append((points, frame, start))
+
+    at = np.unique(np.round(np.concatenate([_fractions(p) for p, _f, _s in lined_up]), 12))
+    rings, flats = [], []
+    for points, frame, _start in lined_up:
+        flat = _resample(points, at)
+        flats.append(flat)
+        rings.append([to_world(frame, flat)])
+
+    if clearance > 0.0:
+        # A fitted Hole also reaches `clearance` past each end.
+        rings[0][0] = rings[0][0] - heading * clearance
+        rings[-1][0] = rings[-1][0] + heading * clearance
+
+    count = len(at)
+    vertices = np.vstack([r[0] for r in rings])
+    faces = [
+        _skin(rings, closed=False),
+        _cap([flats[0]], rings[0][0], 0, -heading),
+        _cap([flats[-1]], rings[-1][0], count * (len(rings) - 1), heading),
+    ]
+    return _solid_from(vertices, np.vstack(faces), "loft")

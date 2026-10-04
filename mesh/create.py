@@ -60,9 +60,9 @@ def new_sketch(entities, frame, name: str = "Sketch") -> Shape:
 
 
 def has_sketch(shape) -> bool:
-    """A sketch, or a part made from one: its curves can be changed."""
+    """A sketch, or a part made from one outline: its curves can be changed."""
     return shape.kind == "primitive" and (
-        is_sketch(shape) or shape.params.get("primitive") in features.SOLIDS
+        is_sketch(shape) or shape.params.get("primitive") in features.ONE_OUTLINE
     )
 
 
@@ -187,6 +187,31 @@ def make_sweep(outline: Shape, path: Shape, hole: bool = False) -> Shape:
             "profile_frame": np.asarray(outline.transform, dtype=np.float64).tolist(),
             "path_entities": copy.deepcopy(path.params["entities"]),
             "path_frame": np.asarray(path.transform, dtype=np.float64).tolist(),
+        },
+        transform=np.eye(4),
+        is_hole=bool(hole),
+    )
+    _checked(lambda: shape_geometry(shape))
+    return shape
+
+
+def make_loft(sketches, hole: bool = False) -> Shape:
+    """A skin through the closed outline of each sketch, in the order given.
+    Like a sweep, its own coordinates are the world's."""
+    sketches = list(sketches)
+    if len(sketches) < 2 or not all(is_sketch(s) for s in sketches):
+        raise BuildError("Select two or more sketches, in the order to join them.")
+    shape = Shape(
+        id=uuid.uuid4().hex,
+        name=f"Loft of {sketches[0].name} to {sketches[-1].name}",
+        kind="primitive",
+        params={
+            "primitive": "loft",
+            "sections": [
+                {"entities": copy.deepcopy(s.params["entities"]),
+                 "frame": np.asarray(s.transform, dtype=np.float64).tolist()}
+                for s in sketches
+            ],
         },
         transform=np.eye(4),
         is_hole=bool(hole),

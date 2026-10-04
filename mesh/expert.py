@@ -72,6 +72,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "short straight steps.",
         "do_sweep",
     ),
+    ExpertTool(
+        "loft", "create", "&Loft...",
+        "Join two or more sketches' outlines, in the order picked, with a skin into a new "
+        "part or a hole. Each needs one closed outline with no holes; the sides run "
+        "straight from one outline to the next.",
+        "do_loft",
+    ),
 )
 
 

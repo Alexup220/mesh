@@ -114,6 +114,12 @@ PRIMITIVES: dict[str, dict] = {
         "defaults": {},
         "shelf": False,
     },
+    # Holds its outlines' curves and planes, in order (features.loft).
+    "loft": {
+        "label": "Loft",
+        "defaults": {},
+        "shelf": False,
+    },
 }
 
 HARDWARE_PRIMITIVES = ("screw_hole", "nut_trap", "insert_pocket", "magnet_pocket")

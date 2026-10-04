@@ -68,6 +68,20 @@ def ask_sweep(parent, sketches, path_id: str) -> dict | None:
     )
 
 
+def loft_fields(count: int):
+    return _result_fields(count)
+
+
+def ask_loft(parent, sketches) -> dict | None:
+    order = ", ".join(s.name for s in sketches)
+    return run_form(
+        parent, "Loft", loft_fields(len(sketches)),
+        note=f"Joins the sketches' outlines with a smooth-sided skin, in the order you picked "
+             f"them: {order}. Each sketch needs one closed outline with no holes. The sides "
+             "are straight from one outline to the next.",
+    )
+
+
 class ExpertActions:
     """Mixed into MeshWindow (see mesh.expert for the menu items)."""
 
@@ -143,10 +157,13 @@ class ExpertActions:
 
     CHANGE_SKETCH_HINT = "Select one sketch, or one part made from a sketch, to change its curves."
 
+    LOFT_NOT_REDRAWN = "A loft's outlines can't be changed. Undo the loft, change the sketches, and loft again."
+
     def do_edit_sketch(self) -> None:
         chosen = self.document.scene.selected()
         if len(chosen) != 1 or not create.has_sketch(chosen[0]):
-            self.statusBar().showMessage(self.CHANGE_SKETCH_HINT)
+            loft = len(chosen) == 1 and chosen[0].params.get("primitive") == "loft"
+            self.statusBar().showMessage(self.LOFT_NOT_REDRAWN if loft else self.CHANGE_SKETCH_HINT)
             return
         shape = chosen[0]
         entities = sketch_editor.edit_sketch(self, f"Change {shape.name}", create.sketch_entities(shape))
@@ -212,8 +229,14 @@ class ExpertActions:
 
     TWO_SKETCHES_HINT = "Select two sketches: the outline, and the path to sweep it along."
 
+    def _picked(self):
+        """The selected shapes in the order they were picked."""
+        scene = self.document.scene
+        order = {shape_id: index for index, shape_id in enumerate(scene.selection)}
+        return sorted(scene.selected(), key=lambda s: order[s.id])
+
     def _two_sketches(self):
-        chosen = self.document.scene.selected()
+        chosen = self._picked()
         if len(chosen) != 2 or not all(create.is_sketch(s) for s in chosen):
             self.statusBar().showMessage(self.TWO_SKETCHES_HINT)
             return None
@@ -241,6 +264,33 @@ class ExpertActions:
         values = ask_sweep(self, pair, create.likely_path(*pair).id)
         if values is not None:
             self.sweep_selected(values["path"], values["result"] == "hole", values["keep_sketch"])
+
+    LOFT_HINT = "Select two or more sketches, in the order to join them."
+
+    def _sketches_in_order(self):
+        chosen = self._picked()
+        if len(chosen) < 2 or not all(create.is_sketch(s) for s in chosen):
+            self.statusBar().showMessage(self.LOFT_HINT)
+            return None
+        return chosen
+
+    def loft_selected(self, hole: bool = False, keep_sketch: bool = False) -> bool:
+        sketches = self._sketches_in_order()
+        if sketches is None:
+            return False
+        shape = self._attempt("Cannot loft", lambda: create.make_loft(sketches, hole))
+        if shape is None:
+            return False
+        self._add_from_sketches("loft", sketches, shape, keep_sketch)
+        return True
+
+    def do_loft(self) -> None:
+        sketches = self._sketches_in_order()
+        if sketches is None:
+            return
+        values = ask_loft(self, sketches)
+        if values is not None:
+            self.loft_selected(values["result"] == "hole", values["keep_sketch"])
 
     def do_extrude(self) -> None:
         if self._chosen_sketch("extrude") is None:
