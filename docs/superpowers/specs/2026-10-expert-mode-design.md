@@ -69,9 +69,10 @@ closest honest version, which its tooltip states and `docs/FOLLOWUPS.md` lists.
   primitive tests are untouched. `shapes.is_reference` is what Group, Join,
   the status bar check, Save for Printing, Hollow out and Split use to leave
   it out or refuse it plainly.
-- **Plane convention.** Sketch X follows the world's X (Y when the plane
-  faces along X), sketch Y = facing x X, and the origin is the point of the
-  plane nearest the world origin, so typed numbers read like the Details
+- **Plane convention.** On an upright or sloping plane, sketch Y points up
+  (the world's height, as seen from the side the plane faces) and X to the
+  right; on a flat plane X follows the world's X. The origin is the point of
+  the plane nearest the world origin, so typed numbers read like the Details
   panel's on the workplane and on flat faces.
 - **Sketch-made parts** are new primitives (`extrude`, `revolve`, `sweep`,
   `loft`) holding a copy of their sketches' curves. Extrude's transform is its
@@ -80,7 +81,13 @@ closest honest version, which its tooltip states and `docs/FOLLOWUPS.md` lists.
   params and use the world as their own coordinates. Making one is one undo
   step that also removes the sketches unless "Keep the sketch" is ticked.
   Change Sketch redraws the outline of an extrusion, revolve or sweep (the
-  part must still come out solid); a loft is not redrawn.
+  part must still come out solid, at its fit if it is a Hole); a revolve
+  made around one of its sketch's lines (`axis_line`) follows that line; a
+  loft is not redrawn.
+- **Fits.** A Sweep or Loft grown by a fit's clearance can fail to build, so
+  `create.fit_refusal` is checked before any change that rebuilds a Hole at
+  a new fit (the Details panel, Make Hole, the fit sizes, Ungroup, Change
+  Sketch), and the change is refused with the reason.
 - **Results** are a new part or a Hole; joining and cutting stay with
   Solid/Hole + Group, as everywhere else in mesh.
 
