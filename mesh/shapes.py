@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 from shapely.geometry import Polygon
 
-from mesh import hardware, sketch, solids, text
+from mesh import features, hardware, sketch, solids, text
 from mesh.blobs import decode_mesh
 
 PRIMITIVES: dict[str, dict] = {
@@ -91,6 +91,15 @@ PRIMITIVES: dict[str, dict] = {
     "magnet_pocket": {
         "label": "Magnet pocket",
         "defaults": {"diameter": 6.0, "depth": 2.0},
+        "shelf": False,
+    },
+    # Solids made from a sketch (Expert mode; see mesh/features.py). Their
+    # params also hold the sketch's curves ("entities"), which are not a
+    # Details panel field: Sketch > Change Sketch edits them.
+    "extrude": {
+        "label": "Extrusion",
+        "defaults": {"distance": 20.0, "side": "one"},
+        "choices": {"side": features.SIDES},
         "shelf": False,
     },
 }
@@ -174,6 +183,10 @@ def primitive_mesh(kind: str, params: dict, clearance: float = 0.0) -> trimesh.T
     if kind in HARDWARE_PRIMITIVES:
         # Hardware holes add their clearance themselves, radius by radius.
         return hardware.build(kind, p, clearance)
+    if kind in features.SOLIDS:
+        # Placed by their sketch's plane, so not moved onto the workplane;
+        # a fitted Hole grows along the outline, not by scaling.
+        return features.build(kind, p, clearance)
     if kind == "text":
         # Letters grow outward along their own outline, not by scaling.
         return text.text_mesh(str(p["text"]), float(p["letter_height"]), float(p["depth"]), clearance)

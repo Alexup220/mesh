@@ -293,7 +293,7 @@ def test_change_sketch_needs_one_sketch_selected(window, monkeypatch):
     window.add_primitive("cube")
     window.do_edit_sketch()
     assert not called
-    assert window.statusBar().currentMessage() == "Select one sketch to change its curves."
+    assert window.statusBar().currentMessage() == window.CHANGE_SKETCH_HINT
 
 
 # --- Sketching on a face ------------------------------------------------------------------

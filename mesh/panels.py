@@ -80,6 +80,8 @@ FIELD_LABELS = {
     "letter_height": "Letter height (mm)",
     "size": "Size",
     "head": "Screw head",
+    "distance": "Distance (mm)",
+    "side": "Direction",
 }
 
 

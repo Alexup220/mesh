@@ -8,8 +8,32 @@ on success.
 
 from PySide6.QtCore import QTimer
 
-from mesh import create, sketch, sketch_editor
+from mesh import create, features, sketch, sketch_editor
+from mesh.panels import run_form
 from mesh.shapes import is_reference
+
+# What a tool makes from a sketch: a new solid part, or a Hole that cuts
+# the parts it is grouped with (Solid/Hole + Group, as everywhere in mesh).
+RESULTS = [("part", "A new part"), ("hole", "A hole (cuts parts when grouped with them)")]
+
+
+def _result_fields():
+    return [
+        ("result", "Make", "part", {"choices": RESULTS}),
+        ("keep_sketch", "Keep the sketch as well", False, {}),
+    ]
+
+
+def extrude_fields():
+    return [
+        ("distance", "Distance (mm)", 20.0, {"min": 0.1, "max": 10000.0}),
+        ("side", "Direction", "one", {"choices": features.SIDES}),
+    ] + _result_fields()
+
+
+def ask_extrude(parent) -> dict | None:
+    return run_form(parent, "Extrude", extrude_fields(),
+                    note="Pushes the sketch's closed outlines straight out of its plane.")
 
 
 class ExpertActions:
@@ -78,23 +102,28 @@ class ExpertActions:
         )
         return entities is not None and self.add_sketch(entities, frame)
 
-    def _chosen_sketch(self):
+    def _chosen_sketch(self, what: str = "use it"):
         chosen = self.document.scene.selected()
         if len(chosen) != 1 or not create.is_sketch(chosen[0]):
-            self.statusBar().showMessage("Select one sketch to change its curves.")
+            self.statusBar().showMessage(f"Select one sketch to {what}.")
             return None
         return chosen[0]
 
+    CHANGE_SKETCH_HINT = "Select one sketch, or one part made from a sketch, to change its curves."
+
     def do_edit_sketch(self) -> None:
-        shape = self._chosen_sketch()
-        if shape is None:
+        chosen = self.document.scene.selected()
+        if len(chosen) != 1 or not create.has_sketch(chosen[0]):
+            self.statusBar().showMessage(self.CHANGE_SKETCH_HINT)
             return
-        entities = sketch_editor.edit_sketch(self, f"Change {shape.name}", shape.params["entities"])
+        shape = chosen[0]
+        entities = sketch_editor.edit_sketch(self, f"Change {shape.name}", create.sketch_entities(shape))
         if entities is not None:
             self.set_sketch_entities(shape, entities)
 
     def set_sketch_entities(self, shape, entities) -> bool:
-        """Give a sketch new curves. One undo step; none if nothing changed."""
+        """Give a sketch, or a part made from one, new curves. One undo
+        step; none if nothing changed or the part would not come out solid."""
         changed = self._attempt("Cannot change the sketch", lambda: create.with_entities(shape, entities))
         if changed is None or changed.params == shape.params:
             return False
@@ -102,3 +131,36 @@ class ExpertActions:
         shape.params = changed.params
         self.sync()
         return True
+
+    # --- Solids from sketches -----------------------------------------------------
+
+    def _add_from_sketches(self, label: str, sources, shape, keep_sketch: bool) -> None:
+        """One undo step: add the new part and, unless kept, remove the
+        sketches it was made from (it keeps a copy of their curves)."""
+        scene = self.document.scene
+        self.document.snapshot(label)
+        if not keep_sketch:
+            scene.remove([s.id for s in sources])
+        scene.add(shape)
+        scene.select([shape.id])
+        self.sync()
+
+    def extrude_selected(self, distance: float, side: str = "one", hole: bool = False,
+                         keep_sketch: bool = False) -> bool:
+        source = self._chosen_sketch("extrude")
+        if source is None:
+            return False
+        shape = self._attempt("Cannot extrude",
+                              lambda: create.make_extrude(source, distance, side, hole))
+        if shape is None:
+            return False
+        self._add_from_sketches("extrude", [source], shape, keep_sketch)
+        return True
+
+    def do_extrude(self) -> None:
+        if self._chosen_sketch("extrude") is None:
+            return
+        values = ask_extrude(self)
+        if values is not None:
+            self.extrude_selected(values["distance"], values["side"], values["result"] == "hole",
+                                  values["keep_sketch"])

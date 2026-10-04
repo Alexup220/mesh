@@ -11,7 +11,7 @@ import uuid
 
 import numpy as np
 
-from mesh import sketch
+from mesh import features, sketch
 from mesh.builders import BuildError
 from mesh.ops import face_direction
 from mesh.scene import Shape
@@ -59,16 +59,59 @@ def new_sketch(entities, frame, name: str = "Sketch") -> Shape:
     )
 
 
+def has_sketch(shape) -> bool:
+    """A sketch, or a part made from one: its curves can be changed."""
+    return shape.kind == "primitive" and (
+        is_sketch(shape) or shape.params.get("primitive") in features.SOLIDS
+    )
+
+
+def sketch_entities(shape) -> list[dict]:
+    """The curves of a sketch, or of the sketch a part was made from."""
+    if is_sketch(shape):
+        return shape.params["entities"]
+    return shape.params.get("entities") or features.default_entities(shape.params["primitive"])
+
+
 def with_entities(shape: Shape, entities) -> Shape:
-    """A copy of `shape` (a sketch) drawing `entities` instead, checked."""
-    if not is_sketch(shape):
-        raise BuildError("Select a sketch to change its curves.")
+    """A copy of `shape` (a sketch, or a part made from one) drawing
+    `entities` instead, checked: a part must still come out solid."""
+    if not has_sketch(shape):
+        raise BuildError("Select a sketch, or a part made from one, to change its curves.")
     entities = _checked(lambda: sketch.clean_entities(entities))
     if not entities:
         raise BuildError("A sketch needs at least one curve.")
     changed = copy.deepcopy(shape)
     changed.params["entities"] = entities
+    if not is_sketch(shape):
+        _checked(lambda: shape_geometry(changed))
     return changed
+
+
+# --- Solids from sketches -----------------------------------------------------------
+
+
+def _from_sketch(source: Shape, primitive: str, label: str, params: dict, hole: bool) -> Shape:
+    """A new part made from the sketch `source`, on the sketch's plane,
+    checked to come out solid."""
+    shape = Shape(
+        id=uuid.uuid4().hex,
+        name=f"{label} of {source.name}",
+        kind="primitive",
+        params={"primitive": primitive, "entities": copy.deepcopy(source.params["entities"]), **params},
+        transform=np.asarray(source.transform, dtype=np.float64).copy(),
+        is_hole=bool(hole),
+    )
+    _checked(lambda: shape_geometry(shape))
+    return shape
+
+
+def make_extrude(source: Shape, distance: float, side: str = "one", hole: bool = False) -> Shape:
+    """The sketch's closed outlines pushed `distance` mm out of its plane."""
+    if not is_sketch(source):
+        raise BuildError("Select a sketch to extrude.")
+    return _from_sketch(source, "extrude", "Extrusion",
+                        {"distance": float(distance), "side": str(side)}, hole)
 
 
 def _boundary_loops(tm, faces) -> list[np.ndarray]:
