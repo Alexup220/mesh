@@ -62,6 +62,20 @@ def test_an_outline_drawn_elsewhere_is_moved_to_the_start_of_the_path():
     assert np.allclose(tm.bounds, [[-22, -0.1, -2], [22, 22, 2]], atol=0.05)
 
 
+def test_an_outline_on_the_starts_plane_but_away_from_it_is_moved_too():
+    # The workplane passes through the path's start, 45 mm from the circle.
+    path_frame = sketch.named_plane_frame("xz")
+    path_frame[0, 3] = -45
+    tm = features.sweep(DOT, FLAT, ELBOW, path_frame)
+    assert np.allclose(tm.bounds, [[-47, -2, 0], [-15, 2, 22]], atol=1e-6)
+
+
+def test_an_outline_drawn_around_the_start_stays_where_it_is():
+    off_centre = [{"type": "rectangle", "corner": [-1, -1], "width": 6, "height": 2}]
+    tm = features.sweep(off_centre, FLAT, ELBOW[:1], UPRIGHT)
+    assert np.allclose(tm.bounds, [[-1, -1, 0], [5, 1, 20]])
+
+
 def test_a_closed_path_makes_a_closed_ring():
     loop = [{"type": "circle", "centre": [0, 0], "diameter": 40}]
     tm = features.sweep(DOT, FLAT, loop, FLAT)

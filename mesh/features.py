@@ -266,10 +266,10 @@ def _solid_from(vertices: np.ndarray, faces: np.ndarray, what: str) -> trimesh.T
 def sweep(entities, profile_frame, path_entities, path_frame, clearance: float = 0.0) -> trimesh.Trimesh:
     """The outline carried along the path, staying square to it.
 
-    If the outline's sketch already sits across the start of the path
-    (facing along it, through its first point), it is used where it is.
-    Otherwise its middle is moved onto the start of the path and it is
-    turned to face along it. At each corner of the path the outline is cut
+    If the outline is already drawn across the start of the path (its
+    sketch facing along the path, with the path's first point within the
+    outline's extent), it is used where it is. Otherwise its middle is
+    moved onto the start of the path and it is turned to face along it. At each corner of the path the outline is cut
     on the plane halfway between the two directions (a mitre), which is
     exact for paths of straight pieces; curves are many short pieces.
     """
@@ -293,8 +293,13 @@ def sweep(entities, profile_frame, path_entities, path_frame, clearance: float =
     world = [to_world(profile_frame, np.asarray(p, dtype=np.float64)) for p in area.to_polygons()]
     x_axis, origin = profile_frame[:3, 0], profile_frame[:3, 3]
     facing = _unit(np.cross(profile_frame[:3, 0], profile_frame[:3, 1]))
+    # Where the path starts, in the outline's own sketch.
+    on_sketch = np.linalg.lstsq(profile_frame[:3, :2], start - origin, rcond=None)[0]
+    low_x, low_y, high_x, high_y = area.bounds()
     across_start = (abs(float(np.dot(facing, t0))) > math.cos(math.radians(1.0))
-                    and abs(float(np.dot(start - origin, facing))) < 1e-6)
+                    and abs(float(np.dot(start - origin, facing))) < 1e-6
+                    and low_x - 1e-6 <= on_sketch[0] <= high_x + 1e-6
+                    and low_y - 1e-6 <= on_sketch[1] <= high_y + 1e-6)
     if not across_start:
         flat = np.vstack(world)
         middle = (flat.min(axis=0) + flat.max(axis=0)) / 2.0
