@@ -84,6 +84,11 @@ class Gizmo(QObject):
         if actor is None or is_reference(shape):
             self._widget.Off()
             self._base = None
+            if actor is not None:
+                # Off() does not redraw. A sketch is often chosen from a
+                # window, not by a click in the 3D view (which redraws), so
+                # the last part's handles would stay on screen.
+                self.viewport._render()
             return
 
         self._base = np.asarray(shape.transform, dtype=np.float64).copy()
