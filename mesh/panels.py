@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from mesh.scene import DEFAULT_COLOR, DEFAULT_FIT, FITS, Shape, euler_from_transform
 from mesh.shapes import PRIMITIVES, shelf_primitives
+from mesh.text import has_letters
 
 POSITION_FIELDS = ("x", "y", "z")
 ROTATION_FIELDS = ("rx", "ry", "rz")
@@ -181,6 +182,10 @@ class Inspector(QWidget):
         if self._shape is None or self._loading:
             return
         value = widget.text()
+        if field == "text" and not has_letters(value):
+            # Nothing that would draw: put the part's own text back.
+            widget.setText(str(self._shape.params.get(field, "")))
+            return
         if value.strip() and value != self._shape.params.get(field):
             self._emit(field, value)
 

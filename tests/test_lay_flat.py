@@ -144,3 +144,75 @@ def test_viewport_reports_surface_clicks_in_pick_mode(window):
     window.viewport.set_pick_mode("lay_flat")
     window.viewport._on_click(window.viewport.interactor, None)
     assert seen_pick == [] and len(seen_surface) == 1
+
+
+# --- review fixes -----------------------------------------------------------
+
+
+def _sliver_faces(shape):
+    tm = shape_geometry(shape)
+    return [int(i) for i in np.flatnonzero(tm.area_faces < 1e-12)]
+
+
+def test_a_sliver_triangle_takes_its_neighbours_direction():
+    # A bevel leaves triangles with no area along the side of a cylinder;
+    # about half the clicks on its side land on one.
+    shape = new_primitive("cylinder")
+    shape.params["chamfer"] = 1.0
+    slivers = _sliver_faces(shape)
+    assert slivers
+    for index in slivers:
+        direction = ops.face_direction(shape, index)
+        assert np.isclose(np.linalg.norm(direction), 1.0)
+
+
+def test_lay_flat_on_a_sliver_triangle_works_in_one_undo_step(window):
+    window.add_primitive("cylinder")
+    shape = window.document.scene.shapes[0]
+    window._on_edited(shape.id, "chamfer", 1.0)
+    window._finish_edit()
+    side = next(i for i in _sliver_faces(shape)
+                if abs(ops.face_direction(shape, i)[2]) < 0.5)
+    depth = len(window.document._undo)
+    window.start_lay_flat()
+    window._on_surface_picked(shape.id, side, (10.0, 0.0, 10.0))
+    assert len(window.document._undo) == depth + 1
+    assert window.tool is None
+    # Now lying on its side: as tall as it is wide.
+    assert np.isclose(np.ptp(shape_geometry(shape).bounds[:, 2]), 20.0, atol=0.1)
+
+
+def test_a_click_that_cannot_lay_flat_leaves_no_undo_step(window, monkeypatch):
+    window.add_primitive("cube")
+    shape = window.document.scene.shapes[0]
+
+    def no_direction(*_args, **_kw):
+        raise ValueError("a direction needs a length")
+
+    monkeypatch.setattr(ops, "lay_flat", no_direction)
+    depth = len(window.document._undo)
+    before = shape.transform.copy()
+    window.start_lay_flat()
+    window._on_surface_picked(shape.id, 0, (0.0, 0.0, 0.0))
+    assert len(window.document._undo) == depth
+    assert np.array_equal(shape.transform, before)
+    assert window.tool == "lay_flat"
+
+
+def test_lay_flat_keeps_the_shape_of_a_stretched_turned_part():
+    # Stretching a turned imported part slants it; turning it must not
+    # straighten (and resize) it.
+    import trimesh
+
+    from mesh.blobs import encode_mesh
+    from mesh.scene import Shape
+
+    turned = transform_with_euler(np.eye(4), 0.0, 0.0, 45.0)
+    part = Shape(id="p", name="Box", kind="imported",
+                 params={"blob": encode_mesh(trimesh.creation.box(extents=(20.0, 20.0, 20.0)))},
+                 transform=np.diag([2.0, 1.0, 1.0, 1.0]) @ turned)
+    before = shape_geometry(part)
+    ops.lay_flat(part, (0.0, 0.0, -1.0))
+    after = shape_geometry(part)
+    assert np.isclose(after.volume, before.volume, rtol=1e-9)
+    assert np.allclose(np.ptp(after.bounds, axis=0), np.ptp(before.bounds, axis=0), atol=1e-6)

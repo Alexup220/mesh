@@ -4,6 +4,7 @@ Every mutating action snapshots the document first, mutates, then syncs.
 Keeping that order uniform is what makes undo trustworthy.
 """
 
+import copy
 import sys
 from pathlib import Path
 
@@ -34,12 +35,10 @@ from mesh.io_formats import (
 )
 from mesh.panels import Inspector, ShapeShelf
 from mesh.printcheck import check
-from mesh.scene import Document, new_primitive, transform_with_euler
+from mesh.scene import MAX_FIT_CLEARANCE, Document, new_primitive, transform_with_euler
 from mesh.shapes import shape_geometry
+from mesh.text import has_letters
 from mesh.viewport import Viewport
-
-
-MAX_FIT_CLEARANCE = 2.0
 
 
 class MeshWindow(QMainWindow):
@@ -220,9 +219,14 @@ class MeshWindow(QMainWindow):
         chosen = self.document.scene.selected()
         self.inspector.show_shape(chosen[0] if len(chosen) == 1 else None)
         if not keep_gizmo:
-            self.gizmo.attach(chosen[0] if len(chosen) == 1 else None)
+            # While a click tool waits, the drag handles stay away, or they
+            # would catch the click meant for the part.
+            self.gizmo.attach(chosen[0] if len(chosen) == 1 and self.tool is None else None)
         self.gizmo.snap_mm = self.document.scene.snap_mm
         self.update_status()
+        if self.tool is not None:
+            self.statusBar().setStyleSheet("")
+            self.statusBar().showMessage(self._tool_prompt())
 
     # Warm coral, readable on the dark theme's status bar background
     # (#1b1e22 -- see mesh/theme.py) without being alarm-red.
@@ -248,12 +252,14 @@ class MeshWindow(QMainWindow):
     def add_shape(self, shape) -> None:
         """Add one new shape as one undo step and select it. Every "add"
         (shelf, hardware holes, text) comes through here."""
-        self.document.snapshot("add")
         if self.tool == "place" and self._place_target is not None:
             point, direction = self._place_target
+            # The new shape isn't in the scene yet, so placing it first
+            # changes nothing if it fails.
             ops.place_on_face(shape, point, direction)
             # One placement, then back to landing on the workplane.
             self._clear_tool()
+        self.document.snapshot("add")
         self.document.scene.add(shape)
         self.document.scene.select([shape.id])
         self.sync()
@@ -268,10 +274,13 @@ class MeshWindow(QMainWindow):
 
     def do_undo(self) -> None:
         if self.document.undo():
+            # A clicked face or point belongs to the scene as it was.
+            self._clear_tool()
             self.sync()
 
     def do_redo(self) -> None:
         if self.document.redo():
+            self._clear_tool()
             self.sync()
 
     def do_select_all(self) -> None:
@@ -562,7 +571,7 @@ class MeshWindow(QMainWindow):
     def add_text(self, text: str, letter_height: float = 10.0, depth: float = 2.0,
                  engraved: bool = False) -> bool:
         """Raised text is a solid; engraved text is a Hole. One undo step."""
-        if not text.strip():
+        if not has_letters(text):
             self._warn("Cannot add text", "Type some text first.")
             return False
         shape = new_primitive("text", name=f"Text: {text}")
@@ -612,6 +621,13 @@ class MeshWindow(QMainWindow):
             action.blockSignals(True)
             action.setChecked(False)
             action.blockSignals(False)
+
+    def _tool_prompt(self) -> str:
+        if self.tool == "place" and self._place_target is not None:
+            return self.TOOL_PROMPTS["place_ready"]
+        if self.tool == "measure" and len(self._measure_points) == 1:
+            return self.TOOL_PROMPTS["measure_second"]
+        return self.TOOL_PROMPTS[self.tool]
 
     def stop_tool(self) -> None:
         if self.tool is None:
@@ -691,11 +707,14 @@ class MeshWindow(QMainWindow):
         try:
             shape = scene.get(shape_id)
             direction = ops.face_direction(shape, face_index, scene.fit_clearances)
-        except (KeyError, IndexError):
+            # Attempt on a copy first: a failure leaves no undo step behind.
+            turned = copy.deepcopy(shape)
+            ops.lay_flat(turned, direction)
+        except (KeyError, IndexError, ValueError):
             self.statusBar().showMessage("Click on a face of a part. Esc cancels.")
             return
         self.document.snapshot("lay flat")
-        ops.lay_flat(shape, direction)
+        shape.transform = turned.transform
         scene.select([shape.id])
         self._clear_tool()
         self.sync()
@@ -756,12 +775,28 @@ class MeshWindow(QMainWindow):
             # A drop-down choice (screw size, head) or typed text.
             shape.params[field] = value
         else:
+            if field == "depth" and self._opens_at_top(shape):
+                # A hardware hole or engraved text is measured down from its
+                # opening: keep the opening where it is (flush with the face
+                # it was placed on) and move the bottom instead.
+                old = float(shape.params.get("depth", value))
+                lift = np.eye(4, dtype=np.float64)
+                lift[2, 3] = old - float(value)
+                shape.transform = np.asarray(shape.transform, dtype=np.float64) @ lift
             shape.params[field] = float(value)
 
         # Defer the expensive part (snapshot already happened above, once
         # per burst) until typing pauses. Every keystroke restarts the
         # window instead of firing sync() itself.
         self._edit_timer.start()
+
+    OPENS_AT_TOP = ("screw_hole", "nut_trap", "magnet_pocket", "text")
+
+    def _opens_at_top(self, shape) -> bool:
+        return (
+            shape.is_hole and shape.kind == "primitive"
+            and shape.params.get("primitive") in self.OPENS_AT_TOP
+        )
 
     def _finish_edit(self) -> None:
         """Fires once, EDIT_COALESCE_MS after the last keystroke in a burst
@@ -789,6 +824,8 @@ class MeshWindow(QMainWindow):
         # empty document) was open before rather than leaving the window
         # half-switched to a document it couldn't actually display.
         previous_document = self.document
+        # A clicked face or measured point belongs to the old project.
+        self._clear_tool()
         self.document = new_document
         try:
             self.sync()

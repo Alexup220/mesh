@@ -267,3 +267,50 @@ def test_fit_clearance_dialog_reads_back_its_values(qapp, close_qt_widget):
 
     dialog = close_qt_widget(FormDialog(None, "Fit clearances", fit_clearance_fields(CLEAR)))
     assert dialog.values() == CLEAR
+
+
+# --- review fixes -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("damaged", [[0.1, 0.2, 0.4], "abc", 5, None])
+def test_a_project_with_damaged_fit_clearances_opens_with_the_defaults(tmp_path, damaged):
+    path = tmp_path / "damaged.mesh"
+    save_project(Scene(), path)
+    document = json.loads(path.read_text())
+    document["scene"]["fit_clearances"] = damaged
+    path.write_text(json.dumps(document))
+    assert load_project(path).fit_clearances == DEFAULT_FIT_CLEARANCES
+
+
+@pytest.mark.parametrize("bad", [-3.0, "nan", "inf", 2.5, "wide"])
+def test_out_of_range_fit_clearances_fall_back_to_the_default(tmp_path, bad):
+    path = tmp_path / "odd.mesh"
+    save_project(Scene(), path)
+    document = json.loads(path.read_text())
+    document["scene"]["fit_clearances"] = {"press": 0.15, "snug": bad}
+    path.write_text(json.dumps(document))
+    clearances = load_project(path).fit_clearances
+    assert clearances == {**DEFAULT_FIT_CLEARANCES, "press": 0.15}
+
+
+def test_a_turned_group_hole_gets_its_fit_across_its_own_sides():
+    from mesh.scene import transform_with_euler
+
+    slot = new_primitive("cube")
+    slot.params.update(width=40.0, depth=4.0, height=10.0)
+    hole = make_group([slot], name="Slot")
+    hole.is_hole = True
+    hole.fit = "loose"
+    hole.transform = transform_with_euler(hole.transform, 0.0, 0.0, 45.0)
+    turned_back = shape_geometry(hole, DEFAULT_FIT_CLEARANCES)
+    turned_back.apply_transform(np.linalg.inv(hole.transform))
+    size = turned_back.bounds[1] - turned_back.bounds[0]
+    assert np.allclose(size, (40.8, 4.8, 10.8), atol=1e-6)
+
+
+def test_a_stretched_imported_hole_still_gets_its_fit_in_millimetres():
+    block = Shape(id="s", name="Block", kind="imported",
+                  params={"blob": encode_mesh(trimesh.creation.box(extents=(10.0, 6.0, 4.0)))},
+                  transform=np.diag([2.0, 1.0, 1.0, 1.0]), is_hole=True, fit="snug")
+    size = np.ptp(shape_geometry(block, DEFAULT_FIT_CLEARANCES).bounds, axis=0)
+    assert np.allclose(size, (20.4, 6.4, 4.4), atol=1e-6)

@@ -87,3 +87,44 @@ def test_escape_or_measure_again_exits_and_removes_the_line(window, how):
 
 def test_measure_shortcut_is_m(window):
     assert window.act_measure.shortcut().toString() == "M"
+
+
+# --- review fixes -----------------------------------------------------------
+
+
+def test_undo_ends_a_measurement_and_removes_its_line(window):
+    window.add_primitive("cube")
+    window.add_primitive("sphere")
+    shape = window.document.scene.shapes[0]
+    window.toggle_measure(True)
+    window._on_surface_picked(shape.id, 0, (0.0, 0.0, 0.0))
+    window._on_surface_picked(shape.id, 0, (1.0, 0.0, 0.0))
+    window.do_undo()
+    assert window.tool is None and window._measure_points == []
+    assert window.viewport.measure_actor is None
+    assert not window.act_measure.isChecked()
+
+
+def test_opening_a_project_ends_a_measurement(window, tmp_path):
+    from mesh.io_formats import save_project
+    from mesh.scene import Scene, new_primitive
+
+    path = tmp_path / "other.mesh"
+    other = Scene()
+    other.add(new_primitive("cube"))
+    save_project(other, path)
+    window.add_primitive("cube")
+    window.toggle_measure(True)
+    window._on_surface_picked(window.document.scene.shapes[0].id, 0, (0.0, 0.0, 0.0))
+    window.open_from(path)
+    assert window.tool is None and window._measure_points == []
+
+
+def test_the_drag_handles_stay_away_while_measuring(window):
+    window.add_primitive("cube")
+    shape = window.document.scene.shapes[0]
+    window.toggle_measure(True)
+    window._on_surface_picked(shape.id, 0, (0.0, 0.0, 0.0))
+    window.sync()
+    assert window.gizmo.attached_id is None
+    assert window.statusBar().currentMessage() == window.TOOL_PROMPTS["measure_second"]

@@ -87,14 +87,21 @@ def outline(text: str) -> tuple[list[list[tuple[float, float]]], float]:
     return pen.contours, cap_height
 
 
+def has_letters(text: str) -> bool:
+    """True when the text draws something. Spaces don't, and nor do
+    invisible characters such as a zero-width space (which often comes
+    along with text copied from a web page)."""
+    return bool(text.strip()) and bool(outline(text)[0])
+
+
 def text_mesh(text: str, letter_height: float, depth: float, clearance: float = 0.0) -> trimesh.Trimesh:
     """One line of text as a solid: `letter_height` mm is the height of a
     capital letter, `depth` mm how far the letters stand up. Centred on
     X/Y, resting on Z = 0. `clearance` > 0 grows every letter outward by
     that much on every side (for engraved text with a fit)."""
-    if not text.strip():
+    contours, cap_height = outline(text) if text.strip() else ([], 1.0)
+    if not contours:
         raise ValueError("text needs at least one visible character")
-    contours, cap_height = outline(text)
     scale = float(letter_height) / cap_height
     polygons = [np.asarray(c, dtype=np.float64) * scale for c in contours]
     shape = m3.CrossSection(polygons, m3.FillRule.NonZero)

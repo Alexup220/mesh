@@ -134,3 +134,51 @@ def test_dialog_values_reach_add_text(window, monkeypatch):
     window.do_add_text()
     shape = window.document.scene.shapes[0]
     assert shape.is_hole and shape.params["letter_height"] == 5.0
+
+
+# --- review fixes -----------------------------------------------------------
+
+INVISIBLE = ["​", "﻿", "⁠ ​"]
+
+
+@pytest.mark.parametrize("value", INVISIBLE)
+def test_invisible_characters_alone_are_not_text(value):
+    # A zero-width space often comes along with text copied from a web page;
+    # it draws nothing, so it must not make an empty part.
+    assert text.has_letters(value) is False
+    with pytest.raises(ValueError):
+        text.text_mesh(value, 10.0, 2.0)
+
+
+def test_text_with_letters_and_an_invisible_character_still_works():
+    assert text.has_letters("​Hi") is True
+    assert text.text_mesh("​Hi", 10.0, 2.0).is_watertight
+
+
+@pytest.mark.parametrize("value", INVISIBLE)
+def test_adding_invisible_text_adds_nothing_and_no_undo_step(window, monkeypatch, value):
+    from PySide6.QtWidgets import QMessageBox
+
+    seen = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: seen.append(a[2]))
+    depth = len(window.document._undo)
+    assert window.add_text(value) is False
+    assert window.document.scene.shapes == []
+    assert len(window.document._undo) == depth
+    assert seen
+
+
+def test_typing_invisible_text_in_the_details_panel_keeps_the_old_text(qapp, close_qt_widget):
+    from mesh.panels import Inspector
+
+    inspector = close_qt_widget(Inspector())
+    shape = new_primitive("text")
+    shape.params["text"] = "Hi"
+    inspector.show_shape(shape)
+    seen = []
+    inspector.edited.connect(lambda *args: seen.append(args))
+    box = inspector.text_boxes["text"]
+    box.setText("​")
+    box.editingFinished.emit()
+    assert seen == []
+    assert box.text() == "Hi"

@@ -6,6 +6,7 @@ save/load, and the numeric inspector correct by construction.
 """
 
 import copy
+import math
 import uuid
 from dataclasses import dataclass, field
 
@@ -31,6 +32,24 @@ FITS = {
 }
 DEFAULT_FIT = "exact"
 DEFAULT_FIT_CLEARANCES = {"press": 0.1, "snug": 0.2, "loose": 0.4}
+MAX_FIT_CLEARANCE = 2.0  # mm per side; the Fit clearances dialog allows no more
+
+
+def _read_fit_clearances(raw) -> dict:
+    """The fit clearances from a project file. Anything missing, damaged or
+    out of range falls back to the default for that fit, so a hand-edited
+    file still opens and never gives a hole a negative or endless size."""
+    clearances = dict(DEFAULT_FIT_CLEARANCES)
+    if not isinstance(raw, dict):
+        return clearances
+    for key in DEFAULT_FIT_CLEARANCES:
+        try:
+            value = float(raw[key])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(value) and 0.0 <= value <= MAX_FIT_CLEARANCE:
+            clearances[key] = value
+    return clearances
 
 
 @dataclass
@@ -131,14 +150,7 @@ class Scene:
             selection=list(d.get("selection", [])),
             build_volume=tuple(d.get("build_volume", DEFAULT_BUILD_VOLUME)),
             snap_mm=d.get("snap_mm", DEFAULT_SNAP_MM),
-            fit_clearances={
-                **DEFAULT_FIT_CLEARANCES,
-                **{
-                    k: float(v)
-                    for k, v in (d.get("fit_clearances") or {}).items()
-                    if k in DEFAULT_FIT_CLEARANCES
-                },
-            },
+            fit_clearances=_read_fit_clearances(d.get("fit_clearances")),
         )
 
 

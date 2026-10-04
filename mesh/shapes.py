@@ -143,7 +143,8 @@ def hole_clearance(shape, clearances: dict | None) -> float:
     """
     if not clearances or not getattr(shape, "is_hole", False):
         return 0.0
-    return float(clearances.get(getattr(shape, "fit", "exact"), 0.0))
+    value = float(clearances.get(getattr(shape, "fit", "exact"), 0.0))
+    return value if np.isfinite(value) and value > 0.0 else 0.0
 
 
 def primitive_mesh(kind: str, params: dict, clearance: float = 0.0) -> trimesh.Trimesh:
@@ -257,13 +258,16 @@ def _chamfer(kind: str, p: dict, tm: trimesh.Trimesh) -> trimesh.Trimesh:
     return solids.chamfer_bottom(tm, footprint, chamfer, height, SEGMENTS)
 
 
-def _grow_baked(tm: trimesh.Trimesh, clearance: float) -> trimesh.Trimesh:
+def _grow_baked(tm: trimesh.Trimesh, clearance) -> trimesh.Trimesh:
     """Grow baked (imported/group) geometry by `clearance` on every side.
 
     There are no size params to grow, so this scales each axis about the
-    shape's centre so that each outside size grows by 2 * clearance. Exact
-    for box-like shapes, approximate for anything else.
+    shape's centre so that each outside size grows by 2 * clearance (one
+    value, or one per axis). Exact for box-like shapes, approximate for
+    anything else. shape_geometry calls it in the shape's own frame, before
+    its turn, so a turned Hole grows across its own sides.
     """
+    clearance = np.broadcast_to(np.asarray(clearance, dtype=np.float64), (3,))
     size = tm.bounds[1] - tm.bounds[0]
     centre = tm.bounds.mean(axis=0)
     factors = np.where(size > 1e-9, (size + 2.0 * clearance) / np.maximum(size, 1e-9), 1.0)
@@ -293,7 +297,12 @@ def shape_geometry(shape, clearances: dict | None = None) -> trimesh.Trimesh:
     else:
         raise KeyError(f"unknown shape kind: {shape.kind}")
     tm = tm.copy()
-    tm.apply_transform(np.asarray(shape.transform, dtype=np.float64))
+    transform = np.asarray(shape.transform, dtype=np.float64)
     if clearance > 0.0 and shape.kind != "primitive":
-        tm = _grow_baked(tm, clearance)
+        # Grown in the shape's own frame, by the clearance divided by the
+        # transform's stretch along each of its axes, so the world-space
+        # room is `clearance` on every side however the hole is turned.
+        stretch = np.linalg.norm(transform[:3, :3], axis=0)
+        tm = _grow_baked(tm, clearance / np.maximum(stretch, 1e-9))
+    tm.apply_transform(transform)
     return tm

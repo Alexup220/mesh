@@ -134,3 +134,74 @@ def test_unchecking_or_escape_turns_the_mode_off(window):
 def test_place_mode_needs_a_part_to_click(window):
     window.act_place.trigger()
     assert window.tool is None and not window.act_place.isChecked()
+
+
+# --- review fixes -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind, params", [
+    ("screw_hole", {"size": "M3", "head": "plain"}),
+    ("magnet_pocket", {"diameter": 6.0, "depth": 2.0}),
+])
+def test_changing_a_placed_holes_depth_keeps_its_opening_on_the_face(window, kind, params):
+    base = _start_with_block(window)
+    window.act_place.trigger()
+    window._on_surface_picked(base.id, face_pointing(base, (0, 0, 1)), (0.0, 0.0, 20.0))
+    window.add_hardware(kind, params)
+    hole = window.document.scene.shapes[-1]
+    assert np.isclose(shape_geometry(hole).bounds[1][2], 20.0, atol=1e-6)
+    depth = len(window.document._undo)
+    window._on_edited(hole.id, "depth", 1.5)
+    window._finish_edit()
+    tm = shape_geometry(hole)
+    assert np.isclose(tm.bounds[1][2], 20.0, atol=1e-6)
+    assert np.isclose(tm.bounds[0][2], 18.5, atol=1e-6)
+    assert len(window.document._undo) == depth + 1
+
+
+def test_changing_a_raised_texts_depth_keeps_it_on_the_face(window):
+    base = _start_with_block(window)
+    window.act_place.trigger()
+    window._on_surface_picked(base.id, face_pointing(base, (0, 0, 1)), (0.0, 0.0, 20.0))
+    window.add_text("Hi")
+    label = window.document.scene.shapes[-1]
+    window._on_edited(label.id, "depth", 5.0)
+    window._finish_edit()
+    assert np.isclose(shape_geometry(label).bounds[0][2], 20.0, atol=1e-6)
+
+
+def test_undo_forgets_the_clicked_face(window):
+    base = _start_with_block(window)
+    window.add_primitive("sphere")
+    window.act_place.trigger()
+    window._on_surface_picked(base.id, face_pointing(base, (0, 0, 1)), (0.0, 0.0, 20.0))
+    window.do_undo()
+    assert window.tool is None and window._place_target is None
+    assert not window.act_place.isChecked()
+
+
+def test_the_drag_handles_stay_away_while_waiting_for_a_face(window):
+    _start_with_block(window)
+    window.act_place.trigger()
+    # Adding a shape before clicking a face syncs the window; the handles
+    # must not come back and catch the next click.
+    window.add_primitive("cylinder")
+    assert window.tool == "place"
+    assert window.gizmo.attached_id is None
+    assert window.statusBar().currentMessage() == window.TOOL_PROMPTS["place"]
+
+
+def test_a_failed_placement_takes_no_undo_step(window, monkeypatch):
+    base = _start_with_block(window)
+    window.act_place.trigger()
+    window._on_surface_picked(base.id, face_pointing(base, (0, 0, 1)), (0.0, 0.0, 20.0))
+
+    def fails(*_args, **_kw):
+        raise ValueError("a direction needs a length")
+
+    monkeypatch.setattr(ops, "place_on_face", fails)
+    depth = len(window.document._undo)
+    with pytest.raises(ValueError):
+        window.add_primitive("sphere")
+    assert len(window.document._undo) == depth
+    assert len(window.document.scene.shapes) == 1
