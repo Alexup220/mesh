@@ -77,6 +77,21 @@ def ask_combine(parent, parts) -> dict | None:
     return run_form(parent, "Combine", combine_fields(parts), note=COMBINE_NOTE)
 
 
+def split_body_fields(parts):
+    return [
+        ("part", "Part to split", parts[0].id, {"choices": [(s.id, s.name) for s in parts]}),
+        ("keep_tool", "Keep the part used to split it as well", False, {}),
+    ]
+
+
+def ask_split_body(parent, parts) -> dict | None:
+    return run_form(
+        parent, "Split Body", split_body_fields(parts),
+        note="Splits one part into the piece inside the other part and the piece outside it, "
+             "where they stand.",
+    )
+
+
 def ask_move_copy(parent) -> dict | None:
     return run_form(
         parent, "Move or Copy", move_copy_fields(),
@@ -268,3 +283,52 @@ class ModifyActions:
         values = ask_combine(self, parts)
         if values is not None:
             self.combine_selected(values["target"], values["op"], values["keep_tools"])
+
+    # --- Split body --------------------------------------------------------------------
+
+    SPLIT_BODY_HINT = "Select the part to split and a sketch or another part to split it with."
+
+    def _split_pair(self):
+        """(the parts the selection could split, the sketch to split by or
+        None), or None (and a message) if the selection isn't two things."""
+        chosen = self._picked()
+        guides = [s for s in chosen if is_reference(s)]
+        parts = [s for s in chosen if not is_reference(s)]
+        if len(chosen) != 2 or len(guides) > 1 or not parts:
+            self.statusBar().showMessage(self.SPLIT_BODY_HINT)
+            return None
+        return parts, (guides[0] if guides else None)
+
+    def split_body_selected(self, part_id: str | None = None, keep_tool: bool = False) -> bool:
+        """Split the selected part by the selected sketch's plane, or one
+        selected part by the other (`part_id`, or the first picked). One
+        undo step; a sketch stays, a part used to split goes unless kept."""
+        pair = self._split_pair()
+        if pair is None:
+            return False
+        parts, guide = pair
+        part = next((s for s in parts if s.id == part_id), parts[0])
+        tool = guide or next(s for s in parts if s is not part)
+        scene = self.document.scene
+        pieces = self._attempt("Cannot split", lambda: modify.split_body(part, tool, scene.fit_clearances))
+        if pieces is None:
+            return False
+        self.document.snapshot("split body")
+        scene.remove([part.id] + ([] if guide is not None or keep_tool else [tool.id]))
+        for piece in pieces:
+            scene.add(piece)
+        scene.select([p.id for p in pieces])
+        self.sync()
+        return True
+
+    def do_split_body(self) -> None:
+        pair = self._split_pair()
+        if pair is None:
+            return
+        parts, guide = pair
+        if guide is not None:
+            self.split_body_selected(parts[0].id)
+            return
+        values = ask_split_body(self, parts)
+        if values is not None:
+            self.split_body_selected(values["part"], values["keep_tool"])

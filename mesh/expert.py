@@ -106,6 +106,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "Ungroup gives the parts back.",
         "do_combine",
     ),
+    ExpertTool(
+        "split_body", "modify", "Split &Body...",
+        "Split a part where it stands: select it and a sketch to cut it along the sketch's "
+        "plane, or another part to cut it into the piece inside that part and the piece "
+        "outside. Ungroup on a piece gives the part back.",
+        "do_split_body",
+    ),
 )
 
 

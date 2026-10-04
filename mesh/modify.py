@@ -19,9 +19,10 @@ from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
 from mesh import features, sketch
-from mesh.builders import GUIDES_ARE_NOT_PARTS, BuildError
+from mesh.builders import GUIDES_ARE_NOT_PARTS, BuildError, _group
 from mesh.ops import (
     AXES,
+    NothingLeftError,
     NothingToCombineError,
     _canonical,
     fresh_ids,
@@ -29,7 +30,9 @@ from mesh.ops import (
     rotate_about,
     rotation_between,
 )
+from mesh.scene import new_primitive
 from mesh.shapes import HARDWARE_PRIMITIVES, is_reference, primitive_mesh, shape_geometry
+from mesh.solids import to_manifold
 
 MOVE_LIMIT = 10000.0  # mm: the furthest one move may go along each line
 
@@ -374,3 +377,76 @@ def combine(target, tools, op: str, keep_tools: bool = False, clearances: dict |
     group.color = target.color
     return group
 
+
+# --- Split body -----------------------------------------------------------------------
+
+
+def _half_space(origin, normal, size: float, color: str):
+    """A Hole filling the side of a plane that `normal` points to, `size`
+    mm across, its flat bottom exactly on the plane."""
+    cutter = new_primitive("cube", name="Cut away")
+    cutter.params.update(width=size, depth=size, height=size)
+    cutter.transform[:3, :3] = rotation_between((0.0, 0.0, 1.0), normal)
+    cutter.transform[:3, 3] = origin
+    cutter.is_hole = True
+    cutter.color = color
+    return cutter
+
+
+def split_body(part, tool, clearances: dict | None = None) -> list:
+    """`part` cut in two where it stands: by the plane of the sketch `tool`
+    (the side the sketch faces first), or by the part `tool` into the piece
+    inside it and the piece outside. Each piece is a group of a copy of the
+    part and what was cut away from it, so Ungroup gives the part back.
+    Exact."""
+    if part.id == tool.id:
+        raise BuildError("Select the part to split and the sketch or part to split it with.")
+    if is_reference(part):
+        raise BuildError(GUIDES_ARE_NOT_PARTS.format(tool="Split Body"))
+    if part.is_hole:
+        raise BuildError("Split Body works on solid parts. This one is a Hole.")
+    tm = shape_geometry(part, clearances)
+
+    def copy_of(shape):
+        return fresh_ids(copy.deepcopy(shape))
+
+    if is_reference(tool):
+        frame = np.asarray(tool.transform, dtype=np.float64)
+        normal = frame[:3, 2] / np.linalg.norm(frame[:3, 2])
+        offset = float(normal @ frame[:3, 3])
+        sides = to_manifold(tm).split_by_plane(tuple(normal), offset)
+        if min(side.volume() for side in sides) < 1e-3:
+            raise BuildError(
+                f"The plane of {tool.name} misses {part.name}. Move the sketch so its plane "
+                "goes through the part."
+            )
+        centre = tm.bounds.mean(axis=0)
+        origin = centre - (normal @ centre - offset) * normal
+        # The plane crosses the part, so no point of it is further than the
+        # length of its box's diagonal from `origin`.
+        size = 2.0 * float(np.linalg.norm(tm.bounds[1] - tm.bounds[0])) + 2.0
+        return [
+            _group([copy_of(part), _half_space(origin, -normal, size, part.color)],
+                   f"{part.name} (piece 1)", clearances),
+            _group([copy_of(part), _half_space(origin, normal, size, part.color)],
+                   f"{part.name} (piece 2)", clearances),
+        ]
+
+    inside_tool, outside_tool = copy_of(tool), copy_of(tool)
+    for cutter, hole in ((inside_tool, False), (outside_tool, True)):
+        cutter.is_hole, cutter.fit = hole, "exact"
+    try:
+        inside = make_boolean_group([copy_of(part), inside_tool], "intersection",
+                                    f"{part.name} (inside {tool.name})", clearances)
+    except NothingLeftError as exc:
+        raise BuildError(f"{tool.name} doesn't overlap {part.name}, so there is nothing to split.") from exc
+    except NothingToCombineError as exc:
+        raise BuildError(str(exc)) from exc
+    try:
+        outside = _group([copy_of(part), outside_tool], f"{part.name} (outside {tool.name})", clearances)
+    except NothingLeftError as exc:
+        raise BuildError(
+            f"{tool.name} covers all of {part.name}, so nothing would be left outside it."
+        ) from exc
+    inside.color = outside.color = part.color
+    return [inside, outside]
