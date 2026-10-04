@@ -91,15 +91,20 @@ def with_entities(shape: Shape, entities) -> Shape:
 # --- Solids from sketches -----------------------------------------------------------
 
 
-def _from_sketch(source: Shape, primitive: str, label: str, params: dict, hole: bool) -> Shape:
-    """A new part made from the sketch `source`, on the sketch's plane,
-    checked to come out solid."""
+def _from_sketch(source: Shape, primitive: str, label: str, params: dict, hole: bool,
+                 local=None) -> Shape:
+    """A new part made from the sketch `source`, checked to come out solid.
+    It sits on the sketch's plane, moved by `local` (in the sketch's own
+    coordinates) when given."""
+    transform = np.asarray(source.transform, dtype=np.float64).copy()
+    if local is not None:
+        transform = transform @ local
     shape = Shape(
         id=uuid.uuid4().hex,
         name=f"{label} of {source.name}",
         kind="primitive",
         params={"primitive": primitive, "entities": copy.deepcopy(source.params["entities"]), **params},
-        transform=np.asarray(source.transform, dtype=np.float64).copy(),
+        transform=transform,
         is_hole=bool(hole),
     )
     _checked(lambda: shape_geometry(shape))
@@ -112,6 +117,45 @@ def make_extrude(source: Shape, distance: float, side: str = "one", hole: bool =
         raise BuildError("Select a sketch to extrude.")
     return _from_sketch(source, "extrude", "Extrusion",
                         {"distance": float(distance), "side": str(side)}, hole)
+
+
+def revolve_axes(source: Shape) -> list[tuple[str, str]]:
+    """The lines a sketch's outline can turn around: (key, plain label).
+    The sketch's own Y and X lines, then every straight line drawn in it."""
+    choices = [
+        ("y", "The sketch's Y line (through 0, 0, going up)"),
+        ("x", "The sketch's X line (through 0, 0, going right)"),
+    ]
+    for index, entity in enumerate(source.params.get("entities", [])):
+        if entity.get("type") == "line":
+            choices.append((f"line:{index}", sketch.describe(entity)))
+    return choices
+
+
+def revolve_axis(source: Shape, key: str) -> list[float]:
+    """The axis [x, y, dx, dy] a key from revolve_axes stands for."""
+    if key == "y":
+        return [0.0, 0.0, 0.0, 1.0]
+    if key == "x":
+        return [0.0, 0.0, 1.0, 0.0]
+    try:
+        entity = source.params["entities"][int(key.removeprefix("line:"))]
+    except (KeyError, IndexError, ValueError) as exc:
+        raise BuildError("Choose a line of the sketch to turn around.") from exc
+    if not key.startswith("line:") or entity.get("type") != "line":
+        raise BuildError("Choose a line of the sketch to turn around.")
+    (sx, sy), (ex, ey) = entity["start"], entity["end"]
+    return [float(sx), float(sy), float(ex - sx), float(ey - sy)]
+
+
+def make_revolve(source: Shape, axis_key: str = "y", angle: float = 360.0, hole: bool = False) -> Shape:
+    """The sketch's closed outlines turned `angle` degrees about a line."""
+    if not is_sketch(source):
+        raise BuildError("Select a sketch to revolve.")
+    axis = revolve_axis(source, axis_key)
+    local = _checked(lambda: features.axis_frame(axis))
+    return _from_sketch(source, "revolve", "Revolve",
+                        {"axis": axis, "angle": float(angle)}, hole, local)
 
 
 def _boundary_loops(tm, faces) -> list[np.ndarray]:

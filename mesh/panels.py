@@ -82,6 +82,7 @@ FIELD_LABELS = {
     "head": "Screw head",
     "distance": "Distance (mm)",
     "side": "Direction",
+    "angle": "Angle (degrees)",
 }
 
 
@@ -120,6 +121,9 @@ class Inspector(QWidget):
             box.setSingleStep(1.0)
             if field in ROTATION_FIELDS:
                 box.setRange(-360.0, 360.0)
+            elif field == "angle":
+                # How far a Revolve turns: at most one whole turn.
+                box.setRange(0.1, 360.0)
             elif field in SIZE_FIELDS:
                 box.setRange(0.0 if field in ZERO_ALLOWED else 0.1, 10000.0)
             else:

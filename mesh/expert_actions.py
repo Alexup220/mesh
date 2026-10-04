@@ -36,6 +36,22 @@ def ask_extrude(parent) -> dict | None:
                     note="Pushes the sketch's closed outlines straight out of its plane.")
 
 
+def revolve_fields(axes):
+    return [
+        ("axis", "Turn around", axes[0][0], {"choices": axes}),
+        ("angle", "Angle (degrees)", 360.0, {"min": 0.1, "max": 360.0}),
+    ] + _result_fields()
+
+
+def ask_revolve(parent, axes) -> dict | None:
+    return run_form(
+        parent, "Revolve", revolve_fields(axes),
+        note="Turns the sketch's closed outlines around a line, like a part on a lathe. "
+             "The outline must lie all on one side of the line. Round surfaces are made "
+             "of narrow flat strips, like a cylinder's.",
+    )
+
+
 class ExpertActions:
     """Mixed into MeshWindow (see mesh.expert for the menu items)."""
 
@@ -156,6 +172,27 @@ class ExpertActions:
             return False
         self._add_from_sketches("extrude", [source], shape, keep_sketch)
         return True
+
+    def revolve_selected(self, axis: str = "y", angle: float = 360.0, hole: bool = False,
+                         keep_sketch: bool = False) -> bool:
+        source = self._chosen_sketch("revolve")
+        if source is None:
+            return False
+        shape = self._attempt("Cannot revolve",
+                              lambda: create.make_revolve(source, axis, angle, hole))
+        if shape is None:
+            return False
+        self._add_from_sketches("revolve", [source], shape, keep_sketch)
+        return True
+
+    def do_revolve(self) -> None:
+        source = self._chosen_sketch("revolve")
+        if source is None:
+            return
+        values = ask_revolve(self, create.revolve_axes(source))
+        if values is not None:
+            self.revolve_selected(values["axis"], values["angle"], values["result"] == "hole",
+                                  values["keep_sketch"])
 
     def do_extrude(self) -> None:
         if self._chosen_sketch("extrude") is None:

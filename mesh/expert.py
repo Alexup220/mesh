@@ -59,6 +59,12 @@ TOOLS: tuple[ExpertTool, ...] = (
         "new part or a hole. The distance stays editable in the Details panel.",
         "do_extrude", "E",
     ),
+    ExpertTool(
+        "revolve", "create", "&Revolve...",
+        "Turn the selected sketch's closed outlines around a line, like a lathe, into a "
+        "new part or a hole. Round surfaces are narrow flat strips, as on a cylinder.",
+        "do_revolve",
+    ),
 )
 
 

@@ -102,6 +102,12 @@ PRIMITIVES: dict[str, dict] = {
         "choices": {"side": features.SIDES},
         "shelf": False,
     },
+    # Also holds "axis", the line it turns around (see features.revolve).
+    "revolve": {
+        "label": "Revolve",
+        "defaults": {"angle": 360.0},
+        "shelf": False,
+    },
 }
 
 HARDWARE_PRIMITIVES = ("screw_hole", "nut_trap", "insert_pocket", "magnet_pocket")
