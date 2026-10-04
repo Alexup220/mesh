@@ -111,3 +111,29 @@ def test_dialog_values_reach_the_generator(window, monkeypatch):
     monkeypatch.setattr(panels, "run_form", accept_defaults)
     window.do_box_with_lid()
     assert len(window.document.scene.shapes) == 2
+
+
+# --- review fixes -----------------------------------------------------------
+
+
+def test_a_box_too_short_for_its_lid_fit_is_refused():
+    clearances = {**DEFAULT_FIT_CLEARANCES, "loose": 1.0}
+    with pytest.raises(BuildError, match="too short"):
+        box_with_lid(60.0, 40.0, 10.5, 3.0, 6.0, "loose", clearances)
+
+
+def test_the_largest_fit_clearance_never_crashes():
+    clearances = {**DEFAULT_FIT_CLEARANCES, "loose": 2.0}
+    try:
+        body, lid = box_with_lid(60.0, 40.0, 14.0, 5.0, 6.0, "loose", clearances)
+    except BuildError:
+        return
+    assert shape_geometry(body).is_volume and shape_geometry(lid).is_volume
+
+
+def test_the_wall_the_refusal_suggests_is_accepted():
+    with pytest.raises(BuildError) as raised:
+        box_with_lid(60.0, 40.0, 30.0, 1.0, 6.0, "snug", DEFAULT_FIT_CLEARANCES)
+    suggested = float(str(raised.value).split("at least ")[1].split(" mm")[0])
+    body, lid = box_with_lid(60.0, 40.0, 30.0, suggested, 6.0, "snug", DEFAULT_FIT_CLEARANCES)
+    assert shape_geometry(lid).is_volume

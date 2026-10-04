@@ -192,3 +192,95 @@ def test_dialog_says_when_the_result_is_approximate(window, monkeypatch):
     window.do_hollow()
     assert seen["note"] is None
     assert seen["keys"] == ["wall", "open_top", "drain"]
+
+
+# --- review fixes -----------------------------------------------------------
+
+
+def _floor_and_top_area(tm, height: float) -> tuple[float, float]:
+    """Material area 1 mm above the bottom and 1 mm below the top."""
+    from mesh.solids import to_manifold
+
+    solid = to_manifold(tm)
+    return solid.slice(1.0).area(), solid.slice(height - 1.0).area()
+
+
+@pytest.mark.parametrize("kind", ["rounded_box", "rounded_cylinder", "tube"])
+def test_rounded_and_ring_shapes_hollow_into_a_closed_part(kind):
+    # These used to come back with a cavity that stopped being a closed
+    # solid once stored in the project, and Group / the status bar crashed.
+    shape = new_primitive(kind)
+    group = hollow(shape, 0.5 if kind == "tube" else 2.0, clearances=DEFAULT_FIT_CLEARANCES)
+    tm = shape_geometry(group)
+    assert tm.is_volume
+    assert 0.0 < tm.volume < shape_geometry(shape).volume
+
+
+@pytest.mark.parametrize("kind", ["cube", "cylinder"])
+@pytest.mark.parametrize("chamfer, wall", [(2.5, 1.0), (3.0, 1.2), (5.0, 2.0)])
+def test_hollowing_a_bevelled_part_keeps_the_floor_attached(kind, chamfer, wall):
+    shape = new_primitive(kind)
+    shape.params["chamfer"] = chamfer
+    tm = shape_geometry(hollow(shape, wall))
+    assert tm.is_volume
+    # A closed hollow part has two surfaces, outside and inside; the
+    # inside one faces inward (negative volume). A loose floor would be a
+    # second outward-facing piece.
+    pieces = [b for b in tm.split(only_watertight=False) if b.volume > 1e-3]
+    assert len(pieces) == 1
+
+
+def test_a_bevel_too_big_for_the_wall_is_refused():
+    shape = new_primitive("cube")
+    shape.params["chamfer"] = 9.9
+    with pytest.raises(BuildError, match="bevel"):
+        hollow(shape, 2.0)
+
+
+@pytest.mark.parametrize("turned", [False, True])
+def test_open_top_and_drain_go_through_the_world_top_and_bottom(turned):
+    shape = new_primitive("cube")
+    if turned:
+        # Lay Flat on the top face turns the part over; it looks the same.
+        shape.transform = transform_with_euler(shape.transform, 180.0, 0.0, 0.0)
+        shape.transform[2, 3] = 20.0
+    tm = shape_geometry(hollow(shape, 2.0, open_top=True, drain=4.0))
+    floor, top = _floor_and_top_area(tm, 20.0)
+    full, ring = 400.0, 400.0 - 16.0 * 16.0
+    assert floor == pytest.approx(full - np.pi * 2.0**2, rel=0.02)
+    assert top == pytest.approx(ring, rel=1e-6)
+
+
+def test_open_top_on_a_part_lying_on_its_side_is_refused():
+    shape = new_primitive("cylinder")
+    shape.transform = transform_with_euler(shape.transform, 90.0, 0.0, 0.0)
+    with pytest.raises(BuildError, match="upright"):
+        hollow(shape, 2.0, open_top=True)
+    # Without open top or a drain, which way it lies doesn't matter.
+    assert shape_geometry(hollow(shape, 2.0)).is_volume
+
+
+def test_approximate_drain_wider_than_the_inside_is_refused():
+    with pytest.raises(BuildError, match="drain hole is wider"):
+        hollow(new_primitive("cone"), 2.0, drain=30.0)
+
+
+def test_hollow_of_a_rounded_box_in_the_window_works(window, warnings):
+    window.add_primitive("rounded_box")
+    assert window.hollow_selected(2.0) is True
+    assert warnings == []
+    window.do_select_all()
+    assert "ready to print" in window.statusBar().currentMessage()
+
+
+def test_a_turned_ball_opens_at_the_world_top():
+    ball = new_primitive("sphere")
+    ball.transform = transform_with_euler(ball.transform, 90.0, 0.0, 0.0)
+    ball.transform[:3, 3] = (0.0, 10.0, 10.0)  # same centre, now lying on its side
+    tm = shape_geometry(hollow(ball, 2.0, open_top=True))
+    assert tm.is_volume
+    floor, top = _floor_and_top_area(tm, 20.0)
+    # 1 mm from either pole the ball is a disc about 59.7 mm2 across: the
+    # bottom one is still there, the top one has been cut away.
+    assert floor == pytest.approx(np.pi * 19.0, rel=0.05)  # a faceted ball
+    assert top == pytest.approx(0.0, abs=1e-6)

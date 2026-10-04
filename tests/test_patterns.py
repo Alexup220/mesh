@@ -162,3 +162,39 @@ def test_circle_dialog_defaults_keep_the_part_in_place(window, monkeypatch):
     window.do_repeat_circle()
     assert len(window.document.scene.shapes) == 6
     assert np.allclose(window.document.scene.get(shape.id).transform[:3, 3], (50.0, 7.0, 0.0))
+
+
+# --- review fixes -----------------------------------------------------------
+
+
+def _all_ids(shape) -> list[str]:
+    ids = [shape.id]
+
+    def walk(children):
+        for child in children:
+            ids.append(child["id"])
+            walk(child.get("params", {}).get("children", []))
+
+    walk(shape.params.get("children", []))
+    return ids
+
+
+def test_copies_of_a_group_give_every_part_its_own_id():
+    from mesh.ops import make_group, ungroup
+
+    inner = make_group([new_primitive("cube"), new_primitive("sphere")])
+    outer = make_group([inner, new_primitive("cylinder")])
+    copies = repeat_row(outer, 3, 40.0)
+    ids = [i for shape in [outer] + copies for i in _all_ids(shape)]
+    assert len(ids) == len(set(ids))
+    parts = [part for shape in [outer] + copies for part in ungroup(shape)]
+    assert len({p.id for p in parts}) == len(parts)
+
+
+def test_repeat_in_a_circle_of_a_group_gives_every_part_its_own_id():
+    from mesh.ops import make_group
+
+    group = make_group([new_primitive("cube"), new_primitive("sphere")])
+    _, copies = repeat_circle(group, 4, 30.0, (0.0, 0.0))
+    ids = [i for shape in [group] + copies for i in _all_ids(shape)]
+    assert len(ids) == len(set(ids))

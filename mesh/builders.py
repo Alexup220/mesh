@@ -11,12 +11,14 @@ call succeeds.
 """
 
 import copy
+import math
 import uuid
+from functools import reduce
 
 import numpy as np
 
 from mesh.blobs import encode_mesh
-from mesh.ops import make_group
+from mesh.ops import HasGapsError, fresh_ids, make_group
 from mesh.scene import Shape, new_primitive
 from mesh.shapes import PRIMITIVES, shape_geometry
 from mesh.solids import from_manifold, m3, to_manifold
@@ -53,6 +55,24 @@ def _baked_child(tm, name: str, color: str, is_hole: bool) -> Shape:
         color=color,
         is_hole=is_hole,
     )
+
+
+NOT_CLEAN = (
+    "That would not come out as one clean, closed part. "
+    "Try slightly different sizes or a different position."
+)
+
+
+def _group(children: list[Shape], name: str, clearances: dict | None) -> Shape:
+    """make_group for a tool's result, checked: a tool refuses rather than
+    hand back a part with gaps in it, which nothing after it could use."""
+    try:
+        group = make_group(children, name=name, clearances=clearances)
+    except HasGapsError as exc:  # a piece was not a closed solid
+        raise BuildError(NOT_CLEAN) from exc
+    if not shape_geometry(group).is_volume:
+        raise BuildError(NOT_CLEAN)
+    return group
 
 
 # --- Hollow out -----------------------------------------------------------
@@ -101,7 +121,7 @@ def hollow(
 
     label = PRIMITIVES[shape.params["primitive"]]["label"] if shape.kind == "primitive" else shape.name
     original = copy.deepcopy(shape)
-    return make_group([original] + holes, name=f"Hollow {label.lower()}", clearances=clearances)
+    return _group([original] + holes, f"Hollow {label.lower()}", clearances)
 
 
 def _too_thick(limit: float) -> BuildError:
@@ -110,11 +130,40 @@ def _too_thick(limit: float) -> BuildError:
     )
 
 
+def _upright(transform) -> int:
+    """+1 if the shape's own up direction points up in the world, -1 if it
+    points down (laid on its top, or mirrored), 0 if it lies on its side."""
+    up = np.asarray(transform, dtype=np.float64)[:3, :3] @ np.array([0.0, 0.0, 1.0])
+    up_z = float(up[2] / max(np.linalg.norm(up), 1e-12))
+    if up_z > 0.99:
+        return 1
+    if up_z < -0.99:
+        return -1
+    return 0
+
+
 def _exact_cavity(shape: Shape, t: float, open_top: bool, drain: float) -> list[Shape]:
     kind = shape.params["primitive"]
     p = {**PRIMITIVES[kind]["defaults"], **shape.params}
-    color, transform = shape.color, shape.transform
+    color, transform = shape.color, np.asarray(shape.transform, dtype=np.float64)
     holes = []
+    if kind == "sphere":
+        # A ball looks the same however it is turned: build its inside
+        # upright about the same centre, so open top and the drain always
+        # go through the world's top and bottom.
+        d = float(p["diameter"])
+        centre = (transform @ np.array([0.0, 0.0, d / 2.0, 1.0]))[:3]
+        transform = np.eye(4, dtype=np.float64)
+        transform[:3, 3] = centre - (0.0, 0.0, d / 2.0)
+    # Open top and the drain go through the world's top and bottom, which
+    # are the shape's own bottom and top once it has been turned over.
+    upright = _upright(transform)
+    if (open_top or drain > 0.0) and upright == 0:
+        raise BuildError(
+            "Open top and the drain hole need the part standing upright. "
+            "Lay it flat on its bottom first, then hollow it out."
+        )
+    flipped = upright < 0
 
     if kind == "sphere":
         d = float(p["diameter"])
@@ -125,9 +174,9 @@ def _exact_cavity(shape: Shape, t: float, open_top: bool, drain: float) -> list[
         if open_top:
             holes.append(_hole_child(
                 "cylinder", {"diameter": inner, "height": d / 2.0 + 1.0},
-                _lift(transform, d / 2.0), color, "Open top",
+                _lift(transform, -1.0 if flipped else d / 2.0), color, "Open top",
             ))
-        footprint = inner
+        footprint, h = inner, d
     else:
         if kind == "cube":
             sizes = (float(p["width"]), float(p["depth"]))
@@ -138,13 +187,27 @@ def _exact_cavity(shape: Shape, t: float, open_top: bool, drain: float) -> list[
         if t >= limit:
             raise _too_thick(limit)
         # Open top: the inside runs 1 mm past the top so the top wall is
-        # cut clean away rather than left as a face-thin skin.
+        # cut clean away rather than left as a face-thin skin. Turned over,
+        # the shape's own bottom is the top, so it runs out that end.
         inner_h = h - t + 1.0 if open_top else h - 2.0 * t
         if kind == "cube":
             params = {"width": sizes[0] - 2.0 * t, "depth": sizes[1] - 2.0 * t, "height": inner_h}
         else:
             params = {"diameter": sizes[0] - 2.0 * t, "height": inner_h}
-        holes.append(_hole_child(kind, params, _lift(transform, t), color, "Inside"))
+        base = -1.0 if (open_top and flipped) else t
+        # A bottom bevel: the inside gets the outside's 45 degree bevel moved
+        # in by the wall, measured from the inside's own base. (The same
+        # clamp as mesh.shapes uses gives the bevel the outside really has.)
+        chamfer = min(float(p.get("chamfer", 0.0)), h - 1e-3, min(sizes) / 2.0 - 1e-3)
+        if chamfer > 1e-6:
+            inner_chamfer = chamfer + (math.sqrt(2.0) - 1.0) * t - base
+            if inner_chamfer >= (min(sizes) - 2.0 * t) / 2.0 - 1e-3:
+                raise BuildError(
+                    "That wall is too thick for this part's bottom bevel. "
+                    "Try a thinner wall or a smaller bottom chamfer."
+                )
+            params["chamfer"] = max(0.0, inner_chamfer)
+        holes.append(_hole_child(kind, params, _lift(transform, base), color, "Inside"))
         footprint = min(sizes) - 2.0 * t
 
     if drain > 0.0:
@@ -155,7 +218,7 @@ def _exact_cavity(shape: Shape, t: float, open_top: bool, drain: float) -> list[
             )
         holes.append(_hole_child(
             "cylinder", {"diameter": drain, "height": t + 2.0},
-            _lift(transform, -1.0), color, "Drain hole",
+            _lift(transform, h - t - 1.0 if flipped else -1.0), color, "Drain hole",
         ))
     return holes
 
@@ -177,6 +240,12 @@ def _approximate_cavity(shape: Shape, t: float, drain: float, clearances) -> lis
 
     if drain > 0.0:
         low, high = inside.bounding_box()[:3], inside.bounding_box()[3:]
+        footprint = min(high[0] - low[0], high[1] - low[1])
+        if drain >= footprint:
+            raise BuildError(
+                f"That drain hole is wider than the inside of the part. "
+                f"Try less than {footprint:.1f} mm."
+            )
         centre = ((low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0)
         bottom = float(outside.bounds[0][2]) - 1.0
         top = float(low[2]) + min(1.0, (high[2] - low[2]) / 2.0)
@@ -213,15 +282,23 @@ def _cylinder_along(point, direction, start: float) -> np.ndarray:
 
 def _peg_spots(tm, origin, normal, radius: float) -> list[np.ndarray]:
     """Up to two points on the cut face with room for a peg of `radius`."""
-    from shapely.geometry import LineString
-    from shapely.ops import unary_union
+    from shapely.errors import GEOSException
+    from shapely.geometry import LineString, Polygon
 
     section = tm.section(plane_origin=origin, plane_normal=normal)
     if section is None:
         return []
     planar, to_3d = section.to_2D()
-    face = unary_union(list(planar.polygons_full))
-    room = face.buffer(-(radius + PEG_MARGIN))
+    # The cut face from its outlines, even-odd: an outline inside another
+    # is a hole in it (a tube's cut face is a ring).
+    try:
+        loops = [Polygon(loop).buffer(0) for loop in planar.discrete if len(loop) >= 3]
+        if not loops:
+            return []
+        face = reduce(lambda a, b: a.symmetric_difference(b), loops)
+        room = face.buffer(-(radius + PEG_MARGIN))
+    except GEOSException:
+        return []
     if room.is_empty:
         return []
 
@@ -251,8 +328,13 @@ def _peg_spots(tm, origin, normal, radius: float) -> list[np.ndarray]:
     return [(to_3d @ np.array([p[0], p[1], 0.0, 1.0]))[:3] for p in spots_2d]
 
 
+PEG_WALL = 0.8   # mm of material kept all round a peg hole and a peg's root
+
+
 def _inside(piece: "m3.Manifold", probe: "m3.Manifold") -> bool:
-    return (piece ^ probe).volume() >= probe.volume() * 0.995
+    """The probe lies wholly inside the piece (it is grown by PEG_WALL
+    first, so what it stands for keeps a wall round it)."""
+    return (probe - piece).volume() <= probe.volume() * 1e-6
 
 
 def split(
@@ -285,8 +367,10 @@ def split(
     low, high = float(tm.bounds[0][index]), float(tm.bounds[1][index])
     position = float(position)
     if not low + 0.01 < position < high - 0.01:
+        # The dialog asks how far in from the part's edge to cut.
         raise BuildError(
-            f"That cut misses the part. Pick a position between {low:.1f} and {high:.1f} mm."
+            f"That cut misses the part. Pick a distance between 0 and {high - low:.1f} mm "
+            "in from the edge."
         )
 
     whole = to_manifold(tm)
@@ -303,9 +387,11 @@ def split(
         length = float(peg_diameter)
         c = float((clearances or {}).get(PEG_FIT, 0.0))
         for spot in _peg_spots(tm, origin, normal, radius):
-            hole_probe = m3.Manifold.cylinder(length + HOLE_EXTRA + c, radius + c, radius + c, 32)
+            hole_r = radius + c + PEG_WALL
+            hole_probe = m3.Manifold.cylinder(length + HOLE_EXTRA + c + PEG_WALL, hole_r, hole_r, 32)
             hole_probe = hole_probe.transform(_cylinder_along(spot, normal, 0.01)[:3, :])
-            peg_probe = m3.Manifold.cylinder(PEG_EMBED, radius, radius, 32)
+            peg_r = radius + PEG_WALL
+            peg_probe = m3.Manifold.cylinder(PEG_EMBED, peg_r, peg_r, 32)
             peg_probe = peg_probe.transform(_cylinder_along(spot, normal, -PEG_EMBED - 0.01)[:3, :])
             if not (_inside(upper, hole_probe) and _inside(lower, peg_probe)):
                 continue
@@ -326,13 +412,13 @@ def split(
                 "position, or no pegs."
             )
 
-    first = make_group(
+    first = _group(
         [_baked_child(from_manifold(lower), "Part 1", shape.color, False)] + peg_children,
-        name=f"{shape.name} (part 1)", clearances=clearances,
+        f"{shape.name} (part 1)", clearances,
     )
-    second = make_group(
+    second = _group(
         [_baked_child(from_manifold(upper), "Part 2", shape.color, False)] + hole_children,
-        name=f"{shape.name} (part 2)", clearances=clearances,
+        f"{shape.name} (part 2)", clearances,
     )
 
     lay_flat(first, -normal if pegs else normal)
@@ -364,10 +450,10 @@ def _check_count(count: int) -> int:
 
 
 def _copy(shape: Shape) -> Shape:
-    """An independent copy: new id, its own params and transform, and the
-    same Solid/Hole flag and fit."""
-    clone = copy.deepcopy(shape)
-    clone.id = uuid.uuid4().hex
+    """An independent copy: new ids (its own and, for a group, every part
+    inside it, so Ungroup gives each copy's parts their own), its own params
+    and transform, and the same Solid/Hole flag and fit."""
+    clone = fresh_ids(copy.deepcopy(shape))
     clone.transform = np.asarray(clone.transform, dtype=np.float64).copy()
     return clone
 
@@ -438,6 +524,8 @@ def repeat_circle(
 
 LID_GAP = 10.0   # mm between the box and its lid once laid out
 MAX_LIP = 3.0    # mm the lid's lip reaches down into the box
+MIN_LIP = 0.5    # mm the lip must reach down, after its fit clearance
+MIN_LIP_WALL = 0.4  # mm thinnest lip wall
 
 
 def _box(name: str, width: float, depth: float, height: float, z: float,
@@ -484,29 +572,36 @@ def box_with_lid(
     if body_h < t + 1.0:
         raise BuildError("The lid is too tall for this box. Try a shorter lid or a taller box.")
     lip_wall = t / 2.0 - c
-    if lip_wall < 0.4:
+    if lip_wall < MIN_LIP_WALL - 1e-9:
+        # Rounded up, so the wall it suggests is always accepted.
+        suggest = math.ceil(2.0 * (MIN_LIP_WALL + c) * 10.0 - 1e-6) / 10.0
         raise BuildError(
             f"The wall is too thin for a lip with that fit. "
-            f"Try a wall of at least {2.0 * (0.4 + c):.1f} mm."
+            f"Try a wall of at least {suggest:.1f} mm."
         )
     lip = min(MAX_LIP, (body_h - t) / 2.0)
+    if lip - c < MIN_LIP:
+        raise BuildError(
+            "The box is too short for a lid with that fit. "
+            "Try a taller box, a shorter lid or a tighter fit."
+        )
 
     inner_w, inner_d = w - 2.0 * t, d - 2.0 * t
-    body = make_group([
+    body = _group([
         _box("Box", w, d, body_h, 0.0, color),
         _box("Inside", inner_w, inner_d, body_h - t + 1.0, t, color, is_hole=True),
         _box("Lip recess", w - t, d - t, lip + 1.0, body_h - lip, color, is_hole=True),
-    ], name="Box", clearances=clearances)
+    ], "Box", clearances)
 
     # Built closed (the lid's underside at Z = 0, lip hanging below it), then
     # flipped for printing.
     lip_drop = lip - c
-    lid = make_group([
+    lid = _group([
         _box("Lid", w, d, hl, 0.0, color),
         _box("Lip", w - t - 2.0 * c, d - t - 2.0 * c, lip_drop + 0.5, -lip_drop, color),
         _box("Inside", inner_w, inner_d, (hl - t) + lip_drop + 1.0, -lip_drop - 1.0, color,
              is_hole=True),
-    ], name="Lid", clearances=clearances)
+    ], "Lid", clearances)
     rotate_about(lid, np.diag([1.0, -1.0, -1.0]), (0.0, 0.0, 0.0))
     drop_to_plane(lid)
     lid.transform[0, 3] += w + LID_GAP

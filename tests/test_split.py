@@ -152,3 +152,67 @@ def test_split_dialog_values_reach_the_tool(window, monkeypatch):
     window.do_split()
     widths = sorted(round(float(shape_geometry(s).volume)) for s in window.document.scene.shapes)
     assert widths == [2000, 6000]
+
+
+# --- review fixes -----------------------------------------------------------
+
+
+@pytest.fixture
+def warnings(monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    seen = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: seen.append(a[2]))
+    return seen
+
+
+def test_pegs_go_on_a_cut_face_with_a_hole_in_it():
+    # A hollow part's cut face is a ring; this needed an optional library
+    # that isn't installed and crashed.
+    from mesh.builders import hollow
+
+    box = new_primitive("cube")
+    box.params.update(width=60.0, depth=60.0, height=40.0)
+    tray = hollow(box, 10.0)
+    first, second = split(tray, "z", 20.0, pegs=True, clearances=DEFAULT_FIT_CLEARANCES)
+    names = [c["name"] for c in first.params["children"] + second.params["children"]]
+    assert "Peg" in names and "Peg hole" in names
+    assert shape_geometry(first).is_volume and shape_geometry(second).is_volume
+
+
+def test_pegs_on_a_ring_too_thin_for_them_are_refused_plainly():
+    with pytest.raises(BuildError, match="room for pegs"):
+        split(new_primitive("tube"), "z", 10.0, pegs=True, clearances=DEFAULT_FIT_CLEARANCES)
+
+
+def test_a_peg_hole_never_breaks_through_a_tapering_side():
+    cone = new_primitive("cone")
+    cone.params.update(diameter=30.0, height=30.0)
+    try:
+        first, second = split(cone, "z", 21.0, pegs=True, clearances=DEFAULT_FIT_CLEARANCES)
+    except BuildError as exc:
+        assert "room for pegs" in str(exc)
+    else:
+        assert shape_geometry(first).is_volume and shape_geometry(second).is_volume
+
+
+@pytest.mark.parametrize("kind, axis, position", [
+    ("tube", "x", -8.0),             # tangent to the inside wall
+    ("rounded_cylinder", "x", 0.0),
+])
+def test_awkward_cuts_give_closed_halves(kind, axis, position):
+    first, second = split(new_primitive(kind), axis, position)
+    assert shape_geometry(first).is_volume and shape_geometry(second).is_volume
+
+
+def test_a_missed_cut_names_the_distance_the_dialog_asks_for():
+    with pytest.raises(BuildError, match="distance between 0 and 20.0 mm"):
+        split(new_primitive("cube"), "x", 15.0)
+
+
+def test_split_of_a_ring_with_pegs_in_the_window_warns_without_an_undo_step(window, warnings):
+    window.add_primitive("tube")
+    depth = len(window.document._undo)
+    assert window.split_selected("z", 10.0, pegs=True) is False
+    assert len(window.document._undo) == depth
+    assert warnings and "room for pegs" in warnings[0]
