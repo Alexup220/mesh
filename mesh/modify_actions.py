@@ -6,7 +6,9 @@ this is only the wiring: ask, try, then snapshot and apply on success.
 """
 
 from mesh import modify
+from mesh.builders import GUIDES_ARE_NOT_PARTS, BuildError
 from mesh.panels import run_form
+from mesh.shapes import is_reference
 
 TURN_AXES = [
     ("z", "An upright line (turns it round, seen from above)"),
@@ -41,9 +43,15 @@ class ModifyActions:
 
     # The click-on-a-part tools of the Modify menu, their prompts, and the
     # method each click goes to.
-    MODIFY_CLICK_TOOLS: tuple[str, ...] = ()
-    MODIFY_TOOL_PROMPTS: dict[str, str] = {}
-    MODIFY_CLICK_HANDLERS: dict[str, str] = {}
+    MODIFY_CLICK_TOOLS = ("align_from", "align_to")
+    MODIFY_TOOL_PROMPTS = {
+        "align_from": "Click the flat face of the part to move. Esc cancels.",
+        "align_to": "Now click the face to put it against. Esc cancels.",
+    }
+    MODIFY_CLICK_HANDLERS = {
+        "align_from": "_align_from_picked",
+        "align_to": "_align_to_picked",
+    }
 
     # --- Move or Copy ------------------------------------------------------------
 
@@ -85,3 +93,47 @@ class ModifyActions:
         values = ask_move_copy(self)
         if values is not None:
             self.move_copy_selected(**values)
+
+    # --- Align face to face ------------------------------------------------------
+
+    TWO_PARTS_FIRST = "Add two parts first, then put a face of one against the other."
+
+    def do_align_faces(self) -> None:
+        parts = [s for s in self.document.scene.shapes if not is_reference(s)]
+        if len(parts) < 2:
+            self.statusBar().showMessage(self.TWO_PARTS_FIRST)
+            return
+        self.start_tool("align_from")
+
+    def _align_from_picked(self, shape_id: str, face_index: int, _point=None) -> None:
+        """Remember the face to move. Nothing changes yet: no undo step."""
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+            if is_reference(shape):
+                raise BuildError(GUIDES_ARE_NOT_PARTS.format(tool="Align"))
+            modify.flat_face(shape, face_index, scene.fit_clearances)
+        except (KeyError, BuildError):
+            self.statusBar().showMessage(self.TOOL_PROMPTS["align_from"])
+            return
+        self.start_tool("align_to")
+        self._align_first = (shape_id, face_index)
+
+    def _align_to_picked(self, shape_id: str, face_index: int, _point=None) -> None:
+        scene = self.document.scene
+        moving_id, moving_face = self._align_first
+        try:
+            moving = scene.get(moving_id)
+            transform = modify.align_faces(moving, moving_face, scene.get(shape_id), face_index,
+                                           scene.fit_clearances)
+        except KeyError:
+            self.statusBar().showMessage(self.TOOL_PROMPTS["align_to"])
+            return
+        except BuildError as exc:
+            self.statusBar().showMessage(f"{exc} {self.TOOL_PROMPTS['align_to']}")
+            return
+        self.document.snapshot("align faces")
+        moving.transform = transform
+        scene.select([moving.id])
+        self._clear_tool()
+        self.sync()

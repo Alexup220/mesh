@@ -85,6 +85,12 @@ TOOLS: tuple[ExpertTool, ...] = (
         "A turn goes around a line through their middle.",
         "do_move_copy",
     ),
+    ExpertTool(
+        "align_faces", "modify", "&Align Face to Face",
+        "Click a flat face of the part to move, then a face of another part: the first "
+        "part turns and moves so the two faces touch, facing each other, middle to middle.",
+        "do_align_faces",
+    ),
 )
 
 
