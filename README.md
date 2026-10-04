@@ -56,6 +56,16 @@ Everything here is in millimetres, and everything can be undone with `Ctrl+Z`.
 
 `Esc` stops whichever of the click-on-a-part tools is running.
 
+## Expert mode
+
+**Tools → Expert Mode** shows a larger set of modeling tools for people who
+have modeled before, in extra menus between *Tools* and *View*. It is off on a
+fresh install, and mesh looks exactly as described above until you turn it on.
+The choice is remembered on this computer (in `~/.config/mesh/settings.json`),
+never in a project file, so opening a project doesn't change it. Turning it
+off only hides the tools: anything you made with them stays in your model,
+visible and editable.
+
 ## Shortcuts
 
 | Key | Action |

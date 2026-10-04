@@ -14,13 +14,15 @@ from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
     QFileDialog,
+    QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QToolBar,
 )
 from PySide6.QtCore import QTimer, Qt
 
-from mesh import builders, hardware, ops, panels
+from mesh import builders, expert, hardware, ops, panels
 from mesh.gizmo import Gizmo
 from mesh.io_formats import (
     EXPORT_EXTS,
@@ -36,6 +38,7 @@ from mesh.io_formats import (
 from mesh.panels import Inspector, ShapeShelf
 from mesh.printcheck import check
 from mesh.scene import MAX_FIT_CLEARANCE, Document, new_primitive, transform_with_euler
+from mesh.settings import Settings, default_path
 from mesh.shapes import shape_geometry
 from mesh.text import has_letters
 from mesh.viewport import Viewport
@@ -44,11 +47,15 @@ from mesh.viewport import Viewport
 class MeshWindow(QMainWindow):
     EDIT_COALESCE_MS = 400
 
-    def __init__(self) -> None:
+    def __init__(self, settings: Settings | None = None) -> None:
         super().__init__()
         self.setWindowTitle("mesh")
         self.resize(1400, 900)
         self.document = Document()
+        # Preferences of this computer, such as Expert mode. A window built
+        # without them (as in the tests) starts from the defaults and saves
+        # nothing; run() passes the user's own.
+        self.settings = settings if settings is not None else Settings()
 
         self.viewport = Viewport(self)
         self.setCentralWidget(self.viewport)
@@ -93,8 +100,10 @@ class MeshWindow(QMainWindow):
         self._edit_timer.timeout.connect(self._finish_edit)
 
         self._build_menus()
+        self._build_expert_menus()
         self._build_bottom_bar()
         self.statusBar().showMessage("Add a shape to get started.")
+        self._apply_expert_mode()
 
     def _dock(self, title, widget, area) -> None:
         dock = QDockWidget(title, self)
@@ -174,13 +183,66 @@ class MeshWindow(QMainWindow):
         tools = self.menuBar().addMenu("&Tools")
         self.act_measure = self._act(tools, "&Measure", "M", self.toggle_measure)
         self.act_measure.setCheckable(True)
+        tools.addSeparator()
+        self.act_expert = self._act(tools, "&Expert Mode", None, self.set_expert_mode)
+        self.act_expert.setCheckable(True)
+        self.act_expert.setStatusTip(self.EXPERT_TIP)
 
         view = self.menuBar().addMenu("&View")
+        self.view_menu = view
         self.act_view_home = self._act(view, "&Home", "Home", lambda: self.viewport.view_preset("home"))
         self.act_view_front = self._act(view, "&Front", "1", lambda: self.viewport.view_preset("front"))
         self.act_view_right = self._act(view, "&Right", "3", lambda: self.viewport.view_preset("right"))
         self.act_view_top = self._act(view, "&Top", "7", lambda: self.viewport.view_preset("top"))
         self._act(view, "&Zoom to Selection", "F", self.viewport.frame_selection)
+
+    def _build_expert_menus(self) -> None:
+        """One menu item per tool in mesh.expert.TOOLS, under the expert
+        menus (placed before View). They are shown or hidden only by
+        _apply_expert_mode."""
+        self.expert_menus = {}
+        self.expert_actions = {}
+        for key, title in expert.MENUS:
+            menu = QMenu(title, self)
+            self.menuBar().insertMenu(self.view_menu.menuAction(), menu)
+            menu.setToolTipsVisible(True)
+            self.expert_menus[key] = menu
+            for tool in expert.tools_in(key):
+                action = self._act(menu, tool.label, tool.shortcut, getattr(self, tool.handler))
+                action.setToolTip(tool.tip)
+                action.setStatusTip(tool.tip)
+                self.expert_actions[tool.key] = action
+        # Shown in the status bar while Expert mode is on.
+        self.expert_badge = QLabel("Expert mode", self)
+        self.statusBar().addPermanentWidget(self.expert_badge)
+
+    EXPERT_TIP = "Show the extra modeling tools for experienced users. Turn off to hide them again."
+    EXPERT_NOT_SAVED = "Expert mode changed, but it could not be saved for next time."
+
+    def set_expert_mode(self, on: bool) -> None:
+        """Show or hide every expert tool, and remember the choice.
+
+        A preference, not an edit: no undo step, and the scene is left
+        exactly as it is, so nothing made with an expert tool is lost or
+        changed when the mode goes off."""
+        self.settings.expert_mode = bool(on)
+        saved = self.settings.save()
+        self._apply_expert_mode()
+        if self.settings.path is not None and not saved:
+            self.statusBar().showMessage(self.EXPERT_NOT_SAVED)
+
+    def _apply_expert_mode(self) -> None:
+        on = self.settings.expert_mode
+        self.act_expert.blockSignals(True)
+        self.act_expert.setChecked(on)
+        self.act_expert.blockSignals(False)
+        for action in self.expert_actions.values():
+            # Hidden and disabled, so a hidden tool's shortcut does nothing.
+            action.setVisible(on)
+            action.setEnabled(on)
+        for menu in self.expert_menus.values():
+            menu.menuAction().setVisible(on and bool(menu.actions()))
+        self.expert_badge.setVisible(on)
 
     def _build_bottom_bar(self) -> None:
         """A visible bottom bar for the actions and camera presets the
@@ -921,6 +983,11 @@ class MeshWindow(QMainWindow):
         self.sync()
 
 
+def make_window() -> MeshWindow:
+    """The app's window, with this computer's saved preferences."""
+    return MeshWindow(Settings.load(default_path()))
+
+
 def run(argv: list[str] | None = None) -> int:
     import os
 
@@ -951,7 +1018,7 @@ def run(argv: list[str] | None = None) -> int:
 
     app = QApplication(argv or sys.argv)
     apply_theme(app)
-    window = MeshWindow()
+    window = make_window()
     window.show()
     window.viewport.start()
     return app.exec()
