@@ -44,6 +44,7 @@ SEGMENTS = 64          # straight pieces in a full circle
 SPLINE_STEPS = 16      # straight pieces between two spline points
 JOIN_TOLERANCE = 0.01  # mm: curve ends this close count as meeting
 MIN_SIZE = 1e-3        # mm: anything smaller is treated as nothing
+LIMIT = 10000.0        # mm: no point or size may be further out or bigger
 
 ENTITY_TYPES = ("line", "rectangle", "circle", "arc", "polygon", "spline")
 CLOSED_TYPES = ("rectangle", "circle", "polygon")
@@ -63,6 +64,8 @@ def _point(value, what: str) -> list[float]:
         raise SketchError(f"The {what} needs two numbers.") from exc
     if not (math.isfinite(x) and math.isfinite(y)):
         raise SketchError(f"The {what} must be ordinary numbers.")
+    if abs(x) > LIMIT or abs(y) > LIMIT:
+        raise SketchError(f"The {what} must be within {LIMIT:g} mm of the sketch's centre.")
     return [x, y]
 
 
@@ -80,6 +83,8 @@ def _size(value, what: str) -> float:
     number = _number(value, what)
     if number < MIN_SIZE:
         raise SketchError(f"The {what} must be more than 0 mm.")
+    if number > LIMIT:
+        raise SketchError(f"The {what} must be at most {LIMIT:g} mm.")
     return number
 
 
@@ -110,7 +115,10 @@ def clean_entity(entity) -> dict:
     if kind == "arc":
         start, end = _number(entity.get("start"), "start angle"), _number(entity.get("end"), "end angle")
         if _sweep(start, end) < 1e-6:
-            raise SketchError("An arc needs different start and end angles.")
+            raise SketchError(
+                "An arc's start and end angles can't be the same, or a whole turn apart. "
+                "For a whole turn, use a Circle."
+            )
         return {
             "type": "arc",
             "centre": _point(entity.get("centre"), "centre"),
@@ -235,14 +243,22 @@ def chains(entities) -> Chains:
         points, closed = entity_points(entity)
         (loops if closed else pieces).append(points)
 
-    # Each piece's two ends become nodes; ends within JOIN_TOLERANCE share one.
+    # Each piece's two ends become nodes; ends within JOIN_TOLERANCE share
+    # one. Nodes are filed by grid square, so finding one near an end looks
+    # only at the squares around it (a traced face can have 1000s of lines).
     nodes: list[np.ndarray] = []
+    grid: dict[tuple[int, int], list[int]] = {}
 
     def node_for(point) -> int:
-        for index, existing in enumerate(nodes):
-            if np.linalg.norm(existing - point) <= JOIN_TOLERANCE:
-                return index
-        nodes.append(np.asarray(point, dtype=np.float64))
+        point = np.asarray(point, dtype=np.float64)
+        cx, cy = (int(math.floor(v / JOIN_TOLERANCE)) for v in point)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for index in grid.get((cx + dx, cy + dy), ()):
+                    if np.linalg.norm(nodes[index] - point) <= JOIN_TOLERANCE:
+                        return index
+        nodes.append(point)
+        grid.setdefault((cx, cy), []).append(len(nodes) - 1)
         return len(nodes) - 1
 
     ends = [(node_for(p[0]), node_for(p[-1])) for p in pieces]
@@ -343,21 +359,27 @@ def plane_frame(normal, point=(0.0, 0.0, 0.0)) -> np.ndarray:
     """The transform of a sketch drawn on the plane through `point` facing
     `normal`.
 
-    Sketch X follows the world's X (or the world's Y when the plane faces
-    along X), sketch Y = facing x sketch X, and the sketch's origin is the
-    point of the plane nearest the world origin. So on the workplane, and
-    on any flat face, sketch numbers are the world's own left/right and
-    forward/back (or height) numbers.
+    On an upright or sloping plane, sketch Y points up (the world's height,
+    laid onto the plane) and sketch X to the right, as seen from the side
+    the plane faces: so the front plane reads like the Front view and every
+    side face of a box reads the right way up. On a flat plane facing up,
+    sketch X and Y are the world's left/right and forward/back; facing
+    down, X stays left/right (Y is then back to front). The sketch's
+    origin is the point of the plane nearest the world origin.
     """
     n = np.asarray(normal, dtype=np.float64)
     length = np.linalg.norm(n)
     if length < 1e-12:
         raise SketchError("A plane needs a facing direction.")
     n = n / length
-    across = np.array([1.0, 0.0, 0.0]) if abs(n[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
-    x = across - np.dot(across, n) * n
-    x /= np.linalg.norm(x)
-    y = np.cross(n, x)
+    if abs(n[2]) < 0.9:
+        y = np.array([0.0, 0.0, 1.0]) - n[2] * n
+        y /= np.linalg.norm(y)
+        x = np.cross(y, n)
+    else:
+        x = np.array([1.0, 0.0, 0.0]) - n[0] * n
+        x /= np.linalg.norm(x)
+        y = np.cross(n, x)
     origin = np.dot(np.asarray(point, dtype=np.float64), n) * n
     frame = np.eye(4)
     frame[:3, 0], frame[:3, 1], frame[:3, 2], frame[:3, 3] = x, y, n, origin

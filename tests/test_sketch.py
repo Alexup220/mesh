@@ -49,7 +49,7 @@ def test_every_curve_is_cleaned_to_plain_floats(entity):
     ({"type": "line", "start": [0, float("nan")], "end": [1, 1]}, "ordinary numbers"),
     ({"type": "rectangle", "corner": [0, 0], "width": 0, "height": 5}, "more than 0"),
     ({"type": "circle", "centre": [0, 0], "diameter": -2}, "more than 0"),
-    ({"type": "arc", "centre": [0, 0], "radius": 5, "start": 30, "end": 390}, "different start and end"),
+    ({"type": "arc", "centre": [0, 0], "radius": 5, "start": 30, "end": 390}, "whole turn apart"),
     ({"type": "polygon", "centre": [0, 0], "sides": 2, "radius": 5}, "between 3 and 1000"),
     ({"type": "polygon", "centre": [0, 0], "sides": "many", "radius": 5}, "whole number"),
     ({"type": "spline", "points": [[0, 0], [0, 0]]}, "at least 2 different points"),
@@ -61,6 +61,31 @@ def test_curves_that_cannot_be_drawn_are_refused_plainly(entity, words):
         sketch.clean_entity(entity)
     assert words in str(err.value)
     assert_plain(str(err.value))
+
+
+@pytest.mark.parametrize("entity, words", [
+    ({"type": "line", "start": [0, 0], "end": [20000, 0]}, "within 10000 mm"),
+    ({"type": "circle", "centre": [0, -1e9], "diameter": 4}, "within 10000 mm"),
+    ({"type": "rectangle", "corner": [0, 0], "width": 1e6, "height": 5}, "at most 10000 mm"),
+    ({"type": "spline", "points": [[0, 0], [5, 5e5]]}, "within 10000 mm"),
+])
+def test_curves_far_too_big_or_far_away_are_refused(entity, words):
+    with pytest.raises(sketch.SketchError) as err:
+        sketch.clean_entity(entity)
+    assert words in str(err.value)
+    assert_plain(str(err.value))
+
+
+def test_joining_thousands_of_short_lines_is_quick():
+    import time
+
+    points = [[10 * math.cos(t), 10 * math.sin(t)] for t in np.linspace(0, 2 * math.pi, 4001)[:-1]]
+    lines = [{"type": "line", "start": points[i], "end": points[(i + 1) % len(points)]}
+             for i in range(len(points))]
+    started = time.perf_counter()
+    found = sketch.chains(sketch.clean_entities(lines))
+    assert time.perf_counter() - started < 5.0
+    assert len(found.loops) == 1
 
 
 def test_a_sketchs_curves_must_be_a_list():
@@ -218,6 +243,17 @@ def test_upright_planes_read_as_seen_from_the_front_and_right():
         sketch.named_plane_frame("sideways")
     with pytest.raises(sketch.SketchError):
         sketch.plane_frame((0, 0, 0))
+
+
+@pytest.mark.parametrize("normal, across", [
+    ((0, 1, 0), (-1, 0, 0)),     # the back, seen from behind
+    ((-1, 0, 0), (0, -1, 0)),    # the left side, seen from the left
+    ((1, 1, 0), (-0.5**0.5, 0.5**0.5, 0)),
+])
+def test_every_upright_face_reads_upright_as_seen_from_outside(normal, across):
+    frame = sketch.plane_frame(normal)
+    assert np.allclose(frame[:3, 1], [0, 0, 1])
+    assert np.allclose(frame[:3, 0], across)
 
 
 def test_sketch_and_world_points_convert_both_ways():
