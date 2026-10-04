@@ -5,6 +5,8 @@ undo and click tools. The geometry lives in a core module (mesh.modify);
 this is only the wiring: ask, try, then snapshot and apply on success.
 """
 
+from PySide6.QtCore import QTimer
+
 from mesh import modify
 from mesh.builders import GUIDES_ARE_NOT_PARTS, BuildError
 from mesh.panels import run_form
@@ -92,6 +94,24 @@ def ask_split_body(parent, parts) -> dict | None:
     )
 
 
+def shell_fields():
+    return [
+        ("wall", "Wall thickness (mm)", 2.0, {"min": 0.1, "max": 100.0}),
+        ("far_side", "Also leave open the face across from it", False, {}),
+    ]
+
+
+APPROXIMATE_SHELL_NOTE = (
+    "This part is shelled approximately: the walls follow the outside evenly, but may come out "
+    "a little thinner in places than the number you type. Boxes and cylinders are shelled "
+    "exactly through their flat sides and ends."
+)
+
+
+def ask_shell(parent, exact: bool) -> dict | None:
+    return run_form(parent, "Shell", shell_fields(), note=None if exact else APPROXIMATE_SHELL_NOTE)
+
+
 def ask_move_copy(parent) -> dict | None:
     return run_form(
         parent, "Move or Copy", move_copy_fields(),
@@ -106,14 +126,16 @@ class ModifyActions:
 
     # The click-on-a-part tools of the Modify menu, their prompts, and the
     # method each click goes to.
-    MODIFY_CLICK_TOOLS = ("align_from", "align_to")
+    MODIFY_CLICK_TOOLS = ("align_from", "align_to", "shell")
     MODIFY_TOOL_PROMPTS = {
         "align_from": "Click the flat face of the part to move. Esc cancels.",
         "align_to": "Now click the face to put it against. Esc cancels.",
+        "shell": "Click the flat face of a part to leave open. Esc cancels.",
     }
     MODIFY_CLICK_HANDLERS = {
         "align_from": "_align_from_picked",
         "align_to": "_align_to_picked",
+        "shell": "_shell_picked",
     }
 
     # --- Move or Copy ------------------------------------------------------------
@@ -332,3 +354,64 @@ class ModifyActions:
         values = ask_split_body(self, parts)
         if values is not None:
             self.split_body_selected(values["part"], values["keep_tool"])
+
+    # --- Faces clicked to change ----------------------------------------------------------
+
+    PARTS_FIRST = "Add a part first, then click one of its faces."
+
+    def _start_face_tool(self, tool: str) -> None:
+        if not any(not is_reference(s) for s in self.document.scene.shapes):
+            self.statusBar().showMessage(self.PARTS_FIRST)
+            return
+        self.start_tool(tool)
+
+    def _face_clicked(self, tool: str, shape_id: str, face_index: int, then) -> None:
+        """A click for a tool that changes the face clicked: if it landed on
+        a flat face of a solid part, stop waiting and, once the click is
+        over, call `then(part)`. Nothing changes yet: no undo step."""
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+            if is_reference(shape) or shape.is_hole:
+                raise BuildError(self.TOOL_PROMPTS[tool])
+            modify.flat_face(shape, face_index, scene.fit_clearances)
+        except (KeyError, BuildError):
+            self.statusBar().showMessage(self.TOOL_PROMPTS[tool])
+            return
+        self._clear_tool()
+        self.sync()
+        # Opened once the click is over: a window opened during the click
+        # would leave the 3D view thinking the button is still held down.
+        QTimer.singleShot(0, lambda: then(shape))
+
+    # --- Shell -------------------------------------------------------------------------
+
+    def do_shell(self) -> None:
+        self._start_face_tool("shell")
+
+    def _shell_picked(self, shape_id: str, face_index: int, _point=None) -> None:
+        self._face_clicked("shell", shape_id, face_index,
+                           lambda shape: self._ask_shell(shape, face_index))
+
+    def _ask_shell(self, shape, face_index: int) -> None:
+        self.viewport.end_drag()
+        values = ask_shell(self, modify.shells_exactly(shape))
+        if values is not None:
+            self.shell_face(shape.id, face_index, values["wall"], values["far_side"])
+
+    def shell_face(self, shape_id: str, face_index: int, wall: float, far_side: bool = False) -> bool:
+        """Hollow out a part, leaving the face `face_index` open (and the
+        one across from it, with `far_side`). One undo step on success."""
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+        except KeyError:
+            return False
+        group = self._attempt(
+            "Cannot shell",
+            lambda: modify.shell(shape, face_index, wall, far_side, scene.fit_clearances),
+        )
+        if group is None:
+            return False
+        self._replace_with("shell", shape, [group])
+        return True

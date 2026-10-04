@@ -113,6 +113,14 @@ TOOLS: tuple[ExpertTool, ...] = (
         "outside. Ungroup on a piece gives the part back.",
         "do_split_body",
     ),
+    ExpertTool(
+        "shell", "modify", "S&hell",
+        "Click a flat face of a part to hollow it out with walls of an even thickness, "
+        "leaving that face open (and, if you like, the face across from it). Exact for "
+        "boxes and cylinders through their flat sides and ends; other parts are shelled "
+        "approximately, and their walls can come out a little thinner in places.",
+        "do_shell",
+    ),
 )
 
 

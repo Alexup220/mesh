@@ -127,6 +127,15 @@ tools do the closest honest version of their Fusion counterparts:
   Pre-existing: a stretched group's parts, once ungrouped, carry the stretch
   in their transforms, so a primitive's Details numbers show its size before
   the stretch (the same happens after dragging a group's handles today).
+- **Shell** leaves one clicked flat face open, or that face and the one
+  across from it; Fusion's free choice of any number of faces, and walls
+  grown outward instead of inward, are not offered. Boxes and cylinders (with
+  no bottom chamfer) are exact through their flat sides and ends. Anything
+  else is shelled approximately, the same way as Hollow out: the room inside
+  keeps a 24-sided ball's distance from the outside, so walls can come out a
+  little thinner in places, and a detailed part can take a few seconds. A
+  round surface is narrow flat strips, so clicking one opens just that strip,
+  and only with a wall thinner than the strip is wide.
 
 ## Platform notes
 
