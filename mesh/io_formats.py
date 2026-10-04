@@ -111,7 +111,7 @@ def export_scene(scene: Scene, path) -> None:
     A beginner cannot tell a bad STL from a good one until a print fails
     hours in, so a hard refusal here is worth more than a warning.
     """
-    from mesh.ops import NothingLeftError, NothingToCombineError, evaluate
+    from mesh.ops import HasGapsError, NothingLeftError, NothingToCombineError, evaluate
 
     path = Path(path)
     if path.suffix.lower() not in EXPORT_EXTS:
@@ -122,6 +122,8 @@ def export_scene(scene: Scene, path) -> None:
     visible = [s for s in scene.shapes if s.visible]
     try:
         result = evaluate(visible, clearances=scene.fit_clearances)
+    except HasGapsError as exc:
+        raise ProjectError(str(exc)) from exc
     except NothingLeftError as exc:
         raise ProjectError(
             "There is nothing to save: the holes cut away all of the solid parts. "

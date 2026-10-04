@@ -140,3 +140,49 @@ def test_keep_overlap_in_the_window_warns_and_adds_no_undo_step(window, warnings
     assert len(window.document.scene.shapes) == 2
     assert window.document.can_undo() == before
     assert warnings and "overlap" in warnings[0][1]
+
+
+# --- parts with gaps ----------------------------------------------------------
+
+
+def _open_part():
+    import numpy as np
+    import trimesh
+
+    from mesh.blobs import encode_mesh
+    from mesh.scene import Shape
+
+    box = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+    box.update_faces(np.arange(len(box.faces) - 1))  # one triangle missing
+    return Shape(id="open", name="Open box", kind="imported",
+                 params={"blob": encode_mesh(box)}, transform=np.eye(4))
+
+
+def _scene_with_open_part() -> Scene:
+    scene = Scene()
+    scene.add(_open_part())
+    scene.add(new_primitive("cube"))
+    return scene
+
+
+def test_a_part_with_gaps_next_to_another_reports_gaps_instead_of_crashing():
+    report = check(_scene_with_open_part())
+    assert report.empty is False and report.watertight is False
+    assert "gaps" in report.message
+    assert_plain(report.message)
+
+
+def test_saving_a_model_with_an_open_part_refuses_plainly(tmp_path):
+    with pytest.raises(ProjectError, match="gaps"):
+        export_scene(_scene_with_open_part(), tmp_path / "out.stl")
+
+
+def test_grouping_an_open_part_refuses_with_no_undo_step(window, warnings):
+    _load(window, _scene_with_open_part())
+    window.document.scene.select([s.id for s in window.document.scene.shapes])
+    before = window.document.can_undo()
+    window.do_group()
+    assert len(window.document.scene.shapes) == 2
+    assert window.document.can_undo() == before
+    assert warnings and "gaps" in warnings[0][1]
+    assert_plain(warnings[0][1])

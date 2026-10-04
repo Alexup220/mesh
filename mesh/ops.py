@@ -32,6 +32,17 @@ EVERYTHING_CUT_AWAY = (
     "Move a hole or make it smaller."
 )
 
+HAS_GAPS = (
+    "A part here has gaps in its surface, so it can't be joined to the others. "
+    "Hide or remove that part, or import a closed version of it."
+)
+
+
+class HasGapsError(NothingToCombineError):
+    """Raised when a part is not a closed solid, so nothing can be combined
+    with it (an imported model with holes in its surface, say)."""
+
+
 NOTHING_LEFT = {
     "difference": (
         "The other shapes cover all of the first one, so cutting them out "
@@ -49,10 +60,19 @@ def _something_left(result: trimesh.Trimesh, message: str) -> trimesh.Trimesh:
     return result
 
 
+def _combine(op: str, meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
+    try:
+        return getattr(trimesh.boolean, op)(meshes, engine=ENGINE)
+    except ValueError as exc:
+        # trimesh refuses anything that is not a closed solid ("Not all
+        # meshes are volumes!") before the engine sees it.
+        raise HasGapsError(HAS_GAPS) from exc
+
+
 def _union(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
     if len(meshes) == 1:
         return meshes[0]
-    return trimesh.boolean.union(meshes, engine=ENGINE)
+    return _combine("union", meshes)
 
 
 def evaluate(shapes: list[Shape], clearances: dict | None = None) -> trimesh.Trimesh:
@@ -71,7 +91,7 @@ def evaluate(shapes: list[Shape], clearances: dict | None = None) -> trimesh.Tri
 
     result = _union(solids)
     if holes:
-        result = trimesh.boolean.difference([result, _union(holes)], engine=ENGINE)
+        result = _combine("difference", [result, _union(holes)])
     return _something_left(result, EVERYTHING_CUT_AWAY)
 
 
@@ -84,7 +104,7 @@ def boolean(shapes: list[Shape], op: str, clearances: dict | None = None) -> tri
         raise NothingToCombineError("Select at least one shape.")
     if len(meshes) == 1:
         return meshes[0]
-    result = getattr(trimesh.boolean, op)(meshes, engine=ENGINE)
+    result = _combine(op, meshes)
     return _something_left(result, NOTHING_LEFT.get(op, EVERYTHING_CUT_AWAY))
 
 
@@ -151,9 +171,25 @@ AXES = {"x": 0, "y": 1, "z": 2}
 ALIGN_MODES = ("min", "center", "max")
 
 
+def fresh_ids(shape: Shape) -> Shape:
+    """Give a copied shape a new id, and every part stored inside a group
+    (at any depth) a new one too, so Ungroup on two copies never gives two
+    parts the same id. Changes and returns `shape`."""
+    shape.id = uuid.uuid4().hex
+
+    def renew(children: list) -> None:
+        for child in children:
+            child["id"] = uuid.uuid4().hex
+            if child.get("kind") == "group":
+                renew(child.get("params", {}).get("children", []))
+
+    if shape.kind == "group":
+        renew(shape.params.get("children", []))
+    return shape
+
+
 def duplicate(shape: Shape, offset=(10.0, 10.0, 0.0)) -> Shape:
-    clone = copy.deepcopy(shape)
-    clone.id = uuid.uuid4().hex
+    clone = fresh_ids(copy.deepcopy(shape))
     clone.transform = np.asarray(clone.transform, dtype=np.float64).copy()
     clone.transform[:3, 3] += np.asarray(offset, dtype=np.float64)
     return clone
@@ -243,7 +279,16 @@ def rotation_between(a, b) -> np.ndarray:
 
 def _canonical(transform: np.ndarray) -> np.ndarray:
     """Re-express a transform through the euler helpers, so its rotation is
-    exactly what the inspector shows and edits (see mesh.scene)."""
+    exactly what the inspector shows and edits (see mesh.scene).
+
+    A slanted transform (a part stretched along a direction it was not
+    built along) can't be written as turns and sizes; re-expressing it
+    would change the part's shape, so it is kept exactly as it is.
+    """
+    gram = transform[:3, :3].T @ transform[:3, :3]
+    slant = np.abs(gram - np.diag(np.diag(gram))).max()
+    if slant > 1e-9 * max(float(np.abs(np.diag(gram)).max()), 1e-12):
+        return transform
     rx, ry, rz = euler_from_transform(transform)
     return transform_with_euler(transform, rx, ry, rz)
 
@@ -271,7 +316,20 @@ def face_direction(shape: Shape, face_index: int, clearances: dict | None = None
     tm = shape_geometry(shape, clearances)
     if not 0 <= face_index < len(tm.faces):
         raise IndexError(face_index)
-    return np.asarray(tm.face_normals[face_index], dtype=np.float64)
+    direction = np.asarray(tm.face_normals[face_index], dtype=np.float64)
+    if np.linalg.norm(direction) < 1e-9:
+        # A sliver triangle with no area has no direction of its own (a
+        # bevel or rounded edge can leave these); use its neighbours'.
+        pairs = tm.face_adjacency
+        around = np.concatenate([
+            pairs[pairs[:, 0] == face_index, 1], pairs[pairs[:, 1] == face_index, 0],
+        ])
+        direction = (tm.face_normals[around] * tm.area_faces[around, None]).sum(axis=0)
+        length = np.linalg.norm(direction)
+        if length < 1e-9:
+            raise IndexError(face_index)
+        direction = direction / length
+    return direction
 
 
 def lay_flat(shape: Shape, direction) -> None:
