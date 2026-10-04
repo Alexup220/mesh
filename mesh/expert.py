@@ -79,6 +79,12 @@ TOOLS: tuple[ExpertTool, ...] = (
         "straight from one outline to the next.",
         "do_loft",
     ),
+    ExpertTool(
+        "move_copy", "modify", "&Move or Copy...",
+        "Move or turn the selected parts by exact amounts, or make moved copies of them. "
+        "A turn goes around a line through their middle.",
+        "do_move_copy",
+    ),
 )
 
 

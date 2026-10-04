@@ -9,6 +9,7 @@ on success.
 from PySide6.QtCore import QTimer
 
 from mesh import create, features, sketch, sketch_editor
+from mesh.modify_actions import ModifyActions
 from mesh.panels import run_form
 from mesh.shapes import is_reference
 
@@ -84,15 +85,23 @@ def ask_loft(parent, sketches) -> dict | None:
     )
 
 
-class ExpertActions:
+class ExpertActions(ModifyActions):
     """Mixed into MeshWindow (see mesh.expert for the menu items)."""
 
     # The click-on-a-part tools Expert mode adds; turning the mode off
     # stops any of them that is waiting for a click.
-    EXPERT_CLICK_TOOLS = ("sketch_face",)
+    EXPERT_CLICK_TOOLS = ("sketch_face",) + ModifyActions.MODIFY_CLICK_TOOLS
 
     EXPERT_TOOL_PROMPTS = {
         "sketch_face": "Click a flat face of a part to sketch on it. Esc cancels.",
+        **ModifyActions.MODIFY_TOOL_PROMPTS,
+    }
+
+    # The method each of those tools' clicks goes to: (part id, triangle
+    # clicked, world point).
+    EXPERT_CLICK_HANDLERS = {
+        "sketch_face": "_sketch_face_picked",
+        **ModifyActions.MODIFY_CLICK_HANDLERS,
     }
 
     # --- Sketches ------------------------------------------------------------------
@@ -131,7 +140,7 @@ class ExpertActions:
             return
         self.start_tool("sketch_face")
 
-    def _sketch_face_picked(self, shape_id: str, face_index: int) -> None:
+    def _sketch_face_picked(self, shape_id: str, face_index: int, _point=None) -> None:
         """Nothing changes until the sketch window's OK, so a click takes no
         undo step."""
         scene = self.document.scene

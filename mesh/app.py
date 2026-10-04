@@ -788,8 +788,8 @@ class MeshWindow(ExpertActions, QMainWindow):
             self._place_picked(shape_id, face_index, point)
         elif self.tool == "measure":
             self._measure_picked(shape_id, point)
-        elif self.tool == "sketch_face":
-            self._sketch_face_picked(shape_id, face_index)
+        elif self.tool in self.EXPERT_CLICK_HANDLERS:
+            getattr(self, self.EXPERT_CLICK_HANDLERS[self.tool])(shape_id, face_index, point)
 
     def _place_picked(self, shape_id: str, face_index: int, point) -> None:
         """Remember the clicked face; nothing in the scene changes until a
