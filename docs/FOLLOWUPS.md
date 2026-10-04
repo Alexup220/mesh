@@ -60,6 +60,42 @@ final whole-branch review and real hands-on use surfaced and deliberately deferr
   ten green task reviews and was only caught by launching the app and screenshotting
   it. Any future change to `mesh/viewport.py` needs a visual check, not just a suite.
 
+## Expert mode, Phase 1 (sketches and Create): approximations and limits
+
+mesh works on closed triangle solids, not exact curved surfaces, so these
+tools do the closest honest version of their Fusion counterparts:
+
+- **Curves are straight pieces.** A circle or arc is 64 pieces per whole turn
+  (like a cylinder), a spline 16 pieces between typed points. Revolve's round
+  surfaces are 64 flat strips per turn, Sweep follows a curved path in those
+  same short straight steps, and Loft's sides run straight from one outline to
+  the next (no smoothing through three or more outlines).
+- **No constraints or driving dimensions** between curves (the binding spec
+  leaves them out): every curve is placed by its own typed numbers.
+- **Sketches are not dragged.** A flat sketch's handle box would have no
+  thickness, so the drag handles are hidden for sketches; they are moved and
+  turned with the Details panel.
+- **Extrude** has no taper angle and no "up to a face". Joining or cutting
+  other parts goes through Make Hole + Group (or Join / Cut Out), not inside
+  Extrude.
+- **Revolve**: a fitted Hole made with less than a whole turn gets its
+  clearance on its round sides only, not on its two flat ends.
+- **Sweep** has no twist, scale or guide rails. An outline that is not drawn
+  across the start of the path is moved there (its middle onto the start), so
+  an outline deliberately drawn beside the path is not swept at a distance.
+  Change Sketch redraws a sweep's outline, not its path.
+- **Loft**: each sketch must hold one closed outline with no holes; no rails
+  and no single point at an end. A loft's outlines can't be redrawn after it
+  is made (undo, change the sketches, loft again). A fitted Hole loft's
+  slanted sides get slightly less than the full clearance.
+- **Corner-drag scaling** does nothing to the size of a part made from a
+  sketch: its size comes from the sketch and the Details panel numbers.
+- **Pre-existing: drag handles can linger.** Putting the handles away (for
+  example after Select All or Delete from the keyboard) does not redraw the
+  3D view, so the old handles stay drawn until the next redraw. Found during
+  the Phase 1 check and fixed for sketches only, so the app with Expert mode
+  off is unchanged; a one-line `_render()` in `Gizmo.attach` fixes the rest.
+
 ## Platform notes
 
 - The app forces Qt's `xcb` platform (XWayland) in `mesh/app.py:run`, because VTK's

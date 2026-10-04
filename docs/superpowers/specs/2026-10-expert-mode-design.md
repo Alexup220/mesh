@@ -57,6 +57,33 @@ closest honest version, which its tooltip states and `docs/FOLLOWUPS.md` lists.
   plus cutters or fillers, like Hollow out and Split, so Ungroup gives the
   original back.
 
+## Phase 1 as built: sketches and Create
+
+- **Modules.** `mesh/sketch.py` (curves, outlines, planes), `mesh/features.py`
+  (the solids) and `mesh/create.py` (shapes made from sketches) are core and in
+  the purity list. `mesh/sketch_editor.py` (the sketch window) and
+  `mesh/expert_actions.py` (the menu handlers, mixed into `MeshWindow`) are GUI.
+- **A sketch** is a shape with `params = {"primitive": "sketch", "entities":
+  [...]}` and its plane as its transform. `shapes.REFERENCES` lists it apart
+  from `PRIMITIVES`, so the shelf, the Details panel's size fields and the
+  primitive tests are untouched. `shapes.is_reference` is what Group, Join,
+  the status bar check, Save for Printing, Hollow out and Split use to leave
+  it out or refuse it plainly.
+- **Plane convention.** Sketch X follows the world's X (Y when the plane
+  faces along X), sketch Y = facing x X, and the origin is the point of the
+  plane nearest the world origin, so typed numbers read like the Details
+  panel's on the workplane and on flat faces.
+- **Sketch-made parts** are new primitives (`extrude`, `revolve`, `sweep`,
+  `loft`) holding a copy of their sketches' curves. Extrude's transform is its
+  sketch's plane; Revolve's is the plane times `features.axis_frame(axis)`,
+  so a fresh one stands upright; Sweep and Loft store each sketch's plane in
+  params and use the world as their own coordinates. Making one is one undo
+  step that also removes the sketches unless "Keep the sketch" is ticked.
+  Change Sketch redraws the outline of an extrusion, revolve or sweep (the
+  part must still come out solid); a loft is not redrawn.
+- **Results** are a new part or a Hole; joining and cutting stay with
+  Solid/Hole + Group, as everywhere else in mesh.
+
 ## Project files
 
 No new top-level fields and no `format_version` change are planned. New shape

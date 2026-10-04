@@ -66,6 +66,23 @@ never in a project file, so opening a project doesn't change it. Turning it
 off only hides the tools: anything you made with them stays in your model,
 visible and editable.
 
+With Expert mode on:
+
+- **Sketch → New Sketch** draws flat curves (lines, rectangles, circles,
+  arcs, polygons and splines) on the workplane or an upright plane. Type each
+  curve in millimetres, or turn on *Draw Lines* and click points into the
+  drawing. **Sketch on a Face** draws on a clicked flat face of a part and
+  shows that face's outline, which you can copy in to trace. **Change
+  Sketch** redraws a sketch, or the sketch a part was made from. Sketches are
+  guides: they show in orange, save with the project and undo like anything
+  else, but are never printed.
+- **Create → Extrude** pushes a sketch's closed outlines out of its plane,
+  **Revolve** turns them around a line, **Sweep** carries them along a path
+  drawn in a second sketch, and **Loft** joins the outlines of two or more
+  sketches with a skin. Each makes a new part or a hole. The sketch is used up
+  unless you keep it; the part keeps a copy of its curves, so its distance or
+  angle stays editable in Details.
+
 ## Shortcuts
 
 | Key | Action |
@@ -84,6 +101,7 @@ visible and editable.
 | `P` | Place next shape on a face |
 | `T` | Add text |
 | `M` | Measure |
+| `E` | Extrude (Expert mode) |
 | `Esc` | Stop the current tool |
 
 ## Develop
