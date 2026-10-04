@@ -1,12 +1,14 @@
-"""The window's Expert mode patterns (in the Create menu).
+"""The window's Expert mode patterns and Mirror (in the Create menu).
 
 Mixed into MeshWindow through ExpertActions. The geometry is in
 mesh.patterns; this is only the wiring: ask, try, then snapshot and add the
 copies on success, as one undo step.
 """
 
+from PySide6.QtCore import QTimer
+
 from mesh import create, patterns
-from mesh.builders import MAX_COPIES
+from mesh.builders import MAX_COPIES, BuildError
 from mesh.modify import MOVE_LIMIT, _bounds
 from mesh.modify_actions import TURN_AXES
 from mesh.panels import run_form
@@ -80,12 +82,36 @@ def ask_path(parent) -> dict | None:
     return run_form(parent, "Pattern Along a Path", path_fields(), note=PATH_NOTE)
 
 
+MIRROR_PLANES = [
+    ("face", "A flat face you click next"),
+    ("x", "The upright middle plane between left and right (through 0)"),
+    ("y", "The upright middle plane between front and back (through 0)"),
+    ("z", "The workplane (the copies end up below it)"),
+]
+
+
+def mirror_fields():
+    return [("plane", "Mirror across", "face", {"choices": MIRROR_PLANES})]
+
+
+MIRROR_NOTE = (
+    "Adds a mirror image of each selected part on the other side of the plane. To mirror "
+    "across a sketch's plane, select the sketch with the parts. Combine joins a copy to its part."
+)
+
+
+def ask_mirror(parent) -> dict | None:
+    return run_form(parent, "Mirror", mirror_fields(), note=MIRROR_NOTE)
+
+
 class PatternActions:
     """Mixed into MeshWindow through ExpertActions."""
 
-    PATTERN_CLICK_TOOLS = ()
-    PATTERN_TOOL_PROMPTS = {}
-    PATTERN_CLICK_HANDLERS = {}
+    PATTERN_CLICK_TOOLS = ("mirror_face",)
+    PATTERN_TOOL_PROMPTS = {
+        "mirror_face": "Click a flat face to mirror the selected parts across. Esc cancels.",
+    }
+    PATTERN_CLICK_HANDLERS = {"mirror_face": "_mirror_face_picked"}
 
     PATTERN_HINT = "Select the parts to copy first."
 
@@ -189,3 +215,83 @@ class PatternActions:
             self.path_pattern_selected(
                 values["count"], None if values["even"] else values["spacing"], values["follow"],
             )
+
+    # --- Mirror -------------------------------------------------------------------
+
+    MIRROR_HINT = "Select the parts to mirror (and a sketch, to mirror across its plane)."
+
+    def _mirror_selection(self):
+        chosen = self._picked()
+        guides = [s for s in chosen if is_reference(s)]
+        parts = [s for s in chosen if not is_reference(s)]
+        if not parts or len(guides) > 1 or (guides and not create.is_sketch(guides[0])):
+            self.statusBar().showMessage(self.MIRROR_HINT)
+            return None
+        return parts, (guides[0] if guides else None)
+
+    def _add_mirrored(self, parts, plane) -> bool:
+        origin, normal = plane
+        return self._add_pattern("mirror", parts, lambda: patterns.mirrored(parts, origin, normal))
+
+    def mirror_copy_selected(self, plane: str = "x") -> bool:
+        """Mirrored copies of the selected parts across the selected
+        sketch's plane, or else the middle plane `plane` ("x", "y", "z")."""
+        chosen = self._mirror_selection()
+        if chosen is None:
+            return False
+        parts, guide = chosen
+        return self._add_mirrored(
+            parts, patterns.plane_of_sketch(guide) if guide else patterns.middle_plane(plane)
+        )
+
+    def do_mirror_copy(self) -> None:
+        chosen = self._mirror_selection()
+        if chosen is None:
+            return
+        parts, guide = chosen
+        if guide is not None:
+            self.mirror_copy_selected()
+            return
+        values = ask_mirror(self)
+        if values is None:
+            return
+        if values["plane"] != "face":
+            self.mirror_copy_selected(values["plane"])
+            return
+        self._mirror_ids = [s.id for s in parts]
+        self.start_tool("mirror_face")
+
+    def _mirror_face_picked(self, shape_id: str, face_index: int, _point=None) -> None:
+        """A click on a flat face: mirror across it once the click is over.
+        Anything else keeps the tool waiting."""
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+            if is_reference(shape):
+                raise BuildError(self.TOOL_PROMPTS["mirror_face"])
+            patterns.plane_of_face(shape, face_index, scene.fit_clearances)
+        except (KeyError, BuildError):
+            self.statusBar().showMessage(self.TOOL_PROMPTS["mirror_face"])
+            return
+        self._clear_tool()
+        self.sync()
+        QTimer.singleShot(0, lambda: self.mirror_across_face(shape_id, face_index))
+
+    def mirror_across_face(self, shape_id: str, face_index: int, part_ids=None) -> bool:
+        """Mirrored copies of the parts `part_ids` (those selected when
+        Mirror started) across the flat face of `shape_id` holding
+        `face_index`. One undo step."""
+        scene = self.document.scene
+        ids = part_ids if part_ids is not None else getattr(self, "_mirror_ids", [])
+        parts = [s for s in scene.shapes if s.id in ids and not is_reference(s)]
+        try:
+            face_part = scene.get(shape_id)
+        except KeyError:
+            return False
+        if not parts:
+            self.statusBar().showMessage(self.MIRROR_HINT)
+            return False
+        plane = self._attempt(
+            "Cannot mirror", lambda: patterns.plane_of_face(face_part, face_index, scene.fit_clearances)
+        )
+        return plane is not None and self._add_mirrored(parts, plane)

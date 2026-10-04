@@ -171,10 +171,10 @@ tools do the closest honest version of their Fusion counterparts:
   with sharp corners (a straight one's corners are rounded). Stretching a
   sloped Extrusion up or across changes its angle so its sides stay flat.
 
-## Expert mode, Phase 3 (Patterns): approximations and limits
+## Expert mode, Phase 3 (Patterns and Mirror): approximations and limits
 
-The copies themselves are exact: each is the same part moved or turned. What
-differs from Fusion is how the pattern is chosen.
+The copies themselves are exact: each is the same part moved, turned or
+reflected. What differs from Fusion is how the pattern is chosen.
 
 - **Directions are the world's.** Pattern in Rows goes along left/right,
   forward/back or up/down, and Pattern Around a Line turns round a line
@@ -193,6 +193,10 @@ differs from Fusion is how the pattern is chosen.
 - **Copies are separate parts**, as Duplicate makes, not one feature.
   Changing the original later does not change the copies, and patterned
   Holes cut once grouped with the part, like any Hole.
+- **Mirror makes copies only.** Fusion can also mirror a part into one
+  joined body; here Combine (Join) joins a copy to its part. The plane is a
+  selected sketch's plane, a clicked flat face, or one of the three middle
+  planes through 0; a construction plane comes in Phase 4.
 
 ## Platform notes
 

@@ -99,6 +99,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_path_pattern",
     ),
     ExpertTool(
+        "mirror", "create", "&Mirror...",
+        "Add a mirror image of the selected parts across a flat face you click, a middle "
+        "plane, or the plane of a sketch selected with them. The images are separate parts; "
+        "Combine joins one to its part.",
+        "do_mirror_copy",
+    ),
+    ExpertTool(
         "move_copy", "modify", "&Move or Copy...",
         "Move or turn the selected parts by exact amounts, or make moved copies of them. "
         "A turn goes around a line through their middle.",

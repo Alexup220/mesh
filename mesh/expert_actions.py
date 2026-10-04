@@ -1,6 +1,6 @@
 """The window's Expert mode actions: the Sketch and Create menus.
 
-Create's patterns are in mesh.pattern_actions, and the Modify
+Create's patterns and Mirror are in mesh.pattern_actions, and the Modify
 menu in mesh.modify_actions; both are mixed in here.
 
 MeshWindow inherits these, so they share its document, undo and click

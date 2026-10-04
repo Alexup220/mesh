@@ -1,11 +1,11 @@
-"""Copies in a pattern: Expert mode's patterns.
+"""Copies in a pattern, and mirrored copies: Expert mode's patterns and Mirror.
 
 Every function returns new shapes (copies with new ids, as Duplicate makes)
 and leaves the shapes passed in alone; the window adds them in one undo
 step. Copies keep their part's name, size numbers, Solid/Hole and fit, so a
 patterned Hole still cuts once grouped. Sketches are guides: they are never
-copied here, and a sketch can be the path. A request that can't be met
-raises BuildError with a plain message.
+copied here, and a sketch can be the path or the mirror plane. A request
+that can't be met raises BuildError with a plain message.
 
     rectangular  rows and columns along two of the world's directions
     circular     round a line through a point, along one of the world's
@@ -15,9 +15,11 @@ raises BuildError with a plain message.
     along_path   along the one path a sketch draws, keeping the parts'
                  place relative to the path's start, and optionally turning
                  with it
+    mirrored     reflected across a plane: a sketch's, a flat face's, or one
+                 of the middle planes through 0
 
-All exact: copies are the same shapes moved or turned. Along a curved path
-the copies sit on the path's straight pieces (64 per circle).
+All exact: copies are the same shapes moved, turned or reflected. Along a
+curved path the copies sit on the path's straight pieces (64 per circle).
 """
 
 import math
@@ -26,8 +28,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from mesh import create, sketch
-from mesh.builders import MAX_COPIES, BuildError, _check_count, _copy
-from mesh.modify import MOVE_LIMIT, _axis_turn, _bounds
+from mesh.builders import GUIDES_ARE_NOT_PARTS, MAX_COPIES, BuildError, _check_count, _copy
+from mesh.modify import MOVE_LIMIT, _axis_turn, _bounds, flat_face
 from mesh.ops import AXES, _canonical
 from mesh.shapes import is_reference
 
@@ -257,3 +259,45 @@ def along_path(shapes, guide, count: int, spacing: float | None = None, follow: 
         local[:2, 3] = path.point(s) - local[:2, :2] @ p0
         out += _moved(parts, frame @ local @ back)
     return out
+
+
+# --- Mirror -------------------------------------------------------------------------
+
+MIDDLE_PLANES = ("x", "y", "z")
+
+
+def mirrored(shapes, origin, normal) -> list:
+    """Copies of the parts reflected across the plane through `origin`
+    facing `normal`, named "(mirrored)"."""
+    if any(is_reference(s) for s in shapes):
+        raise BuildError(GUIDES_ARE_NOT_PARTS.format(tool="Mirror"))
+    if not shapes:
+        raise BuildError("Select the parts to mirror first.")
+    n = np.asarray(normal, dtype=np.float64)
+    n = n / np.linalg.norm(n)
+    p = np.asarray(origin, dtype=np.float64)
+    matrix = np.eye(4)
+    matrix[:3, :3] -= 2.0 * np.outer(n, n)
+    matrix[:3, 3] = 2.0 * float(p @ n) * n
+    out = _moved(list(shapes), matrix, canonical=False)
+    for clone in out:
+        clone.name = f"{clone.name} (mirrored)"
+    return out
+
+
+def plane_of_sketch(guide) -> tuple[np.ndarray, np.ndarray]:
+    frame = np.asarray(guide.transform, dtype=np.float64)
+    return frame[:3, 3].copy(), frame[:3, 2] / np.linalg.norm(frame[:3, 2])
+
+
+def plane_of_face(shape, face_index: int, clearances: dict | None = None):
+    face = flat_face(shape, face_index, clearances)
+    return face.centre, face.normal
+
+
+def middle_plane(axis: str) -> tuple[np.ndarray, np.ndarray]:
+    """The plane through 0 that `axis` runs square to (x: the upright plane
+    between left and right)."""
+    normal = np.zeros(3)
+    normal[AXES[axis]] = 1.0
+    return np.zeros(3), normal
