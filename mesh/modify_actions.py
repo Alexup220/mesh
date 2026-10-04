@@ -112,6 +112,21 @@ def ask_shell(parent, exact: bool) -> dict | None:
     return run_form(parent, "Shell", shell_fields(), note=None if exact else APPROXIMATE_SHELL_NOTE)
 
 
+def push_pull_fields():
+    return [("distance", "Distance (mm)", 5.0, {"min": -modify.MOVE_LIMIT, "max": modify.MOVE_LIMIT})]
+
+
+PUSH_PULL_NOTE = (
+    "More than 0 pulls the face out of the part; less than 0 pushes it in. The face moves "
+    "straight out, square to itself: a sloping side next to it is not extended. A round "
+    "surface is made of narrow flat strips, and only the strip you clicked moves."
+)
+
+
+def ask_push_pull(parent) -> dict | None:
+    return run_form(parent, "Push/Pull", push_pull_fields(), note=PUSH_PULL_NOTE)
+
+
 def ask_move_copy(parent) -> dict | None:
     return run_form(
         parent, "Move or Copy", move_copy_fields(),
@@ -126,16 +141,18 @@ class ModifyActions:
 
     # The click-on-a-part tools of the Modify menu, their prompts, and the
     # method each click goes to.
-    MODIFY_CLICK_TOOLS = ("align_from", "align_to", "shell")
+    MODIFY_CLICK_TOOLS = ("align_from", "align_to", "shell", "push_pull")
     MODIFY_TOOL_PROMPTS = {
         "align_from": "Click the flat face of the part to move. Esc cancels.",
         "align_to": "Now click the face to put it against. Esc cancels.",
         "shell": "Click the flat face of a part to leave open. Esc cancels.",
+        "push_pull": "Click the flat face of a part to push in or pull out. Esc cancels.",
     }
     MODIFY_CLICK_HANDLERS = {
         "align_from": "_align_from_picked",
         "align_to": "_align_to_picked",
         "shell": "_shell_picked",
+        "push_pull": "_push_pull_picked",
     }
 
     # --- Move or Copy ------------------------------------------------------------
@@ -414,4 +431,36 @@ class ModifyActions:
         if group is None:
             return False
         self._replace_with("shell", shape, [group])
+        return True
+
+    # --- Push/Pull ---------------------------------------------------------------------
+
+    def do_push_pull(self) -> None:
+        self._start_face_tool("push_pull")
+
+    def _push_pull_picked(self, shape_id: str, face_index: int, _point=None) -> None:
+        self._face_clicked("push_pull", shape_id, face_index,
+                           lambda shape: self._ask_push_pull(shape, face_index))
+
+    def _ask_push_pull(self, shape, face_index: int) -> None:
+        self.viewport.end_drag()
+        values = ask_push_pull(self)
+        if values is not None:
+            self.push_pull_face(shape.id, face_index, values["distance"])
+
+    def push_pull_face(self, shape_id: str, face_index: int, distance: float) -> bool:
+        """Move a part's flat face out (`distance` > 0) or in. One undo step
+        on success."""
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+        except KeyError:
+            return False
+        group = self._attempt(
+            "Cannot push or pull",
+            lambda: modify.push_pull(shape, face_index, distance, scene.fit_clearances),
+        )
+        if group is None:
+            return False
+        self._replace_with("push/pull", shape, [group])
         return True

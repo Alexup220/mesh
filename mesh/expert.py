@@ -121,6 +121,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "approximately, and their walls can come out a little thinner in places.",
         "do_shell",
     ),
+    ExpertTool(
+        "push_pull", "modify", "&Push/Pull a Face",
+        "Click a flat face of a part, then type how far to pull it out or push it in. The "
+        "face moves straight out, square to itself; sloping sides next to it are not "
+        "extended, and on a round surface only the narrow flat strip clicked moves.",
+        "do_push_pull", "Q",
+    ),
 )
 
 

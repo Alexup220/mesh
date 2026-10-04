@@ -611,3 +611,42 @@ def shell(shape, face_index: int, wall: float, far_side: bool = False,
         return _group([copy.deepcopy(shape)] + room, f"{shape.name} (shell)", clearances)
     except NothingToCombineError as exc:
         raise BuildError("That wall is too thick for this part. Try a thinner wall.") from exc
+
+
+# --- Push/Pull ------------------------------------------------------------------------
+
+OVERLAP = 0.01  # mm a pulled piece reaches back into the part, so the two join solidly
+
+
+def push_pull(shape, face_index: int, distance: float, clearances: dict | None = None):
+    """The flat face clicked moved `distance` mm straight out of the part
+    (more than 0) or into it (less than 0).
+
+    Returns a group of the part and the piece added (the face's outline
+    pushed out) or taken away (pushed in, as a Hole), so Ungroup gives the
+    part back. Exact where the sides next to the face are square to it; a
+    sloping side is not extended, the new sides are square to the face.
+    """
+    if is_reference(shape):
+        raise BuildError(GUIDES_ARE_NOT_PARTS.format(tool="Push/Pull"))
+    if shape.is_hole:
+        raise BuildError("Push/Pull works on solid parts. This one is a Hole.")
+    distance = float(distance)
+    if not math.isfinite(distance) or distance == 0.0:
+        raise BuildError("Type a distance other than 0: more than 0 pulls the face out, "
+                         "less than 0 pushes it in.")
+    if abs(distance) > MOVE_LIMIT:
+        raise BuildError(f"A face can move at most {MOVE_LIMIT:g} mm.")
+    face = flat_face(shape, face_index, clearances)
+    if distance > 0.0:
+        piece = _baked_child(_prism(face, -OVERLAP, distance), "Pulled out", shape.color, False)
+        name = f"{shape.name} (pulled)"
+    else:
+        piece = _baked_child(_prism(face, distance, OVERLAP), "Pushed in", shape.color, True)
+        name = f"{shape.name} (pushed)"
+    try:
+        return _group([copy.deepcopy(shape), piece], name, clearances)
+    except NothingToCombineError as exc:
+        raise BuildError(
+            "Pushing the face in that far would leave nothing of the part. Try a shorter distance."
+        ) from exc

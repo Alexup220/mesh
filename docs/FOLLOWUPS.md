@@ -136,6 +136,12 @@ tools do the closest honest version of their Fusion counterparts:
   little thinner in places, and a detailed part can take a few seconds. A
   round surface is narrow flat strips, so clicking one opens just that strip,
   and only with a wall thinner than the strip is wide.
+- **Push/Pull** moves the clicked flat face straight out or in, square to
+  itself: the face's outline is pushed out as a new piece, or pushed in as a
+  Hole. That is exact where the sides next to the face are square to it.
+  Unlike Fusion, sloping sides next to the face are not extended along their
+  slope, and a round surface can't be pushed as a whole: it is narrow flat
+  strips, and only the strip clicked moves.
 
 ## Platform notes
 
