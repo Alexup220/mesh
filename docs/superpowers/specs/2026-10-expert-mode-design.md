@@ -121,6 +121,32 @@ closest honest version, which its tooltip states and `docs/FOLLOWUPS.md` lists.
   number typed in the Details panel for any part made from a sketch is
   test-built first (`create.edit_refusal`).
 
+## Phase 3 as built: Patterns and Mirror
+
+- **Modules.** `mesh/patterns.py` (core, in the purity list) makes the
+  copies; `mesh/pattern_actions.py` holds the forms and handlers in
+  `PatternActions`, mixed into `ExpertActions` beside `ModifyActions`. The
+  four tools sit in the Create menu, after Loft.
+- **Copies, not features.** Every tool returns new shapes made as Duplicate
+  makes them (new ids, same params, Solid/Hole and fit), moved by one world
+  matrix each, and the window adds them with the parts selected, as one
+  undo step. Nothing links a copy to its original afterwards, and nothing
+  new is saved: a copy is an ordinary shape.
+- **Counts include the parts**, as Fusion's do. Rows go along the world's
+  three directions; Around a Line turns round a line along one of them
+  through a typed point (Repeat in a Circle stays as it was, for beginners).
+- **Along a Path** uses the one path a selected sketch draws
+  (`sketch.single_path`, as Sweep does), in the sketch's own plane: from the
+  end nearest the parts, or round a closed path from its point nearest them.
+  Each copy moves by the path's step from that start; "turn" adds the
+  change in the path's direction, blended over pieces that meet at less than
+  10 degrees so a circle's copies turn smoothly.
+- **Mirror** reflects (`I - 2nnᵀ`), so a copy's transform turns inside out;
+  the geometry is built from it with its faces the right way out, and the
+  copy is named "(mirrored)". The plane is a selected sketch's (used at once,
+  no form), a flat face clicked next (`mirror_face`, a click tool like
+  Phase 2's), or a middle plane through 0.
+
 ## Project files
 
 No new top-level fields and no `format_version` change are planned. New shape
