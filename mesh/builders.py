@@ -20,7 +20,7 @@ import numpy as np
 from mesh.blobs import encode_mesh
 from mesh.ops import HasGapsError, fresh_ids, make_group
 from mesh.scene import Shape, new_primitive
-from mesh.shapes import PRIMITIVES, shape_geometry
+from mesh.shapes import PRIMITIVES, is_reference, shape_geometry
 from mesh.solids import from_manifold, m3, to_manifold
 
 
@@ -56,6 +56,11 @@ def _baked_child(tm, name: str, color: str, is_hole: bool) -> Shape:
         is_hole=is_hole,
     )
 
+
+GUIDES_ARE_NOT_PARTS = (
+    "{tool} works on solid parts. A sketch is a flat drawing, not a part: "
+    "use Extrude or Revolve to make a part from it."
+)
 
 NOT_CLEAN = (
     "That would not come out as one clean, closed part. "
@@ -102,6 +107,8 @@ def hollow(
     """
     wall = float(wall)
     drain = float(drain)
+    if is_reference(shape):
+        raise BuildError(GUIDES_ARE_NOT_PARTS.format(tool="Hollow out"))
     if shape.is_hole:
         raise BuildError("Hollow out works on solid parts. This one is a Hole.")
     if wall <= 0.0:
@@ -359,6 +366,8 @@ def split(
 
     if axis not in AXIS_VECTORS:
         raise ValueError(f"unknown axis {axis!r}")
+    if is_reference(shape):
+        raise BuildError(GUIDES_ARE_NOT_PARTS.format(tool="Split"))
     if shape.is_hole:
         raise BuildError("Split works on solid parts. This one is a Hole.")
     normal = np.asarray(AXIS_VECTORS[axis])

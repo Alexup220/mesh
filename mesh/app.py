@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QTimer, Qt
 
 from mesh import builders, expert, hardware, ops, panels
+from mesh.expert_actions import ExpertActions
 from mesh.gizmo import Gizmo
 from mesh.io_formats import (
     EXPORT_EXTS,
@@ -44,7 +45,7 @@ from mesh.text import has_letters
 from mesh.viewport import Viewport
 
 
-class MeshWindow(QMainWindow):
+class MeshWindow(ExpertActions, QMainWindow):
     EDIT_COALESCE_MS = 400
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -227,6 +228,8 @@ class MeshWindow(QMainWindow):
         changed when the mode goes off."""
         self.settings.expert_mode = bool(on)
         saved = self.settings.save()
+        if not on and self.tool in self.EXPERT_CLICK_TOOLS:
+            self.stop_tool()
         self._apply_expert_mode()
         if self.settings.path is not None and not saved:
             self.statusBar().showMessage(self.EXPERT_NOT_SAVED)
@@ -661,6 +664,7 @@ class MeshWindow(QMainWindow):
         "place_ready": "Now add a shape. It will sit on the face you clicked. Esc cancels.",
         "measure": "Click the first point on a part. Esc or Measure again to stop.",
         "measure_second": "Now click the second point.",
+        **ExpertActions.EXPERT_TOOL_PROMPTS,
     }
 
     def start_tool(self, tool: str) -> None:
@@ -751,6 +755,8 @@ class MeshWindow(QMainWindow):
             self._place_picked(shape_id, face_index, point)
         elif self.tool == "measure":
             self._measure_picked(shape_id, point)
+        elif self.tool == "sketch_face":
+            self._sketch_face_picked(shape_id, face_index)
 
     def _place_picked(self, shape_id: str, face_index: int, point) -> None:
         """Remember the clicked face; nothing in the scene changes until a

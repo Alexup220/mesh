@@ -14,6 +14,7 @@ from vtkmodules.vtkCommonTransforms import vtkTransform
 from vtkmodules.vtkInteractionWidgets import vtkBoxRepresentation, vtkBoxWidget2
 
 from mesh.scene import Shape, _signed_scale
+from mesh.shapes import is_reference
 
 # Which size params a corner-handle scale drag should grow, per axis of
 # the gizmo's local box (x, y, z). "radial" params (diameter, wall
@@ -78,7 +79,9 @@ class Gizmo(QObject):
             return
 
         actor = self.viewport.actor_for(shape.id)
-        if actor is None:
+        # A guide (a sketch) is flat, so a box of handles around it has no
+        # thickness to grab; it is moved and turned in the Details panel.
+        if actor is None or is_reference(shape):
             self._widget.Off()
             self._base = None
             return

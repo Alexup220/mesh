@@ -39,13 +39,20 @@ from vtkmodules.vtkRenderingCore import (
 )
 
 from mesh.scene import Scene
-from mesh.shapes import hole_clearance, shape_geometry
+from mesh.shapes import hole_clearance, is_reference, shape_geometry
+from mesh.sketch import sketch_lines
 
 HOLE_OPACITY = 0.35
 BACKGROUND = (0.16, 0.17, 0.20)
 GRID_COLOR = (0.50, 0.53, 0.58)
 MEASURE_COLOR = (1.0, 0.85, 0.2)
 MEASURE_LINE_WIDTH = 4.0  # pixels
+SELECTED_COLOR = (1.0, 0.85, 0.2)
+# A guide (a sketch) is its curves, drawn as lines, over a faint shading of
+# the area its closed outlines fill.
+GUIDE_FILL_OPACITY = 0.18
+GUIDE_LINE_WIDTH = 2.0
+GUIDE_SELECTED_LINE_WIDTH = 3.5
 
 VIEW_PRESETS = {
     "home": ((1.0, -1.0, 0.8), (0.0, 0.0, 1.0)),
@@ -68,6 +75,33 @@ def _to_polydata(tm) -> vtkPolyData:
     poly.SetPoints(points)
     poly.SetPolys(cells)
     return poly
+
+
+def _lines_polydata(lines) -> vtkPolyData:
+    """World-space polylines (a list of (N, 3) arrays) as VTK lines."""
+    points = vtkPoints()
+    cells = vtkCellArray()
+    for line in lines:
+        start = points.GetNumberOfPoints()
+        for point in line:
+            points.InsertNextPoint(*(float(v) for v in point))
+        cells.InsertNextCell(len(line))
+        for index in range(len(line)):
+            cells.InsertCellPoint(start + index)
+    poly = vtkPolyData()
+    poly.SetPoints(points)
+    poly.SetLines(cells)
+    return poly
+
+
+def _guide_lines(shape) -> list:
+    """A guide's curves as world-space polylines."""
+    transform = np.asarray(shape.transform, dtype=np.float64)
+    out = []
+    for line in sketch_lines(shape.params.get("entities", [])):
+        flat = np.column_stack([line, np.zeros(len(line)), np.ones(len(line))])
+        out.append((flat @ transform.T)[:, :3])
+    return out
 
 
 def _hex_to_rgb(value: str) -> tuple[float, float, float]:
@@ -107,6 +141,8 @@ class Viewport(QWidget):
         super().__init__(parent)
         self._scene: Scene | None = None
         self._actors: dict[str, vtkActor] = {}
+        # A guide's (sketch's) curves, drawn as lines beside its shading.
+        self._outlines: dict[str, vtkActor] = {}
         # What each actor's polydata was last built from. shape_geometry()
         # runs a per-vertex Python loop to build a vtkPolyData -- rebuilding
         # every actor on every refresh() call (e.g. once per keystroke while
@@ -221,6 +257,10 @@ class Viewport(QWidget):
             if shape_id not in wanted:
                 self.renderer.RemoveActor(self._actors.pop(shape_id))
                 self._geometry_keys.pop(shape_id, None)
+        guides = {s.id for s in self._scene.shapes if s.visible and is_reference(s)}
+        for shape_id in list(self._outlines):
+            if shape_id not in guides:
+                self.renderer.RemoveActor(self._outlines.pop(shape_id))
 
         selected = set(self._scene.selection)
         for shape in self._scene.shapes:
@@ -234,11 +274,16 @@ class Viewport(QWidget):
                 self.renderer.AddActor(actor)
 
             key = self._geometry_key(shape)
-            if self._geometry_keys.get(shape.id) != key:
+            changed = self._geometry_keys.get(shape.id) != key
+            if changed:
                 actor.GetMapper().SetInputData(
                     _to_polydata(shape_geometry(shape, self._clearances()))
                 )
                 self._geometry_keys[shape.id] = key
+
+            if is_reference(shape):
+                self._refresh_guide(shape, actor, shape.id in selected, changed)
+                continue
 
             prop = actor.GetProperty()
             prop.SetColor(*_hex_to_rgb(shape.color))
@@ -248,6 +293,47 @@ class Viewport(QWidget):
             prop.SetLineWidth(2.0)
 
         self._render()
+
+    def _refresh_guide(self, shape, shading: vtkActor, selected: bool, changed: bool) -> None:
+        """A guide is faint shading plus its curves as lines, yellow and
+        thicker while selected."""
+        color = _hex_to_rgb(shape.color)
+        prop = shading.GetProperty()
+        prop.SetColor(*color)
+        prop.SetOpacity(GUIDE_FILL_OPACITY)
+        prop.SetEdgeVisibility(False)
+        prop.LightingOff()
+        outline = self._outlines.get(shape.id)
+        if outline is None:
+            outline = vtkActor()
+            outline.SetMapper(vtkPolyDataMapper())
+            outline.GetProperty().LightingOff()
+            self._outlines[shape.id] = outline
+            self.renderer.AddActor(outline)
+            changed = True
+        if changed:
+            outline.GetMapper().SetInputData(_lines_polydata(_guide_lines(shape)))
+        line = outline.GetProperty()
+        line.SetColor(*(SELECTED_COLOR if selected else color))
+        line.SetLineWidth(GUIDE_SELECTED_LINE_WIDTH if selected else GUIDE_LINE_WIDTH)
+
+    def outline_for(self, shape_id: str):
+        """A guide's line actor (its curves), or None."""
+        return self._outlines.get(shape_id)
+
+    def _shape_hit(self, actor) -> str | None:
+        for shape_id, candidate in self._actors.items():
+            if candidate is actor:
+                return shape_id
+        for shape_id, candidate in self._outlines.items():
+            if candidate is actor:
+                return shape_id
+        return None
+
+    def end_drag(self) -> None:
+        """Forget a mouse button held down in the 3D view, before a window
+        opens on top of it and takes the button's release."""
+        self.interactor.GetInteractorStyle().OnLeftButtonUp()
 
     def set_pick_mode(self, mode: str | None) -> None:
         self.pick_mode = mode
@@ -260,11 +346,8 @@ class Viewport(QWidget):
         self._picker.Pick(x, y, 0, self.renderer)
         hit = self._picker.GetActor()
         additive = bool(interactor.GetShiftKey())
-        for shape_id, actor in self._actors.items():
-            if actor is hit:
-                self.picked.emit(shape_id, additive)
-                return
-        self.picked.emit("", additive)
+        shape_id = self._shape_hit(hit) if hit is not None else None
+        self.picked.emit(shape_id or "", additive)
 
     def _on_surface_click(self, x: int, y: int) -> None:
         self._cell_picker.Pick(x, y, 0, self.renderer)
@@ -314,7 +397,8 @@ class Viewport(QWidget):
     def frame_selection(self) -> None:
         if self._scene is None:
             return
-        chosen = [self._actors[s.id] for s in self._scene.selected() if s.id in self._actors]
+        chosen = [self._outlines.get(s.id) or self._actors[s.id]
+                  for s in self._scene.selected() if s.id in self._actors]
         if not chosen:
             self.renderer.ResetCamera()
         else:

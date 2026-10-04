@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from mesh.scene import DEFAULT_COLOR, DEFAULT_FIT, FITS, Shape, euler_from_transform
-from mesh.shapes import PRIMITIVES, shelf_primitives
+from mesh.shapes import PRIMITIVES, is_reference, shelf_primitives
 from mesh.text import has_letters
 
 POSITION_FIELDS = ("x", "y", "z")
@@ -159,6 +159,7 @@ class Inspector(QWidget):
         self.hole_box = QCheckBox("Make this a hole", self)
         self.hole_box.toggled.connect(lambda value: self._emit("is_hole", value))
         layout.addRow(self.hole_box)
+        self._hole_row = layout.rowCount() - 1
 
         # How snugly the hole fits what goes into it. Only meaningful for a
         # Hole, so the row is hidden for solids (see show_shape).
@@ -285,8 +286,12 @@ class Inspector(QWidget):
             for field, value in zip(ROTATION_FIELDS, (rx, ry, rz)):
                 self.fields[field].setValue(float(value))
 
+            # A guide (a sketch) is never printed, so solid or hole means
+            # nothing for it.
+            guide = is_reference(shape)
             self.hole_box.setChecked(bool(shape.is_hole))
-            self._layout.setRowVisible(self._fit_row, bool(shape.is_hole))
+            self._layout.setRowVisible(self._hole_row, not guide)
+            self._layout.setRowVisible(self._fit_row, bool(shape.is_hole) and not guide)
             index = self.fit_box.findData(getattr(shape, "fit", DEFAULT_FIT))
             self.fit_box.setCurrentIndex(max(index, 0))
             self._set_color_swatch(shape.color or DEFAULT_COLOR)

@@ -10,7 +10,7 @@ import numpy as np
 
 from mesh.ops import HasGapsError, NothingLeftError, NothingToCombineError, evaluate
 from mesh.scene import Scene
-from mesh.shapes import shape_geometry
+from mesh.shapes import is_reference, shape_geometry
 
 
 @dataclass
@@ -57,7 +57,8 @@ def _check(scene: Scene) -> Report:
     except HasGapsError:
         # A part that isn't closed can't be combined with the rest; say so
         # with the overall size rather than fail.
-        bounds = np.array([shape_geometry(s, scene.fit_clearances).bounds for s in visible])
+        bounds = np.array([shape_geometry(s, scene.fit_clearances).bounds
+                           for s in visible if not is_reference(s)])
         size = tuple(float(v) for v in bounds[:, 1].max(axis=0) - bounds[:, 0].min(axis=0))
         return Report(
             empty=False,

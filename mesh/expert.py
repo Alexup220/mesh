@@ -34,7 +34,26 @@ MENUS: tuple[tuple[str, str], ...] = (
     ("inspect", "&Inspect"),
 )
 
-TOOLS: tuple[ExpertTool, ...] = ()
+TOOLS: tuple[ExpertTool, ...] = (
+    ExpertTool(
+        "new_sketch", "sketch", "&New Sketch...",
+        "Draw a flat sketch on the workplane or an upright plane: lines, rectangles, "
+        "circles, arcs, polygons and splines, placed by typed millimetres or by clicking. "
+        "A sketch is a guide and is never printed; its closed outlines make parts.",
+        "do_new_sketch",
+    ),
+    ExpertTool(
+        "sketch_on_face", "sketch", "Sketch on a &Face",
+        "Click a flat face of a part to draw a sketch on it. The face's outline is shown "
+        "and can be copied in to trace.",
+        "do_sketch_on_face",
+    ),
+    ExpertTool(
+        "edit_sketch", "sketch", "&Change Sketch...",
+        "Change the curves of the selected sketch.",
+        "do_edit_sketch",
+    ),
+)
 
 
 def tools_in(menu: str) -> list[ExpertTool]:
