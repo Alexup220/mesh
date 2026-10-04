@@ -5,7 +5,7 @@ mesh.patterns; this is only the wiring: ask, try, then snapshot and add the
 copies on success, as one undo step.
 """
 
-from mesh import patterns
+from mesh import create, patterns
 from mesh.builders import MAX_COPIES
 from mesh.modify import MOVE_LIMIT, _bounds
 from mesh.modify_actions import TURN_AXES
@@ -58,6 +58,26 @@ CIRCULAR_NOTE = (
 
 def ask_circular(parent, centre) -> dict | None:
     return run_form(parent, "Pattern Around a Line", circular_fields(centre), note=CIRCULAR_NOTE)
+
+
+def path_fields():
+    return [
+        ("count", "How many in total", 5, {"min": 2, "max": MAX_COPIES}),
+        ("even", "Spread them evenly along the whole path", True, {}),
+        ("spacing", "Otherwise, spacing along the path (mm)", 10.0, {"min": 0.01, "max": MOVE_LIMIT}),
+        ("follow", "Turn the copies as the path turns", False, {}),
+    ]
+
+
+PATH_NOTE = (
+    "Copies the selected parts along the sketch's path, starting from the end nearest them. "
+    "Each copy keeps the parts' place beside the path. Curves are followed in their short "
+    "straight pieces. The count includes the parts themselves."
+)
+
+
+def ask_path(parent) -> dict | None:
+    return run_form(parent, "Pattern Along a Path", path_fields(), note=PATH_NOTE)
 
 
 class PatternActions:
@@ -133,4 +153,39 @@ class PatternActions:
             self.circular_pattern_selected(
                 values["count"], values["axis"],
                 (values["centre_x"], values["centre_y"], values["centre_z"]), values["angle"],
+            )
+
+    # --- Along a path -------------------------------------------------------------
+
+    PATH_HINT = "Select the parts to copy and one sketch whose curves make the path."
+
+    def _path_selection(self):
+        chosen = self._picked()
+        guides = [s for s in chosen if is_reference(s)]
+        parts = [s for s in chosen if not is_reference(s)]
+        if len(guides) != 1 or not parts or not create.is_sketch(guides[0]):
+            self.statusBar().showMessage(self.PATH_HINT)
+            return None
+        return parts, guides[0]
+
+    def path_pattern_selected(self, count: int = 5, spacing: float | None = None,
+                              follow: bool = False) -> bool:
+        """Copies along the selected sketch's path: `spacing` mm apart, or
+        spread evenly for None."""
+        chosen = self._path_selection()
+        if chosen is None:
+            return False
+        parts, guide = chosen
+        return self._add_pattern(
+            "pattern along a path", parts,
+            lambda: patterns.along_path(parts, guide, count, spacing, follow),
+        )
+
+    def do_path_pattern(self) -> None:
+        if self._path_selection() is None:
+            return
+        values = ask_path(self)
+        if values is not None:
+            self.path_pattern_selected(
+                values["count"], None if values["even"] else values["spacing"], values["follow"],
             )

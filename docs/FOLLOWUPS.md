@@ -184,6 +184,12 @@ differs from Fusion is how the pattern is chosen.
 - **No suppressing single copies**, no "symmetric" (both ways from the
   part) option, and no spacing by total extent in Rows: spacing is from one
   copy to the next.
+- **Pattern Along a Path** needs a sketch as the path; a part's edge can't
+  be picked. Curves are followed in their straight pieces (64 per circle),
+  so a copy sits on a piece, slightly inside the true curve. With "Turn the
+  copies as the path turns", the turn is blended across pieces that meet
+  at less than 10 degrees (a curve) and jumps at sharper corners; copies
+  turn only within the sketch's plane, never tilt out of it.
 - **Copies are separate parts**, as Duplicate makes, not one feature.
   Changing the original later does not change the copies, and patterned
   Holes cut once grouped with the part, like any Hole.

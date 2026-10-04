@@ -92,6 +92,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_circular_pattern",
     ),
     ExpertTool(
+        "path_pattern", "create", "Pattern Along a &Path...",
+        "Select the parts and a sketch of a path: copies go along the path, spread evenly or "
+        "a set distance apart, and can turn as it turns. Curves are followed in short "
+        "straight pieces.",
+        "do_path_pattern",
+    ),
+    ExpertTool(
         "move_copy", "modify", "&Move or Copy...",
         "Move or turn the selected parts by exact amounts, or make moved copies of them. "
         "A turn goes around a line through their middle.",
