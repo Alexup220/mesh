@@ -65,6 +65,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "new part or a hole. Round surfaces are narrow flat strips, as on a cylinder.",
         "do_revolve",
     ),
+    ExpertTool(
+        "sweep", "create", "&Sweep...",
+        "Carry one sketch's closed outlines along a path drawn in another sketch, into a "
+        "new part or a hole. Select both sketches first. Curved paths are followed in "
+        "short straight steps.",
+        "do_sweep",
+    ),
 )
 
 

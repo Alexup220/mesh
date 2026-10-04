@@ -159,8 +159,8 @@ def status_text(entities) -> str:
     if loops:
         return (f"{count(loops, 'closed outline')} and {count(paths, 'open path')}. "
                 "Only closed outlines give a part its shape.")
-    return (f"{count(paths, 'open path')} and no closed outline yet. Join curve ends, "
-            "or add a closed curve, to give a part its shape.")
+    return (f"{count(paths, 'open path')} and no closed outline yet. A path can guide a "
+            "Sweep; a part's shape needs a closed outline (join curve ends, or add a closed curve).")
 
 
 class LineDrawer:

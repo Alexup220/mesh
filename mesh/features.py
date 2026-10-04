@@ -1,4 +1,4 @@
-"""Solids made from sketches (Expert mode): Extrude and Revolve.
+"""Solids made from sketches (Expert mode): Extrude, Revolve and Sweep.
 
 Each is a primitive (see mesh.shapes.PRIMITIVES) whose params keep a copy of
 the sketch it was made from, so its numbers stay editable and its geometry
@@ -16,6 +16,9 @@ sketch's: the shape's transform is the sketch's plane.
              fresh revolve stands upright on the workplane; the shape's
              transform is its sketch's plane times axis_frame(axis), which
              puts the axis back where it was drawn.
+    sweep    entities + profile_frame, path_entities + path_frame
+             The outline carried along the path. Each frame is a 4x4 list
+             placing that sketch in the sweep's own coordinates.
 
 A shape with no sketch of its own (a new primitive) uses a small built-in
 one (DEFAULT_*), so every kind has a sensible default, standing on the
@@ -32,10 +35,10 @@ import math
 import numpy as np
 import trimesh
 
-from mesh.sketch import SEGMENTS, SketchError, profile
+from mesh.sketch import SEGMENTS, SketchError, profile, single_path, to_world
 from mesh.solids import from_manifold, m3
 
-SOLIDS = ("extrude", "revolve")
+SOLIDS = ("extrude", "revolve", "sweep")
 
 SIDES = [
     ("one", "The way the sketch faces"),
@@ -47,6 +50,21 @@ DEFAULT_EXTRUDE = [{"type": "rectangle", "corner": [-10.0, -10.0], "width": 20.0
 # Turned about the sketch's Y line: a tube 10 mm across inside, 20 outside.
 DEFAULT_REVOLVE = [{"type": "rectangle", "corner": [5.0, 0.0], "width": 5.0, "height": 20.0}]
 DEFAULT_AXIS = [0.0, 0.0, 0.0, 1.0]
+# A circle on the workplane carried straight up a 20 mm line drawn upright.
+DEFAULT_SWEEP_PROFILE = [{"type": "circle", "centre": [0.0, 0.0], "diameter": 10.0}]
+DEFAULT_SWEEP_PATH = [{"type": "line", "start": [0.0, 0.0], "end": [0.0, 20.0]}]
+_UPRIGHT = [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+_FLAT = np.eye(4).tolist()
+
+
+def _frame(values) -> np.ndarray:
+    try:
+        frame = np.asarray(values, dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise SketchError("A sketch's position is damaged.") from exc
+    if frame.shape != (4, 4) or not np.isfinite(frame).all():
+        raise SketchError("A sketch's position is damaged.")
+    return frame
 
 
 def _grow(area: "m3.CrossSection", clearance: float) -> "m3.CrossSection":
@@ -64,7 +82,7 @@ def _closed(solid: "m3.Manifold", what: str) -> trimesh.Trimesh:
 
 def default_entities(kind: str) -> list[dict]:
     """The built-in sketch a `kind` uses when it has none of its own."""
-    return {"extrude": DEFAULT_EXTRUDE, "revolve": DEFAULT_REVOLVE}[kind]
+    return {"extrude": DEFAULT_EXTRUDE, "revolve": DEFAULT_REVOLVE, "sweep": DEFAULT_SWEEP_PROFILE}[kind]
 
 
 def build(kind: str, params: dict, clearance: float = 0.0) -> trimesh.Trimesh:
@@ -74,6 +92,12 @@ def build(kind: str, params: dict, clearance: float = 0.0) -> trimesh.Trimesh:
     if kind == "revolve":
         return revolve(params.get("entities", DEFAULT_REVOLVE), params.get("axis", DEFAULT_AXIS),
                        params["angle"], clearance)
+    if kind == "sweep":
+        return sweep(
+            params.get("entities", DEFAULT_SWEEP_PROFILE), params.get("profile_frame", _FLAT),
+            params.get("path_entities", DEFAULT_SWEEP_PATH), params.get("path_frame", _UPRIGHT),
+            clearance,
+        )
     raise KeyError(f"unknown sketch solid: {kind}")
 
 
@@ -149,3 +173,176 @@ def revolve(entities, axis, angle: float, clearance: float = 0.0) -> trimesh.Tri
         # turning the outline from its own side.
         solid = solid.rotate((0.0, 0.0, 180.0))
     return _closed(solid, "revolve")
+
+
+# --- Sweep ------------------------------------------------------------------------
+
+
+def _unit(v) -> np.ndarray:
+    v = np.asarray(v, dtype=np.float64)
+    n = np.linalg.norm(v)
+    if n < 1e-12:
+        raise SketchError("The path has a piece with no length.")
+    return v / n
+
+
+def _turn(a, b) -> np.ndarray:
+    """The rotation turning unit direction a onto unit direction b (as
+    mesh.ops.rotation_between does; this module can't import mesh.ops)."""
+    axis = np.cross(a, b)
+    s, c = np.linalg.norm(axis), float(np.dot(a, b))
+    if s < 1e-12:
+        if c > 0.0:
+            return np.eye(3)
+        helper = np.array([1.0, 0.0, 0.0]) if abs(a[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        axis = np.cross(a, helper)
+        axis /= np.linalg.norm(axis)
+        return 2.0 * np.outer(axis, axis) - np.eye(3)
+    axis /= s
+    k = np.array([[0.0, -axis[2], axis[1]], [axis[2], 0.0, -axis[0]], [-axis[1], axis[0], 0.0]])
+    return np.eye(3) + s * k + (1.0 - c) * (k @ k)
+
+
+def _cap(outlines_2d: list, ring: np.ndarray, offset: int, facing) -> np.ndarray:
+    """Triangles closing one end. `outlines_2d` are the end's outlines in
+    2D and `ring` the same points in 3D, in the same order. Returned as
+    indices into the full point list (starting at `offset`), turned to face
+    `facing`."""
+    polygons = [np.ascontiguousarray(o, dtype=np.float64) for o in outlines_2d]
+    triangles = np.asarray(m3.triangulate(polygons), dtype=np.int64).reshape(-1, 3)
+    if len(triangles) == 0:
+        raise SketchError("An outline is too thin to close.")
+    a, b, c = ring[triangles[:, 0]], ring[triangles[:, 1]], ring[triangles[:, 2]]
+    if np.dot(np.cross(b - a, c - a).sum(axis=0), facing) < 0.0:
+        triangles = triangles[:, ::-1]
+    return triangles + offset
+
+
+def _skin(rings: list, closed: bool) -> np.ndarray:
+    """Side triangles joining each ring of points to the next, for every
+    outline. rings[k][c] is outline c at step k; counts match step to step."""
+    faces, offsets, count = [], [], 0
+    for step in rings:
+        offsets.append([])
+        for outline in step:
+            offsets[-1].append(count)
+            count += len(outline)
+    steps = len(rings) if closed else len(rings) - 1
+    for k in range(steps):
+        k1 = (k + 1) % len(rings)
+        for c, outline in enumerate(rings[k]):
+            i = np.arange(len(outline))
+            a, b = offsets[k][c] + i, offsets[k][c] + (i + 1) % len(outline)
+            d, e = offsets[k1][c] + i, offsets[k1][c] + (i + 1) % len(outline)
+            faces.append(np.column_stack([a, b, e]))
+            faces.append(np.column_stack([a, e, d]))
+    return np.vstack(faces)
+
+
+def _solid_from(vertices: np.ndarray, faces: np.ndarray, what: str) -> trimesh.Trimesh:
+    """A closed solid from outward-facing triangles, checked by the solid
+    kernel."""
+    built = m3.Mesh(
+        vert_properties=np.ascontiguousarray(vertices, dtype=np.float32),
+        tri_verts=np.ascontiguousarray(faces, dtype=np.uint32),
+    )
+    return _closed(m3.Manifold(built), what)
+
+
+def sweep(entities, profile_frame, path_entities, path_frame, clearance: float = 0.0) -> trimesh.Trimesh:
+    """The outline carried along the path, staying square to it.
+
+    If the outline's sketch already sits across the start of the path
+    (facing along it, through its first point), it is used where it is.
+    Otherwise its middle is moved onto the start of the path and it is
+    turned to face along it. At each corner of the path the outline is cut
+    on the plane halfway between the two directions (a mitre), which is
+    exact for paths of straight pieces; curves are many short pieces.
+    """
+    profile_frame, path_frame = _frame(profile_frame), _frame(path_frame)
+    path_2d, path_closed = single_path(path_entities)
+    path = to_world(path_frame, path_2d)
+    keep = np.concatenate([[True], np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-9])
+    path = path[keep]
+    if path_closed and len(path) > 1 and np.linalg.norm(path[0] - path[-1]) < 1e-9:
+        path = path[:-1]
+    if len(path) < (3 if path_closed else 2):
+        raise SketchError("The path is too short to sweep along.")
+
+    m = len(path)
+    pieces = m if path_closed else m - 1
+    directions = [_unit(path[(j + 1) % m] - path[j]) for j in range(pieces)]
+    start, t0 = path[0], directions[0]
+
+    # The outline in the world, then in flat coordinates across the start.
+    area = _grow(profile(entities), clearance)
+    world = [to_world(profile_frame, np.asarray(p, dtype=np.float64)) for p in area.to_polygons()]
+    x_axis, origin = profile_frame[:3, 0], profile_frame[:3, 3]
+    facing = _unit(np.cross(profile_frame[:3, 0], profile_frame[:3, 1]))
+    across_start = (abs(float(np.dot(facing, t0))) > math.cos(math.radians(1.0))
+                    and abs(float(np.dot(start - origin, facing))) < 1e-6)
+    if not across_start:
+        flat = np.vstack(world)
+        middle = (flat.min(axis=0) + flat.max(axis=0)) / 2.0
+        turn = _turn(facing, t0)
+        world = [(w - middle) @ turn.T + start for w in world]
+        x_axis = turn @ x_axis
+    e1 = _unit(x_axis - np.dot(x_axis, t0) * t0)
+    e2 = np.cross(t0, e1)
+    outlines = [np.column_stack([(w - start) @ e1, (w - start) @ e2]) for w in world]
+    # Filled again in these coordinates, so every outline runs anticlockwise
+    # seen from ahead along the path, and holes the other way.
+    area = m3.CrossSection([np.ascontiguousarray(o) for o in outlines], m3.FillRule.EvenOdd)
+    outlines = [np.asarray(p, dtype=np.float64) for p in area.to_polygons()]
+    if not outlines:
+        raise SketchError("The outline encloses no area.")
+
+    if clearance > 0.0 and not path_closed:
+        # A fitted Hole also reaches `clearance` past each end.
+        path = path.copy()
+        path[0] = path[0] - directions[0] * clearance
+        path[-1] = path[-1] + directions[-1] * clearance
+
+    # Carry the outline's axes along the path without twisting: each
+    # piece's axes are the piece before's, turned by the bend between them.
+    frames = [(e1, e2)]
+    for j in range(1, pieces):
+        turn = _turn(directions[j - 1], directions[j])
+        frames.append((turn @ frames[-1][0], turn @ frames[-1][1]))
+
+    def ring(k: int, outline: np.ndarray) -> np.ndarray:
+        """The outline at path point k: square to the piece arriving there,
+        then, at a corner, slid along that piece onto the mitre plane."""
+        corner = path_closed or 0 < k < m - 1
+        arriving = (k - 1) % pieces if corner else (0 if k == 0 else pieces - 1)
+        a, b = frames[arriving]
+        points = path[k] + outline[:, :1] * a + outline[:, 1:] * b
+        if corner:
+            d_in, d_out = directions[arriving], directions[k % pieces]
+            mitre = d_in + d_out
+            if np.linalg.norm(mitre) < 1e-6:
+                raise SketchError("The path turns straight back on itself, so it can't be swept along.")
+            mitre /= np.linalg.norm(mitre)
+            points = points - np.outer((points - path[k]) @ mitre / np.dot(d_in, mitre), d_in)
+        return points
+
+    rings = [[ring(k, o) for o in outlines] for k in range(m)]
+
+    # Every point of the outline must move forwards along each piece; one
+    # that runs backwards means the outline is too big for that bend.
+    for j in range(pieces):
+        k0, k1 = j, (j + 1) % m
+        for c in range(len(outlines)):
+            if ((rings[k1][c] - rings[k0][c]) @ directions[j]).min() <= 1e-6:
+                raise SketchError(
+                    "The path bends too tightly for an outline this big. Use a smaller "
+                    "outline or a gentler bend."
+                )
+
+    vertices = np.vstack([o for step in rings for o in step])
+    faces = [_skin(rings, path_closed)]
+    if not path_closed:
+        end = sum(len(o) for o in rings[0]) * (m - 1)
+        faces.append(_cap(outlines, np.vstack(rings[0]), 0, -directions[0]))
+        faces.append(_cap(outlines, np.vstack(rings[-1]), end, directions[-1]))
+    return _solid_from(vertices, np.vstack(faces), "sweep")

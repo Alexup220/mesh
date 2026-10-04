@@ -17,10 +17,11 @@ from mesh.shapes import is_reference
 RESULTS = [("part", "A new part"), ("hole", "A hole (cuts parts when grouped with them)")]
 
 
-def _result_fields():
+def _result_fields(sketches: int = 1):
+    keep = "Keep the sketch as well" if sketches == 1 else "Keep the sketches as well"
     return [
         ("result", "Make", "part", {"choices": RESULTS}),
-        ("keep_sketch", "Keep the sketch as well", False, {}),
+        ("keep_sketch", keep, False, {}),
     ]
 
 
@@ -49,6 +50,21 @@ def ask_revolve(parent, axes) -> dict | None:
         note="Turns the sketch's closed outlines around a line, like a part on a lathe. "
              "The outline must lie all on one side of the line. Round surfaces are made "
              "of narrow flat strips, like a cylinder's.",
+    )
+
+
+def sweep_fields(sketches, path_id: str):
+    return [
+        ("path", "Path to follow", path_id, {"choices": [(s.id, s.name) for s in sketches]}),
+    ] + _result_fields(len(sketches))
+
+
+def ask_sweep(parent, sketches, path_id: str) -> dict | None:
+    return run_form(
+        parent, "Sweep", sweep_fields(sketches, path_id),
+        note="Carries the other sketch's closed outlines along the path, square to it. "
+             "If the outline is not drawn across the start of the path, it is moved there. "
+             "Curved paths are followed in short straight steps.",
     )
 
 
@@ -193,6 +209,38 @@ class ExpertActions:
         if values is not None:
             self.revolve_selected(values["axis"], values["angle"], values["result"] == "hole",
                                   values["keep_sketch"])
+
+    TWO_SKETCHES_HINT = "Select two sketches: the outline, and the path to sweep it along."
+
+    def _two_sketches(self):
+        chosen = self.document.scene.selected()
+        if len(chosen) != 2 or not all(create.is_sketch(s) for s in chosen):
+            self.statusBar().showMessage(self.TWO_SKETCHES_HINT)
+            return None
+        return chosen
+
+    def sweep_selected(self, path_id: str | None = None, hole: bool = False,
+                       keep_sketch: bool = False) -> bool:
+        """Sweep one selected sketch's outline along the other's path
+        (`path_id`, or the likelier one)."""
+        pair = self._two_sketches()
+        if pair is None:
+            return False
+        path = next((s for s in pair if s.id == path_id), None) or create.likely_path(*pair)
+        outline = pair[1] if path is pair[0] else pair[0]
+        shape = self._attempt("Cannot sweep", lambda: create.make_sweep(outline, path, hole))
+        if shape is None:
+            return False
+        self._add_from_sketches("sweep", pair, shape, keep_sketch)
+        return True
+
+    def do_sweep(self) -> None:
+        pair = self._two_sketches()
+        if pair is None:
+            return
+        values = ask_sweep(self, pair, create.likely_path(*pair).id)
+        if values is not None:
+            self.sweep_selected(values["path"], values["result"] == "hole", values["keep_sketch"])
 
     def do_extrude(self) -> None:
         if self._chosen_sketch("extrude") is None:

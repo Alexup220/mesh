@@ -158,6 +158,43 @@ def make_revolve(source: Shape, axis_key: str = "y", angle: float = 360.0, hole:
                         {"axis": axis, "angle": float(angle)}, hole, local)
 
 
+def likely_path(first: Shape, second: Shape) -> Shape:
+    """Which of two sketches is the path for a Sweep: the one drawing an
+    open path and no closed outline, else the second one picked."""
+    for candidate in (first, second):
+        try:
+            found = sketch.chains(candidate.params["entities"])
+        except sketch.SketchError:
+            continue
+        if found.paths and not found.loops:
+            return candidate
+    return second
+
+
+def make_sweep(outline: Shape, path: Shape, hole: bool = False) -> Shape:
+    """The closed outlines of the sketch `outline` carried along the one
+    path drawn in the sketch `path`. The part's own coordinates are the
+    world's, so both sketches are stored with where they were."""
+    if not (is_sketch(outline) and is_sketch(path)) or outline.id == path.id:
+        raise BuildError("Select two sketches: the outline, and the path to sweep it along.")
+    shape = Shape(
+        id=uuid.uuid4().hex,
+        name=f"Sweep of {outline.name}",
+        kind="primitive",
+        params={
+            "primitive": "sweep",
+            "entities": copy.deepcopy(outline.params["entities"]),
+            "profile_frame": np.asarray(outline.transform, dtype=np.float64).tolist(),
+            "path_entities": copy.deepcopy(path.params["entities"]),
+            "path_frame": np.asarray(path.transform, dtype=np.float64).tolist(),
+        },
+        transform=np.eye(4),
+        is_hole=bool(hole),
+    )
+    _checked(lambda: shape_geometry(shape))
+    return shape
+
+
 def _boundary_loops(tm, faces) -> list[np.ndarray]:
     """The outlines (3D point loops) around a group of triangles."""
     edges = np.sort(tm.faces[faces][:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2), axis=1)

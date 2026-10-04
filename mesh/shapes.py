@@ -108,6 +108,12 @@ PRIMITIVES: dict[str, dict] = {
         "defaults": {"angle": 360.0},
         "shelf": False,
     },
+    # Also holds its path's curves and both sketches' planes (features.sweep).
+    "sweep": {
+        "label": "Sweep",
+        "defaults": {},
+        "shelf": False,
+    },
 }
 
 HARDWARE_PRIMITIVES = ("screw_hole", "nut_trap", "insert_pocket", "magnet_pocket")
