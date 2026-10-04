@@ -166,6 +166,25 @@ def clean_entities(entities) -> list[dict]:
     return [clean_entity(e) for e in entities]
 
 
+def scaled_entities(entities, factor: float) -> list[dict]:
+    """The curves scaled by `factor` about the sketch's origin (0, 0),
+    checked like any typed curve."""
+    k = float(factor)
+    out = []
+    for e in clean_entities(entities):
+        e = dict(e)
+        for key in ("start", "end", "corner", "centre"):
+            if key in e and isinstance(e[key], list):
+                e[key] = [k * v for v in e[key]]
+        for key in ("width", "height", "diameter", "radius"):
+            if key in e:
+                e[key] = k * e[key]
+        if "points" in e:
+            e["points"] = [[k * x, k * y] for x, y in e["points"]]
+        out.append(e)
+    return clean_entities(out)
+
+
 # --- Curves as straight pieces ---------------------------------------------------
 
 

@@ -29,6 +29,36 @@ def move_copy_fields():
     ]
 
 
+SCALE_ABOUT = [
+    ("base", "The middle of their base (what stands on the workplane stays on it)"),
+    ("centre", "Their middle"),
+]
+
+
+def scale_fields():
+    percent = {"min": modify.SCALE_LIMITS[0] * 100.0, "max": modify.SCALE_LIMITS[1] * 100.0}
+    return [
+        ("size", "Size (%)", 100.0, percent),
+        ("stretch_x", "Stretch left / right (%)", 100.0, percent),
+        ("stretch_y", "Stretch forward / back (%)", 100.0, percent),
+        ("stretch_z", "Stretch up / down (%)", 100.0, percent),
+        ("about", "Scale about", "base", {"choices": SCALE_ABOUT}),
+    ]
+
+
+SCALE_NOTE = (
+    "Size scales the selected parts the same in every direction, keeping their proportions; "
+    "a stretch scales one direction more. Sizes stay editable in the Details panel. A round "
+    "part must stretch alike across it, and a rounding or bottom chamfer keeps its size when "
+    "the directions differ (Group a part first to stretch it any way). Screw holes, nut traps, "
+    "insert pockets and magnet pockets keep their standard sizes and move with the parts."
+)
+
+
+def ask_scale(parent) -> dict | None:
+    return run_form(parent, "Scale", scale_fields(), note=SCALE_NOTE)
+
+
 def ask_move_copy(parent) -> dict | None:
     return run_form(
         parent, "Move or Copy", move_copy_fields(),
@@ -137,3 +167,42 @@ class ModifyActions:
         scene.select([moving.id])
         self._clear_tool()
         self.sync()
+
+    # --- Scale -------------------------------------------------------------------------
+
+    NOTHING_TO_SCALE = "Select the parts to scale first."
+
+    def scale_selected(self, size: float = 100.0, stretch_x: float = 100.0,
+                       stretch_y: float = 100.0, stretch_z: float = 100.0,
+                       about: str = "base") -> bool:
+        """Scale the selected shapes by percentages: `size` in every
+        direction, times each direction's stretch. One undo step; none when
+        nothing would change."""
+        scene = self.document.scene
+        chosen = scene.selected()
+        if not chosen:
+            self.statusBar().showMessage(self.NOTHING_TO_SCALE)
+            return False
+        factors = [float(size) * float(s) / 10000.0 for s in (stretch_x, stretch_y, stretch_z)]
+        if all(f == 1.0 for f in factors):
+            self.statusBar().showMessage("Nothing changed: the scale was 100%.")
+            return False
+        changed = self._attempt(
+            "Cannot scale", lambda: modify.scaled(chosen, factors, about, scene.fit_clearances)
+        )
+        if changed is None:
+            return False
+        self.document.snapshot("scale")
+        for shape, new in zip(chosen, changed):
+            shape.params = new.params
+            shape.transform = new.transform
+        self.sync()
+        return True
+
+    def do_scale(self) -> None:
+        if not self.document.scene.selected():
+            self.statusBar().showMessage(self.NOTHING_TO_SCALE)
+            return
+        values = ask_scale(self)
+        if values is not None:
+            self.scale_selected(**values)

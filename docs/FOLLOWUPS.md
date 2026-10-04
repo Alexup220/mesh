@@ -113,6 +113,21 @@ tools do the closest honest version of their Fusion counterparts:
   the Phase 1 check and fixed for sketches only, so the app with Expert mode
   off is unchanged; a one-line `_render()` in `Gizmo.attach` fixes the rest.
 
+## Expert mode, Phase 2 (Modify): approximations and limits
+
+- **Scale** changes size numbers, so a scaled primitive stays editable; the
+  same amount in every direction is exact for every kind. Different amounts
+  are exact only along a part's own sizes: a part turned by anything but
+  quarter turns, a round part stretched unevenly across, a sphere, ring,
+  revolve, sweep or loft stretched at all, and a sketch stretched unevenly
+  are refused (Group first: a group stretches any way, in its transform, as
+  its drag handles do). A rounding radius or bottom chamfer keeps its size
+  when the directions differ. Hardware holes keep their standard sizes and
+  move with the parts, their openings to where they were scaled to.
+  Pre-existing: a stretched group's parts, once ungrouped, carry the stretch
+  in their transforms, so a primitive's Details numbers show its size before
+  the stretch (the same happens after dragging a group's handles today).
+
 ## Platform notes
 
 - The app forces Qt's `xcb` platform (XWayland) in `mesh/app.py:run`, because VTK's

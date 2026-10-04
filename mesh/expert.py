@@ -91,6 +91,14 @@ TOOLS: tuple[ExpertTool, ...] = (
         "part turns and moves so the two faces touch, facing each other, middle to middle.",
         "do_align_faces",
     ),
+    ExpertTool(
+        "scale", "modify", "&Scale...",
+        "Make the selected parts bigger or smaller by a percentage, the same in every "
+        "direction or stretched in one. Sizes stay editable. A round part stretches alike "
+        "across it, roundings and bottom chamfers keep their size when stretched, and "
+        "hardware holes keep their standard sizes.",
+        "do_scale",
+    ),
 )
 
 
