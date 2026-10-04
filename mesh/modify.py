@@ -20,8 +20,16 @@ from shapely.ops import unary_union
 
 from mesh import features, sketch
 from mesh.builders import GUIDES_ARE_NOT_PARTS, BuildError
-from mesh.ops import AXES, _canonical, fresh_ids, rotate_about, rotation_between
-from mesh.shapes import HARDWARE_PRIMITIVES, PRIMITIVES, is_reference, primitive_mesh, shape_geometry
+from mesh.ops import (
+    AXES,
+    NothingToCombineError,
+    _canonical,
+    fresh_ids,
+    make_boolean_group,
+    rotate_about,
+    rotation_between,
+)
+from mesh.shapes import HARDWARE_PRIMITIVES, is_reference, primitive_mesh, shape_geometry
 
 MOVE_LIMIT = 10000.0  # mm: the furthest one move may go along each line
 
@@ -333,3 +341,36 @@ def scaled(shapes, factors, about: str = "base", clearances: dict | None = None)
                 raise BuildError(f"{shape.name} can't be made at that size. {exc}") from exc
         out.append(changed)
     return out
+
+
+# --- Combine --------------------------------------------------------------------------
+
+COMBINE_OPS = {"union": "Join", "difference": "Cut", "intersection": "Keep overlap"}
+
+
+def _parts_only(shapes, tool: str) -> None:
+    if any(is_reference(s) for s in shapes):
+        raise BuildError(GUIDES_ARE_NOT_PARTS.format(tool=tool))
+
+
+def combine(target, tools, op: str, keep_tools: bool = False, clearances: dict | None = None):
+    """`target` joined with the `tools`, cut by them, or kept only where it
+    overlaps them, as a group that Ungroup takes apart again. With
+    `keep_tools`, the tools also stay where they are: the group holds
+    copies of them. Exact (as Join, Cut Out and Keep Overlap are)."""
+    if op not in COMBINE_OPS:
+        raise ValueError(f"unknown way to combine {op!r}")
+    tools = [t for t in tools if t.id != target.id]
+    if not tools:
+        raise BuildError("Select the part to change and at least one other part to combine with it.")
+    _parts_only([target, *tools], "Combine")
+    children = [copy.deepcopy(target)] + [
+        fresh_ids(copy.deepcopy(t)) if keep_tools else copy.deepcopy(t) for t in tools
+    ]
+    try:
+        group = make_boolean_group(children, op, f"{target.name} ({COMBINE_OPS[op].lower()})", clearances)
+    except NothingToCombineError as exc:
+        raise BuildError(str(exc)) from exc
+    group.color = target.color
+    return group
+

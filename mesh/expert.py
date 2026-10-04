@@ -99,6 +99,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "hardware holes keep their standard sizes.",
         "do_scale",
     ),
+    ExpertTool(
+        "combine", "modify", "&Combine...",
+        "Join the other selected parts to one of them, cut them out of it, or keep only "
+        "where they overlap, choosing which part to change and whether to keep the others. "
+        "Ungroup gives the parts back.",
+        "do_combine",
+    ),
 )
 
 

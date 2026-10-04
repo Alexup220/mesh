@@ -59,6 +59,24 @@ def ask_scale(parent) -> dict | None:
     return run_form(parent, "Scale", scale_fields(), note=SCALE_NOTE)
 
 
+def combine_fields(parts):
+    return [
+        ("target", "Part to change", parts[0].id, {"choices": [(s.id, s.name) for s in parts]}),
+        ("op", "Combine by", "union", {"choices": list(modify.COMBINE_OPS.items())}),
+        ("keep_tools", "Keep the other parts as well", False, {}),
+    ]
+
+
+COMBINE_NOTE = (
+    "Join adds the other parts to the part to change, Cut takes them away from it, and Keep "
+    "overlap keeps only where they overlap. The result is a group: Ungroup gives the parts back."
+)
+
+
+def ask_combine(parent, parts) -> dict | None:
+    return run_form(parent, "Combine", combine_fields(parts), note=COMBINE_NOTE)
+
+
 def ask_move_copy(parent) -> dict | None:
     return run_form(
         parent, "Move or Copy", move_copy_fields(),
@@ -206,3 +224,47 @@ class ModifyActions:
         values = ask_scale(self)
         if values is not None:
             self.scale_selected(**values)
+
+    # --- Combine -----------------------------------------------------------------------
+
+    COMBINE_HINT = "Select two or more parts to combine."
+
+    def _picked_parts(self, hint: str, least: int = 2):
+        """The selected parts, in the order they were picked; None (and a
+        message) if there are fewer than `least`. Sketches are left out."""
+        parts = [s for s in self._picked() if not is_reference(s)]
+        if len(parts) < least:
+            self.statusBar().showMessage(hint)
+            return None
+        return parts
+
+    def combine_selected(self, target_id: str | None = None, op: str = "union",
+                         keep_tools: bool = False) -> bool:
+        """Join, cut or keep the overlap of the selected parts, changing the
+        part `target_id` (or the first picked). One undo step."""
+        parts = self._picked_parts(self.COMBINE_HINT)
+        if parts is None:
+            return False
+        target = next((s for s in parts if s.id == target_id), parts[0])
+        tools = [s for s in parts if s is not target]
+        scene = self.document.scene
+        group = self._attempt(
+            "Cannot combine",
+            lambda: modify.combine(target, tools, op, keep_tools, scene.fit_clearances),
+        )
+        if group is None:
+            return False
+        self.document.snapshot("combine")
+        scene.remove([target.id] + ([] if keep_tools else [s.id for s in tools]))
+        scene.add(group)
+        scene.select([group.id])
+        self.sync()
+        return True
+
+    def do_combine(self) -> None:
+        parts = self._picked_parts(self.COMBINE_HINT)
+        if parts is None:
+            return
+        values = ask_combine(self, parts)
+        if values is not None:
+            self.combine_selected(values["target"], values["op"], values["keep_tools"])
