@@ -29,9 +29,9 @@ from mesh import create, sketch
 from mesh.panels import run_form
 
 # Any position in a sketch, and any size, in millimetres.
-COORD = {"min": -10000.0, "max": 10000.0}
-SIZE = {"min": 0.01, "max": 10000.0}
-ANGLE = {"min": -360.0, "max": 360.0}
+COORD = {"min": -sketch.LIMIT, "max": sketch.LIMIT, "decimals": 3}
+SIZE = {"min": sketch.MIN_SIZE, "max": sketch.LIMIT, "decimals": 3}
+ANGLE = {"min": -360.0, "max": 360.0, "decimals": 3}
 
 ENTITY_LABELS = {
     "line": "Line",
@@ -62,6 +62,12 @@ def _xy(prefix: str, label: str, point) -> list:
     ]
 
 
+def _number_text(value: float) -> str:
+    """A number as short as it can be typed and still read back exactly."""
+    short = f"{value:g}"
+    return short if float(short) == value else repr(float(value))
+
+
 def entity_fields(kind: str, entity: dict | None = None) -> list:
     """The form for one curve, filled from `entity` (or a new curve's numbers)."""
     e = entity if entity is not None else NEW_ENTITIES[kind]
@@ -89,12 +95,36 @@ def entity_fields(kind: str, entity: dict | None = None) -> list:
             ("angle", "Turn (degrees)", float(e["angle"]), ANGLE),
         ]
     if kind == "spline":
-        points = "; ".join(f"{x:g}, {y:g}" for x, y in e["points"])
+        points = "; ".join(f"{_number_text(x)}, {_number_text(y)}" for x, y in e["points"])
         return [
             ("points", "Points it passes through", points, {}),
             ("closed", "Close it into a loop", bool(e["closed"]), {}),
         ]
     raise ValueError(f"unknown curve {kind!r}")
+
+
+def _as_shown(default, options: dict):
+    """What a form field shows for `default`: a number box keeps it within
+    its range and rounds it to its decimals (see mesh.panels.FormDialog)."""
+    if isinstance(default, bool) or not isinstance(default, (int, float)):
+        return default
+    if isinstance(default, int):
+        return min(max(default, int(options.get("min", 0))), int(options.get("max", 1000)))
+    value = min(max(default, float(options.get("min", 0.0))), float(options.get("max", 10000.0)))
+    return round(value, int(options.get("decimals", 2)))
+
+
+def keep_untouched(fields, values: dict) -> dict:
+    """A form's values, with every field still showing what it was given
+    back exactly as it was: the form's rounding and range must not change a
+    curve just because its form was opened."""
+    out = dict(values)
+    for key, _label, default, options in fields:
+        shown = _as_shown(default, options or {})
+        if values.get(key) == shown or (
+                isinstance(shown, float) and abs(values.get(key, math.inf) - shown) < 1e-9):
+            out[key] = default
+    return out
 
 
 def parse_points(text: str) -> list:
@@ -180,6 +210,8 @@ class LineDrawer:
         last = self.points[-1]
         if math.dist(last, point) < sketch.MIN_SIZE:
             return []
+        if len(self.points) >= 2 and math.dist(self.points[-2], point) <= sketch.JOIN_TOLERANCE:
+            return []  # straight back over the line just drawn
         line = {"type": "line", "start": list(last), "end": point}
         if len(self.points) >= 3 and math.dist(self.points[0], point) <= sketch.JOIN_TOLERANCE:
             self.points = []
@@ -223,6 +255,11 @@ class SketchPreview(QWidget):
     finished = Signal()              # right click: end the line being drawn
 
     SNAP_PIXELS = 10
+    # The drawing first shows at least this many mm across; the mouse wheel
+    # zooms by ZOOM_STEP a notch, between SPANS.
+    FIRST_SPAN = 100.0
+    ZOOM_STEP = 1.25
+    SPANS = (1.0, 100000.0)
     BACKGROUND = QColor("#1b1e22")
     GRID = QColor("#2c3138")
     X_AXIS = QColor("#d9534f")
@@ -242,7 +279,8 @@ class SketchPreview(QWidget):
         self.drawing = False
         self._hover = None
         self._centre = np.zeros(2)
-        self._span = 100.0
+        self._span = self.FIRST_SPAN
+        self._fitted = False
 
     def set_content(self, entities, guides=None, chain=None, chosen=None) -> None:
         self.entities = list(entities)
@@ -250,12 +288,15 @@ class SketchPreview(QWidget):
             self.guides = [np.asarray(g, dtype=np.float64) for g in guides]
         self.chain = list(chain or [])
         self.chosen = chosen
-        self._fit()
+        # Fitted once; after that the view only grows when something is
+        # out of sight, so a click never moves the drawing under the mouse.
+        self._fit(grow_only=self._fitted)
+        self._fitted = True
         self.update()
 
     # --- Where things are on screen ---------------------------------------------
 
-    def _fit(self) -> None:
+    def _fit(self, grow_only: bool = False) -> None:
         points = [np.zeros((1, 2))]
         points += [line for line in sketch.sketch_lines(self.entities)]
         points += list(self.guides)
@@ -263,8 +304,27 @@ class SketchPreview(QWidget):
             points.append(np.asarray(self.chain))
         everything = np.vstack(points)
         low, high = everything.min(axis=0), everything.max(axis=0)
+        if grow_only:
+            view_low, view_high = self._centre - self._span / 2.0, self._centre + self._span / 2.0
+            if np.all(low >= view_low) and np.all(high <= view_high):
+                return
+            low, high = np.minimum(low, view_low), np.maximum(high, view_high)
         self._centre = (low + high) / 2.0
-        self._span = max(float((high - low).max()) * 1.25, 40.0)
+        self._span = min(max(float((high - low).max()) * 1.25, self.FIRST_SPAN), self.SPANS[1])
+
+    def zoom(self, notches: float, x: float, y: float) -> None:
+        """Zoom in (notches > 0) or out, keeping the point under (x, y)
+        pixels where it is."""
+        before = self.to_sketch(x, y)
+        low, high = self.SPANS
+        self._span = min(max(self._span / self.ZOOM_STEP ** notches, low), high)
+        self._centre = self._centre + (before - self.to_sketch(x, y))
+        self.update()
+
+    def wheelEvent(self, event) -> None:
+        notches = event.angleDelta().y() / 120.0
+        if notches:
+            self.zoom(notches, event.position().x(), event.position().y())
 
     def _scale(self) -> float:
         return min(self.width(), self.height()) / self._span
@@ -279,13 +339,14 @@ class SketchPreview(QWidget):
         return np.array([self._centre[0] + (x - self.width() / 2.0) / s,
                          self._centre[1] - (y - self.height() / 2.0) / s])
 
-    def grid_step(self) -> float:
-        """The grid's spacing (mm): a round number at least 12 pixels apart."""
+    def grid_step(self) -> float | None:
+        """The grid's spacing (mm): a round number at least 12 pixels apart;
+        None (no grid) when zoomed out so far that none is."""
         s = self._scale()
-        for step in (0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000):
+        for step in (0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000):
             if step * s >= 12:
                 return float(step)
-        return 10000.0
+        return None
 
     def snap(self, x: float, y: float) -> list:
         """The sketch point a click at (x, y) pixels means: a curve's end
@@ -299,7 +360,7 @@ class SketchPreview(QWidget):
             nearest = int(np.argmin(distance))
             if distance[nearest] * s <= self.SNAP_PIXELS:
                 return [float(v) for v in ends[nearest]]
-        step = self.grid_step()
+        step = self.grid_step() or 1.0
         return [round(float(v) / step) * step for v in raw]
 
     # --- Mouse ---------------------------------------------------------------------
@@ -341,12 +402,13 @@ class SketchPreview(QWidget):
         low = self.to_sketch(0, self.height())
         high = self.to_sketch(self.width(), 0)
         painter.setPen(QPen(self.GRID, 1))
-        for i in range(int(math.floor(low[0] / step)), int(math.ceil(high[0] / step)) + 1):
-            x = self.to_screen((i * step, 0)).x()
-            painter.drawLine(QPointF(x, 0), QPointF(x, self.height()))
-        for j in range(int(math.floor(low[1] / step)), int(math.ceil(high[1] / step)) + 1):
-            y = self.to_screen((0, j * step)).y()
-            painter.drawLine(QPointF(0, y), QPointF(self.width(), y))
+        if step is not None:
+            for i in range(int(math.floor(low[0] / step)), int(math.ceil(high[0] / step)) + 1):
+                x = self.to_screen((i * step, 0)).x()
+                painter.drawLine(QPointF(x, 0), QPointF(x, self.height()))
+            for j in range(int(math.floor(low[1] / step)), int(math.ceil(high[1] / step)) + 1):
+                y = self.to_screen((0, j * step)).y()
+                painter.drawLine(QPointF(0, y), QPointF(self.width(), y))
         origin = self.to_screen((0, 0))
         painter.setPen(QPen(self.X_AXIS, 1.5))
         painter.drawLine(QPointF(0, origin.y()), QPointF(self.width(), origin.y()))
@@ -401,7 +463,8 @@ class SketchDialog(QDialog):
     NOTE = (
         "Sizes are in millimetres. X runs to the right and Y runs up, seen from "
         "the side the plane faces. Closed curves make the outline a part is made "
-        "from; a closed curve inside another cuts a hole in it."
+        "from; a closed curve inside another cuts a hole in it. Turn the mouse "
+        "wheel over the drawing to zoom."
     )
     DRAW_PROMPT = (
         "Click to place points: each click draws a line from the last point. Click the "
@@ -429,7 +492,7 @@ class SketchDialog(QDialog):
         side.addWidget(self.note)
 
         self.list = QListWidget(self)
-        self.list.currentRowChanged.connect(lambda _row: self._refresh_preview())
+        self.list.currentRowChanged.connect(lambda _row: self._chosen_changed())
         self.list.itemDoubleClicked.connect(lambda _item: self.change_chosen())
         side.addWidget(self.list, 1)
 
@@ -487,10 +550,13 @@ class SketchDialog(QDialog):
         verb = "Change" if entity is not None else "Add"
         name = ENTITY_LABELS[kind].lower()
         article = "an" if name[0] in "aeiou" else "a"
-        values = run_form(self, f"{verb} {article} {name}", entity_fields(kind, entity),
+        fields = entity_fields(kind, entity)
+        values = run_form(self, f"{verb} {article} {name}", fields,
                           note=SPLINE_POINTS_HELP if kind == "spline" else None)
         if values is None:
             return None
+        if entity is not None:
+            values = keep_untouched(fields, values)
         try:
             return entity_from_values(kind, values)
         except sketch.SketchError as exc:
@@ -511,6 +577,7 @@ class SketchDialog(QDialog):
         row = self.chosen_row()
         if row is None:
             return
+        self.drawer.finish()
         old = self._entities[row]
         entity = self._ask(old["type"], old)
         if entity is not None:
@@ -521,12 +588,16 @@ class SketchDialog(QDialog):
         row = self.chosen_row()
         if row is None:
             return
+        self.drawer.finish()
         del self._entities[row]
         self._refresh(chosen=min(row, len(self._entities) - 1) if self._entities else None)
 
     def copy_guides(self) -> None:
+        """Add the face's edges as lines; any already there are not added twice."""
+        self.drawer.finish()
         for entity in create.outline_entities(self.guides):
-            self._entities.append(entity)
+            if entity not in self._entities:
+                self._entities.append(entity)
         self._refresh(chosen=len(self._entities) - 1)
 
     # --- Drawing lines by clicking -------------------------------------------------
@@ -581,11 +652,14 @@ class SketchDialog(QDialog):
         if chosen is not None and 0 <= chosen < len(self._entities):
             self.list.setCurrentRow(chosen)
         self.list.blockSignals(False)
+        self.status.setText(self.DRAW_PROMPT if self.drawing() else status_text(self._entities))
+        self.button_box.button(QDialogButtonBox.Ok).setEnabled(bool(self._entities))
+        self._chosen_changed()
+
+    def _chosen_changed(self) -> None:
         has_chosen = self.chosen_row() is not None
         self.change_button.setEnabled(has_chosen)
         self.remove_button.setEnabled(has_chosen)
-        self.status.setText(self.DRAW_PROMPT if self.drawing() else status_text(self._entities))
-        self.button_box.button(QDialogButtonBox.Ok).setEnabled(bool(self._entities))
         self._refresh_preview()
 
     def _refresh_preview(self) -> None:

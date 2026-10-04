@@ -138,6 +138,48 @@ def test_a_bad_curve_is_refused_and_not_added(dialog, monkeypatch, no_warnings):
     assert_plain(no_warnings[0])
 
 
+def test_picking_a_curve_in_the_list_lets_it_be_changed_or_removed(dialog):
+    d = dialog([CIRCLE, SQUARE[0]])
+    assert not d.remove_button.isEnabled()
+    d.list.setCurrentRow(1)
+    assert d.change_button.isEnabled() and d.remove_button.isEnabled()
+    d.remove_chosen()
+    assert d.entities() == [sketch.clean_entity(CIRCLE)]
+
+
+@pytest.mark.parametrize("entity", [
+    {"type": "line", "start": [7.0710678, -9999.12345], "end": [0.0004, 3.0]},
+    {"type": "arc", "centre": [0.0, 0.0], "radius": 0.004, "start": 350.0, "end": 450.0},
+    {"type": "polygon", "centre": [1.23456, 0.0], "sides": 6, "radius": 5.0, "angle": 725.0},
+    {"type": "spline", "points": [[0.0, 0.0], [1234.5678901, 9.87654321]], "closed": False},
+], ids=lambda e: e["type"])
+def test_opening_a_curves_form_and_pressing_ok_changes_nothing(dialog, monkeypatch, entity):
+    from mesh.panels import FormDialog
+
+    # OK pressed straight away: the form gives back what its boxes show.
+    monkeypatch.setattr(sketch_editor, "run_form",
+                        lambda parent, title, fields, note=None: FormDialog(None, title, fields).values())
+    d = dialog([entity])
+    d.list.setCurrentRow(0)
+    d.change_chosen()
+    assert d.entities() == [sketch.clean_entity(entity)]
+
+
+def test_a_changed_number_still_goes_through_the_form(dialog, monkeypatch):
+    from mesh.panels import FormDialog
+
+    def change_end_x(parent, title, fields, note=None):
+        form = FormDialog(None, title, fields)
+        form.widgets["end_x"].setValue(2.5)
+        return form.values()
+
+    monkeypatch.setattr(sketch_editor, "run_form", change_end_x)
+    d = dialog([{"type": "line", "start": [7.0710678, 1.0], "end": [0.0, 3.0]}])
+    d.list.setCurrentRow(0)
+    d.change_chosen()
+    assert d.entities() == [{"type": "line", "start": [7.0710678, 1.0], "end": [2.5, 3.0]}]
+
+
 def test_cancelling_a_curve_form_adds_nothing(dialog, monkeypatch):
     d = dialog([CIRCLE])
     monkeypatch.setattr(sketch_editor, "run_form", lambda *a, **k: None)
@@ -158,6 +200,71 @@ def test_clicking_four_corners_and_the_first_again_draws_a_closed_square(dialog)
     assert len(d.entities()) == 4
     assert d.drawer.points == []  # closing the outline ends the line
     assert sketch.profile(d.entities()).area() == pytest.approx(100.0)
+
+
+@pytest.mark.parametrize("clicks", [
+    [(0, 0), (10, 0), (0, 0)],
+    [(0, 0), (10, 0), (10, 10), (10, 0)],
+], ids=["back to the first of two points", "back over the last line"])
+def test_clicking_straight_back_over_the_last_line_draws_nothing(dialog, clicks):
+    d = dialog()
+    d.set_drawing(True)
+    for point in clicks:
+        d.click_point(point)
+    assert len(d.entities()) == len(clicks) - 2
+    assert d.drawer.points == [list(map(float, p)) for p in clicks[:-1]]
+
+
+def test_removing_or_changing_a_curve_ends_the_line_being_drawn(dialog, monkeypatch):
+    d = dialog()
+    d.set_drawing(True)
+    for point in [(0, 0), (10, 0), (10, 10)]:
+        d.click_point(point)
+    d.remove_chosen()  # the line just drawn
+    assert d.drawer.points == []
+    d.click_point((20, 20))
+    assert len(d.entities()) == 1  # a fresh start, not a line from a point no curve reaches
+    monkeypatch.setattr(sketch_editor, "run_form", lambda *a, **k: None)
+    d.click_point((30, 20))
+    d.list.setCurrentRow(0)
+    d.change_chosen()
+    assert d.drawer.points == []
+
+
+def test_clicks_while_drawing_do_not_move_the_drawing_under_the_mouse(dialog):
+    d = dialog()
+    d.preview.resize(400, 400)
+    d.set_drawing(True)
+    d.click_point((0, 0))
+    centre, span = d.preview._centre.copy(), d.preview._span
+    for point in [(45, 0), (45, 45), (-45, 45)]:
+        d.click_point(point)
+        assert np.allclose(d.preview._centre, centre) and d.preview._span == span
+    assert span >= 100  # a new sketch shows at least 100 mm across
+
+
+def test_the_drawing_grows_to_show_a_curve_added_out_of_sight(dialog):
+    d = dialog()
+    d.add_entity({"type": "circle", "centre": [300, 0], "diameter": 10})
+    preview = d.preview
+    assert preview._centre[0] - preview._span / 2 <= 295 and preview._centre[0] + preview._span / 2 >= 305
+
+
+def test_the_mouse_wheel_zooms_around_the_pointer(dialog):
+    d = dialog([CIRCLE])
+    preview = d.preview
+    preview.resize(400, 400)
+    under = preview.to_sketch(300, 120)
+    span = preview._span
+    preview.zoom(-2, 300, 120)
+    assert preview._span == pytest.approx(span * 1.25**2)
+    assert np.allclose(preview.to_sketch(300, 120), under)
+    preview.zoom(-200, 300, 120)
+    assert preview._span == preview.SPANS[1]
+    preview.grab()
+    preview._span = 1e7
+    assert preview.grid_step() is None  # too far out for a grid: none is drawn
+    preview.grab()
 
 
 def test_esc_ends_the_line_then_stops_drawing_and_only_then_closes(dialog):
@@ -184,6 +291,8 @@ def test_a_face_outline_is_shown_and_can_be_copied_in(dialog):
     d.copy_guides()
     assert len(d.entities()) == 4
     assert sketch.profile(d.entities()).area() == pytest.approx(400.0)
+    d.copy_guides()  # pressed again: the edges are not doubled
+    assert len(d.entities()) == 4
     assert dialog().copy_button.isHidden()
 
 
