@@ -80,6 +80,12 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_loft",
     ),
     ExpertTool(
+        "rectangular_pattern", "create", "Pattern in Ro&ws (Rectangular)...",
+        "Copy the selected parts in a row, a set distance apart, and in more rows if you "
+        "like: left/right, forward/back or up/down.",
+        "do_rectangular_pattern",
+    ),
+    ExpertTool(
         "move_copy", "modify", "&Move or Copy...",
         "Move or turn the selected parts by exact amounts, or make moved copies of them. "
         "A turn goes around a line through their middle.",

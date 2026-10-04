@@ -1,5 +1,8 @@
 """The window's Expert mode actions: the Sketch and Create menus.
 
+Create's patterns are in mesh.pattern_actions, and the Modify
+menu in mesh.modify_actions; both are mixed in here.
+
 MeshWindow inherits these, so they share its document, undo and click
 tools. Each tool's geometry lives in a core module (mesh.sketch,
 mesh.create); this is only the wiring: ask, try, then snapshot and apply
@@ -10,6 +13,7 @@ from PySide6.QtCore import QTimer
 
 from mesh import create, features, sketch, sketch_editor
 from mesh.modify_actions import ModifyActions
+from mesh.pattern_actions import PatternActions
 from mesh.panels import run_form
 from mesh.shapes import is_reference
 
@@ -85,16 +89,19 @@ def ask_loft(parent, sketches) -> dict | None:
     )
 
 
-class ExpertActions(ModifyActions):
+class ExpertActions(ModifyActions, PatternActions):
     """Mixed into MeshWindow (see mesh.expert for the menu items)."""
 
     # The click-on-a-part tools Expert mode adds; turning the mode off
     # stops any of them that is waiting for a click.
-    EXPERT_CLICK_TOOLS = ("sketch_face",) + ModifyActions.MODIFY_CLICK_TOOLS
+    EXPERT_CLICK_TOOLS = (
+        ("sketch_face",) + ModifyActions.MODIFY_CLICK_TOOLS + PatternActions.PATTERN_CLICK_TOOLS
+    )
 
     EXPERT_TOOL_PROMPTS = {
         "sketch_face": "Click a flat face of a part to sketch on it. Esc cancels.",
         **ModifyActions.MODIFY_TOOL_PROMPTS,
+        **PatternActions.PATTERN_TOOL_PROMPTS,
     }
 
     # The method each of those tools' clicks goes to: (part id, triangle
@@ -102,6 +109,7 @@ class ExpertActions(ModifyActions):
     EXPERT_CLICK_HANDLERS = {
         "sketch_face": "_sketch_face_picked",
         **ModifyActions.MODIFY_CLICK_HANDLERS,
+        **PatternActions.PATTERN_CLICK_HANDLERS,
     }
 
     # --- Sketches ------------------------------------------------------------------

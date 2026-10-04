@@ -171,6 +171,22 @@ tools do the closest honest version of their Fusion counterparts:
   with sharp corners (a straight one's corners are rounded). Stretching a
   sloped Extrusion up or across changes its angle so its sides stay flat.
 
+## Expert mode, Phase 3 (Patterns): approximations and limits
+
+The copies themselves are exact: each is the same part moved. What differs
+from Fusion is how the pattern is chosen.
+
+- **Directions are the world's.** Pattern in Rows goes along left/right,
+  forward/back or up/down. Fusion also lets an edge, a sloping face or a
+  construction axis set the direction; picking one is not offered
+  (construction axes come in Phase 4).
+- **No suppressing single copies**, no "symmetric" (both ways from the
+  part) option, and no spacing by total extent in Rows: spacing is from one
+  copy to the next.
+- **Copies are separate parts**, as Duplicate makes, not one feature.
+  Changing the original later does not change the copies, and patterned
+  Holes cut once grouped with the part, like any Hole.
+
 ## Platform notes
 
 - The app forces Qt's `xcb` platform (XWayland) in `mesh/app.py:run`, because VTK's
