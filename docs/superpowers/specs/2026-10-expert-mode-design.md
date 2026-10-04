@@ -91,6 +91,36 @@ closest honest version, which its tooltip states and `docs/FOLLOWUPS.md` lists.
 - **Results** are a new part or a Hole; joining and cutting stay with
   Solid/Hole + Group, as everywhere else in mesh.
 
+## Phase 2 as built: Modify
+
+- **Modules.** `mesh/modify.py` (Move or Copy, Align, Scale, Combine, Split
+  Body, Shell, Push/Pull, Draft) and `mesh/edges.py` (Fillet and Chamfer) are
+  core and in the purity list. `mesh/modify_actions.py` holds their forms and
+  menu handlers in `ModifyActions`, the base of `ExpertActions`. Every core
+  function returns new shapes or changed copies and raises `BuildError` with
+  a plain message on refusal; the window snapshots only on success.
+- **Click tools.** Align, Shell, Push/Pull, Fillet and Chamfer wait for a
+  click on a part (`MODIFY_CLICK_TOOLS`); `EXPERT_CLICK_HANDLERS` routes the
+  click (part, triangle, point) to each tool's handler. A click that can't be
+  used keeps the tool waiting with the reason in the status bar. Forms open
+  after the click is over (`QTimer.singleShot(0)`), so the view's drag ends.
+- **Faces and edges.** A flat face is the facet holding the clicked triangle
+  (`modify.flat_face`). An edge is where two faces meet at more than 20
+  degrees; Fillet and Chamfer take the edge of the clicked face nearest the
+  click and follow it on through corners that turn less than 30 degrees
+  (`edges.find_run`).
+- **Groups.** Combine, Split Body (each piece), Shell, Push/Pull, Fillet and
+  Chamfer return ordinary groups of the part plus pieces added or cut away
+  (Holes), so Ungroup gives the part back.
+- **Sizes stay numbers.** Move or Copy and Align change the transform. Scale
+  changes size params (primitives stay editable), or the transform for
+  imported parts and groups. Draft is a `taper` param (degrees) on `extrude`,
+  0 when missing: each straight side of the outline moves in by distance times
+  tan(taper), keeping its direction (`features._tapered`); a box, cylinder or
+  tube becomes an `extrude` first. Sides that would meet are refused, and a
+  number typed in the Details panel for any part made from a sketch is
+  test-built first (`create.edit_refusal`).
+
 ## Project files
 
 No new top-level fields and no `format_version` change are planned. New shape
