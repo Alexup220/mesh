@@ -306,6 +306,82 @@ def test_change_sketch_on_a_sweep_changes_its_outline(window, monkeypatch):
     assert window.document.scene.shapes[0].params["entities"] == sketch.clean_entities(SQUARE)
 
 
+# Up 20, across 4.5, down 20: a 4 mm square fits round the two bends with
+# 0.5 mm to spare inside, so it can grow by less than 0.25 mm a side.
+U_BEND = [
+    {"type": "line", "start": [0, 0], "end": [0, 20]},
+    {"type": "line", "start": [0, 20], "end": [4.5, 20]},
+    {"type": "line", "start": [4.5, 20], "end": [4.5, 0]},
+]
+
+
+def add_u_bend_hole(window):
+    window.add_sketch(SQUARE, FLAT, "Outline")
+    window.add_sketch(U_BEND, UPRIGHT, "Path")
+    window.do_select_all()
+    window.sweep_selected(hole=True)
+    shape = window.document.scene.shapes[0]
+    return shape, len(window.document._undo)
+
+
+def test_a_fit_the_sweep_hole_cannot_take_is_refused_in_the_details_panel(window, warnings):
+    shape, steps = add_u_bend_hole(window)
+    window._on_edited(shape.id, "fit", "snug")
+    window._finish_edit()
+    assert shape.fit == "snug" and len(window.document._undo) == steps + 1
+    window._on_edited(shape.id, "fit", "loose")
+    assert shape.fit == "snug" and len(window.document._undo) == steps + 1
+    assert window.inspector.fit_box.currentData() == "snug"
+    assert warnings and "bends too tightly" in warnings[0] and shape.name in warnings[0]
+    assert_plain(warnings[0])
+
+
+def test_making_a_sweep_a_hole_at_a_fit_it_cannot_take_is_refused(window, warnings):
+    shape, _steps = add_u_bend_hole(window)
+    window.do_toggle_hole()
+    shape.fit = "loose"  # kept from before, while it was a part
+    steps = len(window.document._undo)
+    window.do_toggle_hole()
+    assert not shape.is_hole and len(window.document._undo) == steps
+    window._on_edited(shape.id, "is_hole", True)
+    assert not shape.is_hole and len(window.document._undo) == steps
+    assert len(warnings) == 2
+
+
+def test_fit_sizes_a_sweep_hole_cannot_take_are_refused(window, warnings):
+    shape, steps = add_u_bend_hole(window)
+    shape.fit = "press"
+    assert not window.set_fit_clearances({"press": 0.3})
+    assert window.document.scene.fit_clearances["press"] == 0.1
+    assert len(window.document._undo) == steps and warnings
+    assert window.set_fit_clearances({"press": 0.2})
+
+
+def test_ungrouping_after_the_fits_changed_is_refused_if_a_sweep_hole_cannot_take_them(window, warnings):
+    shape, _steps = add_u_bend_hole(window)
+    shape.fit = "press"
+    window.add_primitive("cube")
+    window.do_select_all()
+    window.do_group()
+    assert window.set_fit_clearances({"press": 0.3})  # nothing loose to rebuild
+    steps = len(window.document._undo)
+    window.do_ungroup()
+    assert [s.kind for s in window.document.scene.shapes] == ["group"]
+    assert len(window.document._undo) == steps and warnings
+
+
+def test_change_sketch_on_a_fitted_sweep_hole_is_checked_at_its_fit(window, monkeypatch, warnings):
+    shape, steps = add_u_bend_hole(window)
+    shape.fit = "snug"
+    bigger = [{"type": "rectangle", "corner": [-2.2, -2.2], "width": 4.4, "height": 4.4}]
+    answers = [bigger, None]
+    monkeypatch.setattr(sketch_editor, "edit_sketch", lambda *a, **k: answers.pop(0))
+    window.do_edit_sketch()  # fits exactly, but not with snug's 0.2 mm
+    assert shape.params["entities"] == sketch.clean_entities(SQUARE)
+    assert len(window.document._undo) == steps
+    assert warnings and "bends too tightly" in warnings[0]
+
+
 def test_sweep_form_is_plain_language(qapp, close_qt_widget):
     from mesh.panels import FormDialog
 

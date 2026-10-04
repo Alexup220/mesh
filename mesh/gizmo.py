@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, Signal
 from vtkmodules.vtkCommonTransforms import vtkTransform
 from vtkmodules.vtkInteractionWidgets import vtkBoxRepresentation, vtkBoxWidget2
 
+from mesh import features
 from mesh.scene import Shape, _signed_scale
 from mesh.shapes import is_reference
 
@@ -121,11 +122,22 @@ class Gizmo(QObject):
         for axis in range(3):
             transform[axis, 3] = self._snap(transform[axis, 3])
 
+        resized = False
         if self._shape.kind == "primitive":
-            transform = self._bake_scale(self._shape, transform)
+            if self._shape.params.get("primitive") in features.SOLIDS:
+                # Sized by its sketch and the Details panel's numbers, not by
+                # the handles: a size drag changes nothing (moving and
+                # turning still do), and the handles go back to the part.
+                resized = not np.allclose(np.linalg.norm(transform[:3, :3], axis=0), 1.0, atol=1e-6)
+            else:
+                transform = self._bake_scale(self._shape, transform)
 
-        self._shape.transform = transform
+        if not resized:
+            self._shape.transform = transform
         self.changed.emit(self._shape.id)
+        if resized:
+            self.attach(self._shape)
+            self.viewport._render()
 
     def _bake_scale(self, shape: Shape, transform: np.ndarray) -> np.ndarray:
         """Fold a corner-handle scale into the shape's size params instead

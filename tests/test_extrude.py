@@ -250,6 +250,14 @@ def test_an_extrusion_stays_editable_with_expert_mode_off(window):
     assert window.gizmo._widget.GetEnabled()
 
 
+def test_extrude_says_which_way_a_hole_into_a_sketched_face_goes(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(expert_actions, "run_form", lambda *a, **k: seen.update(k))
+    expert_actions.ask_extrude(None)
+    assert "The other way" in seen["note"]
+    assert_plain(seen["note"])
+
+
 def test_extrude_form_is_plain_language(qapp, close_qt_widget):
     from mesh.panels import FormDialog
 

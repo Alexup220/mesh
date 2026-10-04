@@ -77,7 +77,8 @@ tools do the closest honest version of their Fusion counterparts:
   turned with the Details panel.
 - **Extrude** has no taper angle and no "up to a face". Joining or cutting
   other parts goes through Make Hole + Group (or Join / Cut Out), not inside
-  Extrude.
+  Extrude. Its direction starts at "The way the sketch faces" for a hole too;
+  the form says to choose "The other way" for a hole into a face sketched on.
 - **Sweep** has no twist, scale or guide rails. An outline drawn across
   either end of an open path, or anywhere round a closed one, is used where it
   is. Any other outline is moved to the nearer end (its middle onto the path),
@@ -95,8 +96,13 @@ tools do the closest honest version of their Fusion counterparts:
   larger than that on the gentler sides, and on sides almost flat (growth is
   capped at three times the clearance) it is less. Growing it exactly in 3D
   took 5 to 10 seconds for curved outlines, too slow to redraw.
-- **Corner-drag scaling** does nothing to the size of a part made from a
-  sketch: its size comes from the sketch and the Details panel numbers.
+- **Size handles** do nothing on a part made from a sketch (they spring
+  back): its size comes from the sketch and the Details panel numbers. Moving
+  and turning it by its handles work as for any part.
+- **Fits**: a Hole made by Sweep or Loft can be too big at a fit (a bend too
+  tight, a gap closed up). Choosing such a fit, making it a hole at that fit,
+  changing the fit sizes, or ungrouping it after they changed is refused with
+  the reason, before anything changes.
 - **Pre-existing: drag handles can linger.** Putting the handles away (for
   example after Select All or Delete from the keyboard) does not redraw the
   3D view, so the old handles stay drawn until the next redraw. Found during

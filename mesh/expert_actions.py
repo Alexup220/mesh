@@ -34,7 +34,9 @@ def extrude_fields():
 
 def ask_extrude(parent) -> dict | None:
     return run_form(parent, "Extrude", extrude_fields(),
-                    note="Pushes the sketch's closed outlines straight out of its plane.")
+                    note="Pushes the sketch's closed outlines straight out of its plane. A sketch "
+                         "on a face faces out of the part: for a hole into that face, choose "
+                         "\"The other way\".")
 
 
 def revolve_fields(axes):
@@ -96,7 +98,9 @@ class ExpertActions:
     # --- Sketches ------------------------------------------------------------------
 
     def add_sketch(self, entities, frame, name: str | None = None) -> bool:
-        """Add a sketch of `entities` on the plane `frame` places. One undo step."""
+        """Add a sketch of `entities` on the plane `frame` places. One undo
+        step. Not through add_shape: a sketch stays on its own plane, even
+        while Place on a Face waits to place the next new part."""
         scene = self.document.scene
         shape = self._attempt(
             "Cannot make the sketch",
@@ -104,7 +108,10 @@ class ExpertActions:
         )
         if shape is None:
             return False
-        self.add_shape(shape)
+        self.document.snapshot("add sketch")
+        scene.add(shape)
+        scene.select([shape.id])
+        self.sync()
         return True
 
     def do_new_sketch(self) -> None:
@@ -166,20 +173,38 @@ class ExpertActions:
             self.statusBar().showMessage(self.LOFT_NOT_REDRAWN if loft else self.CHANGE_SKETCH_HINT)
             return
         shape = chosen[0]
-        entities = sketch_editor.edit_sketch(self, f"Change {shape.name}", create.sketch_entities(shape))
-        if entities is not None:
-            self.set_sketch_entities(shape, entities)
+        entities = create.sketch_entities(shape)
+        while True:
+            entities = sketch_editor.edit_sketch(self, f"Change {shape.name}", entities)
+            if entities is None:
+                return
+            changed = self._changed_sketch(shape, entities)
+            if changed is not None:
+                self._apply_sketch_change(shape, changed)
+                return
+            # Refused (and said why): back to the sketch window with the
+            # curves as they were left, to fix them.
+
+    def _changed_sketch(self, shape, entities):
+        return self._attempt(
+            "Cannot change the sketch",
+            lambda: create.with_entities(shape, entities, self.document.scene.fit_clearances),
+        )
+
+    def _apply_sketch_change(self, shape, changed) -> bool:
+        if changed.params == shape.params:
+            return False
+        self.document.snapshot("change sketch")
+        shape.params = changed.params
+        shape.transform = changed.transform
+        self.sync()
+        return True
 
     def set_sketch_entities(self, shape, entities) -> bool:
         """Give a sketch, or a part made from one, new curves. One undo
         step; none if nothing changed or the part would not come out solid."""
-        changed = self._attempt("Cannot change the sketch", lambda: create.with_entities(shape, entities))
-        if changed is None or changed.params == shape.params:
-            return False
-        self.document.snapshot("change sketch")
-        shape.params = changed.params
-        self.sync()
-        return True
+        changed = self._changed_sketch(shape, entities)
+        return changed is not None and self._apply_sketch_change(shape, changed)
 
     # --- Solids from sketches -----------------------------------------------------
 

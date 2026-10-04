@@ -237,6 +237,15 @@ def test_add_sketch_is_one_undo_step(window):
     assert window.document.scene.shapes[0].params["entities"] == sketch.clean_entities(SQUARE)
 
 
+def test_a_new_sketch_stays_on_its_plane_while_place_on_a_face_waits(window):
+    window.add_primitive("cube")
+    window.toggle_place_on_face(True)
+    window._place_target = (np.array([5.0, 5.0, 20.0]), np.array([0.0, 0.0, 1.0]))
+    assert window.add_sketch(SQUARE, sketch.named_plane_frame("xz", 4.0))
+    assert np.allclose(window.document.scene.shapes[1].transform, sketch.named_plane_frame("xz", 4.0))
+    assert window.tool == "place"  # still waiting for the next new part
+
+
 def test_a_refused_sketch_leaves_no_undo_step(window, no_warnings):
     assert not window.add_sketch([], np.eye(4))
     assert window.document.scene.shapes == [] and not window.document.can_undo()
@@ -285,6 +294,27 @@ def test_change_sketch_without_changes_takes_no_undo_step(window, monkeypatch):
     monkeypatch.setattr(sketch_editor, "edit_sketch", lambda *a, **k: list(SQUARE))
     window.do_edit_sketch()
     assert len(window.document._undo) == steps
+
+
+def test_a_refused_change_goes_back_to_the_sketch_window_with_the_curves_as_left(
+        window, monkeypatch, no_warnings):
+    window.add_sketch(SQUARE, np.eye(4))
+    window.extrude_selected(5.0)
+    shape = window.document.scene.shapes[0]
+    steps = len(window.document._undo)
+    open_line = [{"type": "line", "start": [0, 0], "end": [9, 0]}]
+    answers, shown = [open_line, [CIRCLE]], []
+
+    def edit(parent, title, entities=(), guides=(), note=None):
+        shown.append(entities)
+        return answers.pop(0)
+
+    monkeypatch.setattr(sketch_editor, "edit_sketch", edit)
+    window.do_edit_sketch()
+    assert no_warnings and "no closed outline" in no_warnings[0]
+    assert shown[1] == open_line  # reopened with the refused curves, not the old ones
+    assert shape.params["entities"] == [sketch.clean_entity(CIRCLE)]
+    assert len(window.document._undo) == steps + 1
 
 
 def test_change_sketch_needs_one_sketch_selected(window, monkeypatch):
@@ -403,6 +433,43 @@ def test_a_sketch_has_no_drag_handles_and_no_solid_or_hole_rows(window):
     assert inspector._layout.isRowVisible(inspector._hole_row)
 
 
+def test_the_hole_row_comes_back_once_the_sketch_is_put_away(window):
+    window.add_sketch(SQUARE, np.eye(4))
+    window.document.scene.select([])
+    window.sync()
+    assert window.inspector._layout.isRowVisible(window.inspector._hole_row)
+
+
+def test_make_hole_leaves_sketches_alone(window):
+    window.add_sketch(SQUARE, np.eye(4))
+    steps = len(window.document._undo)
+    window.do_toggle_hole()
+    assert not window.document.scene.shapes[0].is_hole
+    assert len(window.document._undo) == steps
+    window.add_primitive("cube")
+    window.do_select_all()
+    window.do_toggle_hole()
+    sketch_shape, cube = window.document.scene.shapes
+    assert cube.is_hole and not sketch_shape.is_hole
+
+
+def test_size_handles_do_not_move_or_resize_a_part_made_from_a_sketch(window):
+    window.add_sketch([{"type": "rectangle", "corner": [30, 30], "width": 10, "height": 10}], np.eye(4))
+    window.extrude_selected(5.0)
+    shape = window.document.scene.shapes[0]
+    before = shape_geometry(shape).bounds.copy()
+    centre = before.mean(axis=0)
+    doubled = np.eye(4)
+    doubled[:3, :3] *= 2.0
+    doubled[:3, 3] = centre - 2.0 * centre  # twice the size about its middle
+    window.gizmo._apply(doubled @ shape.transform)
+    assert np.allclose(shape_geometry(shape).bounds, before)
+    moved = np.eye(4)
+    moved[:3, 3] = [3, 0, 0]
+    window.gizmo._apply(moved @ shape.transform)
+    assert np.allclose(shape_geometry(shape).bounds, before + [3, 0, 0])
+
+
 def test_sketches_stay_when_expert_mode_is_off(window):
     window.add_sketch(SQUARE, np.eye(4))
     before = scene_json(window)
@@ -473,6 +540,31 @@ def test_grouping_or_joining_leaves_sketches_out():
     assert [c.name for c in ops.ungroup(group)] == [s.name for s in scene.shapes]
     joined = ops.boolean(scene.shapes, "union")
     assert np.allclose(joined.bounds, [[-10, -10, 0], [10, 10, 20]])
+
+
+@pytest.mark.parametrize("op", ["group", "union"])
+def test_group_and_join_in_the_window_leave_selected_sketches_where_they_are(window, op):
+    window.add_sketch(SQUARE, np.eye(4))
+    window.add_primitive("cube")
+    sketch_shape, cube = window.document.scene.shapes
+    window.do_select_all()
+    window.do_group() if op == "group" else window.do_boolean(op)
+    shapes = window.document.scene.shapes
+    assert [s.id for s in shapes][:1] == [sketch_shape.id] and len(shapes) == 2
+    assert shapes[1].kind == "group" and shapes[1].color == cube.color
+    assert window.viewport.outline_for(sketch_shape.id) is not None
+
+
+def test_grouping_only_sketches_says_so_and_changes_nothing(window, no_warnings):
+    window.add_sketch(SQUARE, np.eye(4))
+    window.do_select_all()
+    before, steps = scene_json(window), len(window.document._undo)
+    window.do_group()
+    window.do_boolean("union")
+    assert scene_json(window) == before and len(window.document._undo) == steps
+    assert window.statusBar().currentMessage() == window.GUIDES_ONLY
+    assert not no_warnings
+    assert_plain(window.GUIDES_ONLY)
 
 
 def test_hollow_and_split_refuse_a_sketch_plainly():

@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QTimer, Qt
 
-from mesh import builders, expert, hardware, ops, panels
+from mesh import builders, create, expert, hardware, ops, panels
 from mesh.expert_actions import ExpertActions
 from mesh.gizmo import Gizmo
 from mesh.io_formats import (
@@ -40,7 +40,7 @@ from mesh.panels import Inspector, ShapeShelf
 from mesh.printcheck import check
 from mesh.scene import MAX_FIT_CLEARANCE, Document, new_primitive, transform_with_euler
 from mesh.settings import Settings, default_path
-from mesh.shapes import shape_geometry
+from mesh.shapes import is_reference, shape_geometry
 from mesh.text import has_letters
 from mesh.viewport import Viewport
 
@@ -371,18 +371,46 @@ class MeshWindow(ExpertActions, QMainWindow):
         self.sync()
 
     def do_toggle_hole(self) -> None:
-        chosen = self.document.scene.selected()
+        # A guide (a sketch) is never printed, so it is never a hole.
+        chosen = [s for s in self.document.scene.selected() if not is_reference(s)]
         if not chosen:
             return
-        self.document.snapshot("hole")
         target = not chosen[0].is_hole
+        trials = [copy.copy(s) for s in chosen]
+        for trial in trials:
+            trial.is_hole = target
+        if not self._fits_build(trials, "Cannot make a hole"):
+            return
+        self.document.snapshot("hole")
         for shape in chosen:
             shape.is_hole = target
         self.sync()
 
+    def _fits_build(self, shapes, title: str, clearances: dict | None = None) -> bool:
+        """Whether every Hole made from a sketch among `shapes` can be made
+        at its fit (with `clearances`, or the scene's). If not, say why."""
+        problem = create.fit_refusal(
+            shapes, self.document.scene.fit_clearances if clearances is None else clearances
+        )
+        if problem is not None:
+            self._warn(title, problem)
+        return problem is None
+
+    GUIDES_ONLY = "Sketches are guides, not parts, so there is nothing to combine. Select parts too."
+
+    def _parts_chosen(self):
+        """The selected shapes to combine: guides (sketches) are left out
+        and stay where they are. None, and a message, if only guides are."""
+        selected = self.document.scene.selected()
+        chosen = [s for s in selected if not is_reference(s)]
+        if selected and not chosen:
+            self.statusBar().showMessage(self.GUIDES_ONLY)
+            return None
+        return chosen
+
     def do_group(self) -> None:
-        chosen = self.document.scene.selected()
-        if len(chosen) < 1:
+        chosen = self._parts_chosen()
+        if not chosen:
             return
         try:
             group = ops.make_group(chosen, clearances=self.document.scene.fit_clearances)
@@ -400,8 +428,8 @@ class MeshWindow(ExpertActions, QMainWindow):
         secondary route to ops.boolean for a user who wants the operator
         directly rather than the Solid/Hole flag. Solid/Hole + Group stays
         the primary path."""
-        chosen = self.document.scene.selected()
-        if len(chosen) < 1:
+        chosen = self._parts_chosen()
+        if not chosen:
             return
         try:
             group = ops.make_boolean_group(
@@ -420,10 +448,13 @@ class MeshWindow(ExpertActions, QMainWindow):
         chosen = [s for s in self.document.scene.selected() if s.kind == "group"]
         if not chosen:
             return
+        unpacked = [(group, ops.ungroup(group)) for group in chosen]
+        # The fits may have changed since the group was made.
+        if not self._fits_build([c for _g, children in unpacked for c in children], "Cannot ungroup"):
+            return
         self.document.snapshot("ungroup")
         restored = []
-        for group in chosen:
-            children = ops.ungroup(group)
+        for group, children in unpacked:
             self.document.scene.remove([group.id])
             for child in children:
                 self.document.scene.add(child)
@@ -449,6 +480,8 @@ class MeshWindow(ExpertActions, QMainWindow):
                 return False
             cleaned[key] = value
         if cleaned == current:
+            return False
+        if not self._fits_build(self.document.scene.shapes, "Cannot change fits", cleaned):
             return False
         self.document.snapshot("fit clearances")
         self.document.scene.fit_clearances = cleaned
@@ -806,6 +839,12 @@ class MeshWindow(ExpertActions, QMainWindow):
             shape = self.document.scene.get(shape_id)
         except KeyError:
             return
+        if field in ("is_hole", "fit"):
+            trial = copy.copy(shape)
+            setattr(trial, field, bool(value) if field == "is_hole" else str(value))
+            if not self._fits_build([trial], "Cannot change the fit"):
+                self.inspector.show_shape(shape)
+                return
 
         # One snapshot per burst of edits, not one per keystroke: see the
         # comment on self._edit_timer in __init__.

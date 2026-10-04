@@ -258,6 +258,8 @@ class Inspector(QWidget):
             for field in SIZE_FIELDS + CHOICE_FIELDS + TEXT_FIELDS:
                 self._layout.setRowVisible(self._rows[field], False)
             self._layout.setRowVisible(self._fit_row, False)
+            # Hidden while a sketch was shown; every part has it.
+            self._layout.setRowVisible(self._hole_row, True)
             return
 
         self._loading = True

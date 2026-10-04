@@ -73,9 +73,10 @@ def sketch_entities(shape) -> list[dict]:
     return shape.params.get("entities") or features.default_entities(shape.params["primitive"])
 
 
-def with_entities(shape: Shape, entities) -> Shape:
+def with_entities(shape: Shape, entities, clearances: dict | None = None) -> Shape:
     """A copy of `shape` (a sketch, or a part made from one) drawing
-    `entities` instead, checked: a part must still come out solid."""
+    `entities` instead, checked: a part must still come out solid, at its
+    fit if it is a Hole (pass the scene's fit clearances)."""
     if not has_sketch(shape):
         raise BuildError("Select a sketch, or a part made from one, to change its curves.")
     entities = _checked(lambda: sketch.clean_entities(entities))
@@ -83,9 +84,45 @@ def with_entities(shape: Shape, entities) -> Shape:
         raise BuildError("A sketch needs at least one curve.")
     changed = copy.deepcopy(shape)
     changed.params["entities"] = entities
+    if "axis_line" in shape.params:
+        _follow_axis_line(shape, changed)
     if not is_sketch(shape):
-        _checked(lambda: shape_geometry(changed))
+        _checked(lambda: shape_geometry(changed, clearances))
     return changed
+
+
+def _follow_axis_line(old: Shape, changed: Shape) -> None:
+    """A revolve made around one of its sketch's lines keeps turning around
+    that line when the curves change, wherever the line was moved to."""
+    before, after = old.params["entities"], changed.params["entities"]
+    index = int(old.params["axis_line"])
+    line = before[index] if 0 <= index < len(before) else None
+    if line in after:
+        index = after.index(line)
+    elif len(after) != len(before) or after[index].get("type") != "line":
+        raise BuildError(
+            "The line this revolve turns around is gone. Keep that line, or undo the "
+            "revolve and choose another line to turn around."
+        )
+    axis = revolve_axis(changed, f"line:{index}")
+    turn = _checked(lambda: np.linalg.inv(features.axis_frame(old.params["axis"])) @ features.axis_frame(axis))
+    changed.transform = np.asarray(old.transform, dtype=np.float64) @ turn
+    changed.params["axis"] = axis
+    changed.params["axis_line"] = index
+
+
+def fit_refusal(shapes, clearances: dict | None) -> str | None:
+    """Why one of `shapes`, a Hole made from a sketch, can't be made at its
+    fit with these fit clearances; None if they all can. (A sweep or loft
+    grown by a fit's clearance can bend too tightly or close a gap.)"""
+    for shape in shapes:
+        if (shape.kind == "primitive" and shape.is_hole
+                and shape.params.get("primitive") in features.SOLIDS):
+            try:
+                shape_geometry(shape, clearances)
+            except sketch.SketchError as exc:
+                return f"{shape.name} can't be made at that fit. {exc}"
+    return None
 
 
 # --- Solids from sketches -----------------------------------------------------------
@@ -154,8 +191,11 @@ def make_revolve(source: Shape, axis_key: str = "y", angle: float = 360.0, hole:
         raise BuildError("Select a sketch to revolve.")
     axis = revolve_axis(source, axis_key)
     local = _checked(lambda: features.axis_frame(axis))
-    return _from_sketch(source, "revolve", "Revolve",
-                        {"axis": axis, "angle": float(angle)}, hole, local)
+    params = {"axis": axis, "angle": float(angle)}
+    if axis_key.startswith("line:"):
+        # Which of the sketch's curves is the line, so Change Sketch can follow it.
+        params["axis_line"] = int(axis_key.removeprefix("line:"))
+    return _from_sketch(source, "revolve", "Revolve", params, hole, local)
 
 
 def likely_path(first: Shape, second: Shape) -> Shape:

@@ -146,6 +146,7 @@ def test_make_revolve_can_turn_around_a_line_in_the_sketch():
     assert [key for key, _label in axes] == ["y", "x", "line:1"]
     shape = create.make_revolve(source, "line:1", 180, hole=True)
     assert shape.is_hole and shape.params["axis"] == [0, 0, 20, 0]
+    assert shape.params["axis_line"] == 1
     assert np.allclose(shape_geometry(shape).bounds, [[0, -10, -10], [20, 0, 10]], atol=1e-6)
 
 
@@ -169,6 +170,45 @@ def test_a_revolves_curves_can_be_changed_and_keep_its_line():
     assert shape_geometry(changed).volume == pytest.approx(math.pi * (225 - 25) * 20 / 2, rel=0.01)
     with pytest.raises(BuildError):
         create.with_entities(shape, [{"type": "circle", "centre": [0, 0], "diameter": 4}])
+
+
+AROUND_A_LINE = [
+    {"type": "rectangle", "corner": [0, 5], "width": 20, "height": 5},
+    {"type": "line", "start": [0, 0], "end": [20, 0]},
+]
+
+
+def revolved_around_its_line():
+    shape = create.make_revolve(sketch_of(AROUND_A_LINE), "line:1")
+    shape.transform[:3, 3] += [100, 0, 0]  # moved after it was made
+    return shape
+
+
+def test_change_sketch_follows_the_line_a_revolve_turns_around():
+    shape = revolved_around_its_line()
+    lower = [AROUND_A_LINE[0], {"type": "line", "start": [0, -5], "end": [20, -5]}]
+    changed = create.with_entities(shape, lower)
+    assert changed.params["axis"] == [0.0, -5.0, 20.0, 0.0]
+    # Turned around y = -5 now: the ring reaches 15 mm from it, still where it was moved.
+    assert np.allclose(shape_geometry(changed).bounds, [[100, -20, -15], [120, 10, 15]], atol=1e-6)
+
+
+def test_change_sketch_keeps_the_line_when_other_curves_change():
+    shape = revolved_around_its_line()
+    taller = [{"type": "rectangle", "corner": [0, 5], "width": 20, "height": 8}, AROUND_A_LINE[1]]
+    changed = create.with_entities(shape, taller)
+    assert changed.params["axis"] == shape.params["axis"]
+    assert np.allclose(changed.transform, shape.transform)
+    # And when an earlier curve goes, the line is found where it moved to.
+    moved_up = create.with_entities(shape, [AROUND_A_LINE[1], AROUND_A_LINE[0]])
+    assert moved_up.params["axis_line"] == 0 and moved_up.params["axis"] == shape.params["axis"]
+
+
+def test_change_sketch_refuses_to_lose_the_line_a_revolve_turns_around():
+    with pytest.raises(BuildError) as err:
+        create.with_entities(revolved_around_its_line(), AROUND_A_LINE[:1])
+    assert "turns around is gone" in str(err.value)
+    assert_plain(str(err.value))
 
 
 def test_a_revolve_round_trips_through_a_project_file(tmp_path):
@@ -241,6 +281,20 @@ def test_a_revolves_angle_is_in_the_details_panel(window):
     window._on_edited(shape.id, "angle", 180.0)
     window._finish_edit()
     assert shape_geometry(shape).volume == pytest.approx(TUBE_VOLUME / 2, rel=0.01)
+
+
+def test_change_sketch_on_a_revolve_around_a_moved_line_is_one_undo_step(window, monkeypatch):
+    window.add_sketch(AROUND_A_LINE, np.eye(4))
+    window.revolve_selected("line:1")
+    shape = window.document.scene.shapes[0]
+    before = shape.transform.copy()
+    monkeypatch.setattr(sketch_editor, "edit_sketch", lambda *a, **k: [
+        AROUND_A_LINE[0], {"type": "line", "start": [0, -5], "end": [20, -5]}])
+    window.do_edit_sketch()
+    assert shape.params["axis"] == [0.0, -5.0, 20.0, 0.0]
+    window.do_undo()
+    restored = window.document.scene.shapes[0]
+    assert restored.params["axis"] == [0.0, 0.0, 20.0, 0.0] and np.allclose(restored.transform, before)
 
 
 def test_change_sketch_on_a_revolve(window, monkeypatch):
