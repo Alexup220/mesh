@@ -142,6 +142,19 @@ tools do the closest honest version of their Fusion counterparts:
   Unlike Fusion, sloping sides next to the face are not extended along their
   slope, and a round surface can't be pushed as a whole: it is narrow flat
   strips, and only the strip clicked moves.
+- **Round an Edge (Fillet)** rounds one run of edges per click: the edge
+  next to the click and the edges it runs on into smoothly (turning less than
+  30 degrees), such as a cylinder's whole rim. Picking several separate edges
+  at once is not offered. It is exact for a straight edge between flat faces,
+  with the round made of 16 straight pieces per quarter turn, as a circle has.
+  Round surfaces are narrow flat strips, and the round follows them. Where
+  rounded edges meet at a corner, the corner is not blended into a ball, and
+  rounding the next edge of a box after one is rounded follows the first
+  round down the side; at a radius as big as the first one's it is refused
+  ("too big for how tightly this edge bends"), where Fusion would blend the
+  corner. A radius that would run off the faces next to the edge is refused
+  with the largest that fits. Variable radius and setback corners are not
+  offered.
 
 ## Platform notes
 

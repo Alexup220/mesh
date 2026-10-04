@@ -7,7 +7,7 @@ this is only the wiring: ask, try, then snapshot and apply on success.
 
 from PySide6.QtCore import QTimer
 
-from mesh import modify
+from mesh import edges, modify
 from mesh.builders import GUIDES_ARE_NOT_PARTS, BuildError
 from mesh.panels import run_form
 from mesh.shapes import is_reference
@@ -127,6 +127,24 @@ def ask_push_pull(parent) -> dict | None:
     return run_form(parent, "Push/Pull", push_pull_fields(), note=PUSH_PULL_NOTE)
 
 
+EDGE_NOTE = (
+    "{what} the edge next to where you clicked, and the edges it runs on into smoothly (all "
+    "the way round a cylinder's rim, say). Where {done} edges meet at a corner, the corner "
+    "is not blended into a ball."
+)
+
+
+def fillet_fields():
+    return [("radius", "Radius (mm)", 2.0, {"min": 0.01, "max": 1000.0})]
+
+
+FILLET_NOTE = EDGE_NOTE.format(what="Rounds", done="rounded")
+
+
+def ask_fillet(parent) -> dict | None:
+    return run_form(parent, "Round an Edge", fillet_fields(), note=FILLET_NOTE)
+
+
 def ask_move_copy(parent) -> dict | None:
     return run_form(
         parent, "Move or Copy", move_copy_fields(),
@@ -141,18 +159,20 @@ class ModifyActions:
 
     # The click-on-a-part tools of the Modify menu, their prompts, and the
     # method each click goes to.
-    MODIFY_CLICK_TOOLS = ("align_from", "align_to", "shell", "push_pull")
+    MODIFY_CLICK_TOOLS = ("align_from", "align_to", "shell", "push_pull", "fillet")
     MODIFY_TOOL_PROMPTS = {
         "align_from": "Click the flat face of the part to move. Esc cancels.",
         "align_to": "Now click the face to put it against. Esc cancels.",
         "shell": "Click the flat face of a part to leave open. Esc cancels.",
         "push_pull": "Click the flat face of a part to push in or pull out. Esc cancels.",
+        "fillet": "Click a face of a part, next to the edge to round. Esc cancels.",
     }
     MODIFY_CLICK_HANDLERS = {
         "align_from": "_align_from_picked",
         "align_to": "_align_to_picked",
         "shell": "_shell_picked",
         "push_pull": "_push_pull_picked",
+        "fillet": "_edge_picked",
     }
 
     # --- Move or Copy ------------------------------------------------------------
@@ -464,3 +484,53 @@ class ModifyActions:
             return False
         self._replace_with("push/pull", shape, [group])
         return True
+
+    # --- Round or bevel an edge ----------------------------------------------------------
+
+    def do_fillet(self) -> None:
+        self._start_face_tool("fillet")
+
+    def _edge_picked(self, shape_id: str, face_index: int, point=None) -> None:
+        """A click next to an edge: if it found one, ask for the size once
+        the click is over. Nothing changes yet: no undo step."""
+        tool = self.tool
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+            edges.find_run(edges._part_surface(shape, scene.fit_clearances), face_index, point)
+        except KeyError:
+            self.statusBar().showMessage(self.TOOL_PROMPTS[tool])
+            return
+        except BuildError as exc:
+            self.statusBar().showMessage(f"{exc} {self.TOOL_PROMPTS[tool]}")
+            return
+        self._clear_tool()
+        self.sync()
+        QTimer.singleShot(0, lambda: self._ask_edge(tool, shape, face_index, point))
+
+    def _ask_edge(self, tool: str, shape, face_index: int, point) -> None:
+        self.viewport.end_drag()
+        values = ask_fillet(self)
+        if values is not None:
+            self.round_edge(shape.id, face_index, point, values["radius"])
+
+    def _change_edge(self, label: str, title: str, shape_id: str, build) -> bool:
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+        except KeyError:
+            return False
+        group = self._attempt(title, lambda: build(shape, scene.fit_clearances))
+        if group is None:
+            return False
+        self._replace_with(label, shape, [group])
+        return True
+
+    def round_edge(self, shape_id: str, face_index: int, point, radius: float) -> bool:
+        """Round the edge of the clicked face nearest `point`, and the run
+        it belongs to. One undo step on success."""
+        return self._change_edge(
+            "round edge", "Cannot round the edge", shape_id,
+            lambda shape, fits: edges.fillet(shape, face_index, point, radius, fits),
+        )
+

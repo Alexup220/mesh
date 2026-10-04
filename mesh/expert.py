@@ -128,6 +128,14 @@ TOOLS: tuple[ExpertTool, ...] = (
         "extended, and on a round surface only the narrow flat strip clicked moves.",
         "do_push_pull", "Q",
     ),
+    ExpertTool(
+        "fillet", "modify", "&Round an Edge (Fillet)",
+        "Click a face of a part next to an edge, then type the radius. The edge is rounded "
+        "along with the edges it runs on into smoothly; an inside edge is filled in round. "
+        "Round surfaces are narrow flat strips, and corners where rounded edges meet are "
+        "not blended into a ball.",
+        "do_fillet",
+    ),
 )
 
 
