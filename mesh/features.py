@@ -32,6 +32,10 @@ sketch's: the shape's transform is the sketch's plane.
              point. Its sides run straight from one outline to the next
              ("straight"), or along a smooth curve through all of them
              ("smooth"); missing in older files, where they are straight.
+    pipe     path_entities + path_frame, diameter, inside, wall
+             A round tube carried along the path, like a sweep of a
+             circle `diameter` across: "solid", or "hollow" with a `wall`
+             mm thick.
 
 A shape with no sketch of its own (a new primitive) uses a small built-in
 one (DEFAULT_*), so every kind has a sensible default, standing on the
@@ -52,7 +56,7 @@ from shapely.geometry import LinearRing, LineString, Point, Polygon
 from mesh.sketch import SEGMENTS, SPLINE_STEPS, SketchError, profile, signed_area, single_path, to_world
 from mesh.solids import from_manifold, m3
 
-SOLIDS = ("extrude", "revolve", "sweep", "loft")
+SOLIDS = ("extrude", "revolve", "sweep", "loft", "pipe")
 # The ones made from one outline, which Change Sketch can redraw.
 ONE_OUTLINE = ("extrude", "revolve", "sweep")
 
@@ -132,6 +136,9 @@ def build(kind: str, params: dict, clearance: float = 0.0) -> trimesh.Trimesh:
         )
     if kind == "loft":
         return loft(params.get("sections") or DEFAULT_LOFT, clearance, params.get("sides", "straight"))
+    if kind == "pipe":
+        return pipe(params.get("path_entities", DEFAULT_SWEEP_PATH), params.get("path_frame", _UPRIGHT),
+                    params["diameter"], params.get("inside", "solid"), params.get("wall", 1.0), clearance)
     raise KeyError(f"unknown sketch solid: {kind}")
 
 
@@ -640,6 +647,34 @@ def sweep(entities, profile_frame, path_entities, path_frame, clearance: float =
         faces.append(_cap(outlines_at(0), np.vstack(rings[0]), 0, -directions[0]))
         faces.append(_cap(outlines_at(m - 1), np.vstack(rings[-1]), end, directions[-1]))
     return _solid_from(vertices, np.vstack(faces), "sweep")
+
+
+# --- Pipe ---------------------------------------------------------------------------
+
+
+PIPE_INSIDES = [("solid", "Solid"), ("hollow", "Hollow, with a wall")]
+
+
+def pipe(path_entities, path_frame, diameter: float, inside: str = "solid", wall: float = 1.0,
+         clearance: float = 0.0) -> trimesh.Trimesh:
+    """A round tube `diameter` mm across carried along the path, square to
+    it (Fusion's Pipe): a sweep of a circle, or with "hollow" of a ring
+    `wall` mm thick. Which end of the path it starts from makes no
+    difference to a round tube."""
+    diameter, wall = float(diameter), float(wall)
+    if not math.isfinite(diameter) or diameter < 0.1:
+        raise SketchError("The pipe must be at least 0.1 mm across.")
+    if inside not in dict(PIPE_INSIDES):
+        raise SketchError("Choose a solid or hollow pipe.")
+    entities = [{"type": "circle", "centre": [0.0, 0.0], "diameter": diameter}]
+    if inside == "hollow":
+        if not math.isfinite(wall) or wall < 0.05:
+            raise SketchError("A hollow pipe's wall must be at least 0.05 mm thick.")
+        if diameter - 2.0 * wall < 0.05:
+            raise SketchError(f"A {wall:g} mm wall fills a {diameter:g} mm pipe. Use a thinner wall, or "
+                              "make the pipe solid.")
+        entities.append({"type": "circle", "centre": [0.0, 0.0], "diameter": diameter - 2.0 * wall})
+    return sweep(entities, _FLAT, path_entities, path_frame, clearance)
 
 
 # --- Loft ---------------------------------------------------------------------------

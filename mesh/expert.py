@@ -121,6 +121,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_thread",
     ),
     ExpertTool(
+        "pipe", "create", "P&ipe...",
+        "Select a sketch of a path: a round tube follows it, solid or hollow with a wall. "
+        "Curves are followed in short straight steps, and the tube's outline has many "
+        "straight sides.",
+        "do_pipe",
+    ),
+    ExpertTool(
         "coil", "create", "C&oil...",
         "Make a coil spring: a round or square wire wound round an upright line, with its "
         "outside diameter, pitch, number of turns and wire thickness. Its ends are cut square "

@@ -292,6 +292,35 @@ def make_sweep(outline: Shape, path: Shape, hole: bool = False, twist: float = 0
     return shape
 
 
+def make_pipe(path: Shape, diameter: float, inside: str = "solid", wall: float = 1.0,
+              hole: bool = False) -> Shape:
+    """A round tube `diameter` mm across carried along the one path drawn
+    in the sketch `path` (see features.pipe). The part's own coordinates are
+    the world's, so the sketch is stored with where it was, as a sweep's."""
+    if not is_sketch(path):
+        raise BuildError(PIPE_PICK)
+    shape = Shape(
+        id=uuid.uuid4().hex,
+        name=f"Pipe along {path.name}",
+        kind="primitive",
+        params={
+            "primitive": "pipe",
+            "path_entities": copy.deepcopy(path.params["entities"]),
+            "path_frame": np.asarray(path.transform, dtype=np.float64).tolist(),
+            "diameter": float(diameter),
+            "inside": str(inside),
+            "wall": float(wall),
+        },
+        transform=np.eye(4),
+        is_hole=bool(hole),
+    )
+    _checked(lambda: shape_geometry(shape))
+    return shape
+
+
+PIPE_PICK = "Select one sketch with the path for the pipe to follow."
+
+
 LOFT_PICKS = ("Select two or more sketches, in the order to join them. A construction point "
               "may come first or last, to close the loft to that point.")
 

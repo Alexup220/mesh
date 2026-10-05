@@ -190,6 +190,7 @@ _FOLLOWS = {
     "extrude": {"distance": "z"},
     "thread": {"diameter": "across", "height": "z", "thread_length": "z", "pitch": "detail"},
     "coil": {"diameter": "all", "pitch": "all", "wire": "all"},
+    "pipe": {"diameter": "all", "wall": "all"},
 }
 
 
@@ -241,7 +242,7 @@ def _scaled_params(shape, own: np.ndarray) -> dict:
             raise _stretch_refusal(shape.name, "is a flat drawing of curves", across=True, group=False)
         params["entities"] = _scaled_entities(shape, params["entities"], own[0])
         return params
-    if kind in ("revolve", "sweep", "loft") and not uniform:
+    if kind in ("revolve", "sweep", "loft", "pipe") and not uniform:
         raise _stretch_refusal(shape.name, "is made from a sketch")
     if kind == "extrude":
         if not across:
@@ -263,6 +264,10 @@ def _scaled_params(shape, own: np.ndarray) -> dict:
             params[key] = _scaled_entities(shape, params.get(key) or default, own[0])
         for key, default in (("profile_frame", features._FLAT), ("path_frame", features._UPRIGHT)):
             params[key] = _scaled_frame(params.get(key, default), own[0])
+    elif kind == "pipe":
+        params["path_entities"] = _scaled_entities(shape, params.get("path_entities") or features.DEFAULT_SWEEP_PATH,
+                                                   own[0])
+        params["path_frame"] = _scaled_frame(params.get("path_frame", features._UPRIGHT), own[0])
     elif kind == "loft":
         params["sections"] = [
             {"point": [own[0] * float(v) for v in section["point"]]} if "point" in section else

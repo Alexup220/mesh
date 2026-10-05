@@ -194,6 +194,26 @@ def thread_note(standard: str, pitch: float, inch: tuple | None = None, pipe: tu
             "start into each other easily.")
 
 
+def pipe_fields():
+    return [
+        ("diameter", "Diameter across the outside (mm)", 10.0, {"min": 0.1, "max": 10000.0}),
+        ("inside", "Inside", "solid", {"choices": features.PIPE_INSIDES}),
+        ("wall", "Wall thickness, if hollow (mm)", 1.0, {"min": 0.05, "max": 5000.0, "step": 0.5}),
+    ] + _result_fields()
+
+
+PIPE_NOTE = (
+    "Carries a round tube along the sketch's path, square to it, solid or hollow. The sketch needs "
+    "one path, open or closed. Curves are followed in short straight steps, "
+    "the tube's outline has 64 straight sides, and at a sharp corner the tube is cut on the slant "
+    "halfway between the two directions, as Sweep does."
+)
+
+
+def ask_pipe(parent) -> dict | None:
+    return run_form(parent, "Pipe", pipe_fields(), note=PIPE_NOTE)
+
+
 def coil_fields():
     d = coils.DEFAULTS
     return [
@@ -593,6 +613,38 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         shape.params = changed.params
         self.sync()
         return True
+
+    # --- Pipe ------------------------------------------------------------------------
+
+    def _pipe_path(self):
+        """The one selected sketch, or None (and a message)."""
+        chosen = self._picked()
+        if len(chosen) != 1 or not create.is_sketch(chosen[0]):
+            self.statusBar().showMessage(create.PIPE_PICK)
+            return None
+        return chosen[0]
+
+    @replayable()
+    def pipe_selected(self, diameter: float = 10.0, inside: str = "solid", wall: float = 1.0,
+                      hole: bool = False, keep_sketch: bool = False) -> bool:
+        """A round tube along the selected sketch's path, solid or hollow
+        (see features.pipe). One undo step on success."""
+        path = self._pipe_path()
+        if path is None:
+            return False
+        shape = self._attempt("Cannot make the pipe", lambda: create.make_pipe(path, diameter, inside, wall, hole))
+        if shape is None:
+            return False
+        self._add_from_sketches("pipe", [path], shape, keep_sketch)
+        return True
+
+    def do_pipe(self) -> None:
+        if self._pipe_path() is None:
+            return
+        values = ask_pipe(self)
+        if values is not None:
+            self.pipe_selected(values["diameter"], values["inside"], values["wall"], values["result"] == "hole",
+                               values["keep_sketch"])
 
     # --- Coil ------------------------------------------------------------------------
 

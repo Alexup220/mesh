@@ -114,6 +114,13 @@ PRIMITIVES: dict[str, dict] = {
         "defaults": {"twist": 0.0, "end_scale": 100.0},
         "shelf": False,
     },
+    # Also holds its path's curves and plane (features.pipe).
+    "pipe": {
+        "label": "Pipe",
+        "defaults": {"diameter": 10.0, "inside": "solid", "wall": 1.0},
+        "choices": {"inside": features.PIPE_INSIDES},
+        "shelf": False,
+    },
     # Holds its outlines' curves and planes, in order (features.loft).
     "loft": {
         "label": "Loft",

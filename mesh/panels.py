@@ -100,6 +100,7 @@ FIELD_LABELS = {
     "wire": "Wire thickness (mm)",
     "wire_shape": "Wire shape",
     "winding": "Coil winds",
+    "inside": "Inside",
 }
 
 

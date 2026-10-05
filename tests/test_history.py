@@ -353,6 +353,13 @@ def scenario_thread_pipe(window):
     window.thread_selected(1.5, 12.0, "bottom", standard="pipe", per_inch=19.0)
 
 
+def scenario_pipe(window):
+    path = add_sketch(window, [{"type": "line", "start": [0.0, 0.0], "end": [20.0, 0.0]},
+                               {"type": "line", "start": [20.0, 0.0], "end": [20.0, 15.0]}])
+    pick(window, path)
+    window.pipe_selected(4.0, "hollow", 1.0)
+
+
 def scenario_coil(window):
     window.add_coil(16.0, 4.0, 3.5, 1.5, "square", "left")
     window.add_coil(hole=True)
@@ -766,7 +773,7 @@ SAMPLE_ARGS = {
     "angle": 30.0,
     "pitch": 1.5, "length": 10.0, "end": "top", "hand": "right", "starts": 1, "standard": "metric",
     "per_inch": 0.0, "lead_in": "none", "diameter": 20.0, "turns": 5.0, "wire": 2.0,
-    "wire_shape": "round", "winding": "right", "dx": 1.0, "dy": 0.0, "dz": 0.0,
+    "wire_shape": "round", "winding": "right", "inside": "solid", "dx": 1.0, "dy": 0.0, "dz": 0.0,
     "make_copy": False, "size": 100.0, "stretch_x": 100.0, "stretch_y": 100.0, "stretch_z": 100.0,
     "about": "base", "op": "union", "keep_tools": False, "keep_tool": False, "wall": 2.0, "far_side": False,
     "radius": 2.0, "count": 3, "spacing": 10.0, "count2": 1, "spacing2": 30.0, "axis2": "y",

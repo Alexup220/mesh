@@ -106,6 +106,13 @@ tools do the closest honest version of their Fusion counterparts:
   A path that crosses itself is refused, but one that only passes closer to
   itself than the outline's size is not caught, and makes a part that overlaps
   itself. Change Sketch redraws a sweep's outline, not its path.
+- **Pipe** (Create menu) carries a round tube, solid or hollow, along a
+  sketch's one path; it is a sweep of a circle (64 straight sides), with
+  the same mitred corners, straight steps round curves and limits on
+  tight bends and paths that pass close to themselves. Fusion's square
+  and triangle sections are not offered, nor a part's edge as the path;
+  the path can't be changed afterwards (the diameter and wall can, in the
+  Details panel).
 - **Loft**: each sketch must hold one closed outline with no holes; no
   rails. A construction point picked first or last closes the loft to that
   point (a sketch point can't be used); where the point is is kept as
