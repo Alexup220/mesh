@@ -291,9 +291,10 @@ def make_sweep(outline: Shape, path: Shape, hole: bool = False, twist: float = 0
     return shape
 
 
-def make_loft(sketches, hole: bool = False) -> Shape:
-    """A skin through the closed outline of each sketch, in the order given.
-    Like a sweep, its own coordinates are the world's."""
+def make_loft(sketches, hole: bool = False, sides: str = "straight") -> Shape:
+    """A skin through the closed outline of each sketch, in the order given,
+    its sides straight or smooth (features.LOFT_SIDES). Like a sweep, its
+    own coordinates are the world's."""
     sketches = list(sketches)
     if len(sketches) < 2 or not all(is_sketch(s) for s in sketches):
         raise BuildError("Select two or more sketches, in the order to join them.")
@@ -312,6 +313,9 @@ def make_loft(sketches, hole: bool = False) -> Shape:
         transform=np.eye(4),
         is_hole=bool(hole),
     )
+    # Kept only when used, so a plain loft's settings are as before.
+    if sides != "straight":
+        shape.params["sides"] = sides
     _checked(lambda: shape_geometry(shape))
     return shape
 

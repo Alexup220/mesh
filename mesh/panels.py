@@ -87,6 +87,7 @@ FIELD_LABELS = {
     "taper": "Sides slope in (degrees)",
     "twist": "Twist along the path (degrees)",
     "end_scale": "Size at the far end (%)",
+    "sides": "Sides between the outlines",
     "pitch": "Thread pitch (mm per turn)",
     "thread_length": "Threaded length (mm)",
     "end": "Thread starts",

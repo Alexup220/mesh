@@ -79,7 +79,6 @@ def editors() -> dict:
     from mesh import pattern_actions as pa
 
     nothing = [SimpleNamespace(id="", name="")]
-    results = (lambda a: _filled(ea.loft_fields(2), _results(a)), lambda v, _a: _from_results(v))
     return {
         "extrude_selected": (
             "Extrude",
@@ -95,11 +94,12 @@ def editors() -> dict:
                              lambda a: _filled(_without(ea.revolve_fields([(a["axis"], "")]), "axis"),
                                                {**a, **_results(a)}),
                              lambda v, _a: {"angle": v["angle"], **_from_results(v)}),
-        "sweep_selected": ("Sweep", lambda a: _filled(ea.sweep_shape_fields() + ea.loft_fields(2),
+        "sweep_selected": ("Sweep", lambda a: _filled(ea.sweep_shape_fields() + ea._result_fields(2),
                                                       {**a, **_results(a)}),
                            lambda v, _a: {"twist": v["twist"], "end_scale": v["end_scale"],
                                           **_from_results(v)}),
-        "loft_selected": ("Loft", *results),
+        "loft_selected": ("Loft", lambda a: _filled(ea.loft_fields(2), {**a, **_results(a)}),
+                          lambda v, _a: {"sides": v["sides"], **_from_results(v)}),
         "thread_selected": ("Thread", lambda a: _filled(ea.thread_fields(a["length"], a["pitch"]), a), _same),
         "move_copy_selected": ("Move or Copy", lambda a: _filled(ma.move_copy_fields(), a), _same),
         "scale_selected": ("Scale", lambda a: _filled(ma.scale_fields(), a), _same),

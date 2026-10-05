@@ -317,6 +317,14 @@ def scenario_loft(window):
     window.loft_selected()
 
 
+def scenario_loft_smooth(window):
+    first = add_sketch(window, BIG)
+    second = add_sketch(window, SMALL, sketch.named_plane_frame("xy", 15.0))
+    third = add_sketch(window, BIG, sketch.named_plane_frame("xy", 30.0))
+    pick(window, first, second, third)
+    window.loft_selected(sides="smooth")
+
+
 def scenario_thread(window):
     add(window, "cylinder")
     window.thread_selected(1.5, 10.0)
@@ -726,7 +734,7 @@ def test_the_history_window(window, monkeypatch):
 
 SAMPLE_ARGS = {
     "distance": 5.0, "side": "one", "hole": False, "keep_sketch": False, "taper": 0.0, "to_plane": False,
-    "combine": None, "twist": 0.0, "end_scale": 100.0, "axis": "z",
+    "combine": None, "twist": 0.0, "end_scale": 100.0, "sides": "straight", "axis": "z",
     "angle": 30.0,
     "pitch": 1.5, "length": 10.0, "end": "top", "hand": "right", "dx": 1.0, "dy": 0.0, "dz": 0.0,
     "make_copy": False, "size": 100.0, "stretch_x": 100.0, "stretch_y": 100.0, "stretch_z": 100.0,

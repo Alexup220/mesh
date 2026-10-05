@@ -25,9 +25,12 @@ sketch's: the shape's transform is the sketch's plane.
              twist (degrees) the outline turns evenly along the path, and
              with an end_scale (percent) its size changes evenly to that at
              the far end; missing in older files, where they are 0 and 100.
-    loft     sections: [{entities, frame}, ...]
+    loft     sections: [{entities, frame}, ...], sides
              A skin through two or more outlines, in order, each placed by
-             its frame like a sweep's sketches.
+             its frame like a sweep's sketches. Its sides run straight from
+             one outline to the next ("straight"), or along a smooth curve
+             through all of them ("smooth"); missing in older files, where
+             they are straight.
 
 A shape with no sketch of its own (a new primitive) uses a small built-in
 one (DEFAULT_*), so every kind has a sensible default, standing on the
@@ -45,7 +48,7 @@ import numpy as np
 import trimesh
 from shapely.geometry import LinearRing, LineString, Point, Polygon
 
-from mesh.sketch import SEGMENTS, SketchError, profile, signed_area, single_path, to_world
+from mesh.sketch import SEGMENTS, SPLINE_STEPS, SketchError, profile, signed_area, single_path, to_world
 from mesh.solids import from_manifold, m3
 
 SOLIDS = ("extrude", "revolve", "sweep", "loft")
@@ -127,7 +130,7 @@ def build(kind: str, params: dict, clearance: float = 0.0) -> trimesh.Trimesh:
             clearance, params.get("twist", 0.0), params.get("end_scale", 100.0),
         )
     if kind == "loft":
-        return loft(params.get("sections") or DEFAULT_LOFT, clearance)
+        return loft(params.get("sections") or DEFAULT_LOFT, clearance, params.get("sides", "straight"))
     raise KeyError(f"unknown sketch solid: {kind}")
 
 
@@ -731,27 +734,67 @@ def _check_skin(rings: list) -> None:
             )
 
 
-def _slopes(rings: list, normals: list) -> list[float]:
-    """For each outline, how square to its plane the sides leaving it are
-    at their steepest, as a cosine (1 for sides straight out of the plane)."""
-    cosines = [1.0] * len(rings)
+LOFT_SIDES = [
+    ("straight", "Straight from one outline to the next"),
+    ("smooth", "A smooth curve through all the outlines"),
+]
+# Smooth sides are this many flat strips between one outline and the next,
+# as fine as a sketch's spline.
+SMOOTH_STEPS = SPLINE_STEPS
+
+
+def _smoothed(rings: list) -> tuple[list, list]:
+    """Rings in between `rings`, so each matched point runs along a smooth
+    curve through its place on every outline (a natural cubic spline, spaced
+    by the distance between the outlines' middles, like a sketch's spline):
+    (all the rings, where each of `rings` is among them). The outlines
+    themselves are kept exactly."""
+    from scipy.interpolate import CubicSpline
+
+    middles = np.array([r.mean(axis=0) for r in rings])
+    t = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(middles, axis=0), axis=1))])
+    spline = CubicSpline(t, np.stack(rings), axis=0, bc_type="natural")
+    dense, where = [], []
     for k in range(len(rings) - 1):
-        edges = rings[k + 1] - rings[k]
-        lengths = np.maximum(np.linalg.norm(edges, axis=1), 1e-12)
-        for j in (k, k + 1):
-            cosines[j] = min(cosines[j], float((np.abs(edges @ normals[j]) / lengths).min()))
+        where.append(len(dense))
+        dense.append(rings[k])
+        dense.extend(spline(np.linspace(t[k], t[k + 1], SMOOTH_STEPS + 1)[1:-1]))
+    where.append(len(dense))
+    dense.append(rings[-1])
+    return dense, where
+
+
+def _slopes(rings: list, normals: list, where: list) -> list[float]:
+    """For each outline (rings[where[k]], in the plane facing normals[k]),
+    how square to its plane the sides are at their steepest, from the
+    outline before it to the one after, as a cosine (1 for sides straight
+    out of the plane)."""
+    cosines = []
+    for k, normal in enumerate(normals):
+        cosine = 1.0
+        for i in range(where[max(k - 1, 0)], where[min(k + 1, len(where) - 1)]):
+            edges = rings[i + 1] - rings[i]
+            lengths = np.maximum(np.linalg.norm(edges, axis=1), 1e-12)
+            cosine = min(cosine, float((np.abs(edges @ normal) / lengths).min()))
+        cosines.append(cosine)
     return cosines
 
 
-def loft(sections, clearance: float = 0.0) -> trimesh.Trimesh:
+def loft(sections, clearance: float = 0.0, sides: str = "straight") -> trimesh.Trimesh:
     """A skin through two or more outlines, in order, closed at both ends
-    (see _lined_up for how the outlines are joined).
+    (see _lined_up for how the outlines are joined). Its sides run straight
+    from one outline to the next, or (`sides` "smooth", with three or more
+    outlines) along a smooth curve through them all (see _smoothed).
 
     A fitted Hole (`clearance` > 0) grows each outline within its plane, by
     more where the sides slope, so the gap square to the sides is at least
     `clearance` (up to MOST_LOFT_GROWTH times it); and reaches `clearance`
-    past each end.
+    past each end. With smooth sides, the slope is the steepest anywhere
+    from the outline before to the one after, and the sides in between
+    follow the grown outlines, so their gap is about `clearance` or more.
     """
+    if sides not in dict(LOFT_SIDES):
+        raise SketchError("A loft's sides must be straight or smooth.")
     if not isinstance(sections, (list, tuple)) or len(sections) < 2:
         raise SketchError("A loft needs at least two sketches, each with one closed outline.")
     parsed = [_section(s) for s in sections]
@@ -777,12 +820,22 @@ def loft(sections, clearance: float = 0.0) -> trimesh.Trimesh:
             turned.append((points, frame))
         return turned
 
-    flats, rings = _lined_up(facing_on(parsed), heading)
-    _check_skin(rings)
+    def skin_through(outlines):
+        """(the end outlines' flat points, every ring of the skin, where
+        each outline's ring is among them)."""
+        flats, rings = _lined_up(facing_on(outlines), heading)
+        if sides == "smooth" and len(rings) > 2:
+            rings, where = _smoothed(rings)
+        else:
+            where = list(range(len(rings)))
+        _check_skin(rings)
+        return (flats[0], flats[-1]), rings, where
+
+    ends, rings, where = skin_through(parsed)
 
     if clearance > 0.0:
         grown = []
-        for (points, frame), cosine in zip(parsed, _slopes(rings, normals)):
+        for (points, frame), cosine in zip(parsed, _slopes(rings, normals, where)):
             distance = clearance / max(cosine, 1.0 / MOST_LOFT_GROWTH)
             polygons = _grow(m3.CrossSection([np.ascontiguousarray(points)]), distance).to_polygons()
             if len(polygons) != 1:
@@ -791,19 +844,18 @@ def loft(sections, clearance: float = 0.0) -> trimesh.Trimesh:
                     "Choose a tighter fit, or widen the gap."
                 )
             grown.append((np.asarray(polygons[0], dtype=np.float64), frame))
-        flats, rings = _lined_up(facing_on(grown), heading)
+        ends, rings, _where = skin_through(grown)
         # Reaching `clearance` past each end: the end outlines again, that
         # far out of their planes, joined to them by straight sides.
         first = normals[0] * np.sign(np.dot(normals[0], steps[0])) * clearance
         last = normals[-1] * np.sign(np.dot(normals[-1], steps[-1])) * clearance
-        flats = [flats[0]] + flats + [flats[-1]]
         rings = [rings[0] - first] + rings + [rings[-1] + last]
 
-    count = len(flats[0])
+    count = len(ends[0])
     vertices = np.vstack(rings)
     faces = [
         _skin([[r] for r in rings], closed=False),
-        _cap([flats[0]], rings[0], 0, -heading),
-        _cap([flats[-1]], rings[-1], count * (len(rings) - 1), heading),
+        _cap([ends[0]], rings[0], 0, -heading),
+        _cap([ends[1]], rings[-1], count * (len(rings) - 1), heading),
     ]
     return _solid_from(vertices, np.vstack(faces), "loft")

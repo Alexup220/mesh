@@ -117,7 +117,8 @@ PRIMITIVES: dict[str, dict] = {
     # Holds its outlines' curves and planes, in order (features.loft).
     "loft": {
         "label": "Loft",
-        "defaults": {},
+        "defaults": {"sides": "straight"},
+        "choices": {"sides": features.LOFT_SIDES},
         "shelf": False,
     },
     # A cylinder with a modeled screw thread (Expert mode's Thread tool;

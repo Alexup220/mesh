@@ -68,8 +68,8 @@ tools do the closest honest version of their Fusion counterparts:
 - **Curves are straight pieces.** A circle or arc is 64 pieces per whole turn
   (like a cylinder), a spline 16 pieces between typed points. Revolve's round
   surfaces are 64 flat strips per turn, Sweep follows a curved path in those
-  same short straight steps, and Loft's sides run straight from one outline to
-  the next (no smoothing through three or more outlines).
+  same short straight steps, and Loft's smooth sides are 16 flat strips
+  between one outline and the next.
 - **No constraints or driving dimensions** between curves (the binding spec
   leaves them out): every curve is placed by its own typed numbers.
 - **The sketch window** zooms with the mouse wheel, around the pointer, but
@@ -108,14 +108,23 @@ tools do the closest honest version of their Fusion counterparts:
   itself. Change Sketch redraws a sweep's outline, not its path.
 - **Loft**: each sketch must hold one closed outline with no holes; no rails
   and no single point at an end. A loft's outlines can't be redrawn after it
-  is made (undo, change the sketches, loft again). Sides that would pass
-  through each other are refused by checking seven in-between outlines per
-  step, so a very brief crossing near an outline could slip through. A fitted
-  Hole loft grows each outline in its own plane by more where the sides
-  slope, so the gap square to the sides is at least the fit's clearance; it is
-  larger than that on the gentler sides, and on sides almost flat (growth is
-  capped at three times the clearance) it is less. Growing it exactly in 3D
-  took 5 to 10 seconds for curved outlines, too slow to redraw.
+  is made (undo, change the sketches, loft again). Its sides run straight
+  from one outline to the next, or, as a choice, along a smooth curve through
+  all of them: each matched point of the outlines follows a natural spline
+  (the curve a sketch's spline uses), spaced by the distance between the
+  outlines' middles. Fusion's smooth loft also lets you set how the sides
+  leave the end outlines; here they leave them as the spline does. Sides
+  that would pass through each other are refused by checking seven
+  in-between outlines per strip, so a very brief crossing near an outline
+  could slip through. A fitted Hole loft grows each outline in its own plane
+  by more where the sides slope, so the gap square to the sides is at least
+  the fit's clearance; it is larger than that on the gentler sides, and on
+  sides almost flat (growth is capped at three times the clearance) it is
+  less. With smooth sides the slope is the steepest anywhere between the
+  outline before and the one after, and the sides in between follow the
+  grown outlines, so their gap is about the clearance or more, not exactly
+  at least it. Growing it exactly in 3D took 5 to 10 seconds for curved
+  outlines, too slow to redraw.
 - **Size handles** do nothing on a part made from a sketch (they spring
   back): its size comes from the sketch and the Details panel numbers. Moving
   and turning it by its handles work as for any part.

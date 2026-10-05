@@ -144,16 +144,20 @@ def ask_sweep(parent, sketches, path_id: str) -> dict | None:
 
 
 def loft_fields(count: int):
-    return _result_fields(count)
+    return [
+        ("sides", "Sides between the outlines", "straight", {"choices": features.LOFT_SIDES}),
+    ] + _result_fields(count)
 
 
 def ask_loft(parent, sketches) -> dict | None:
     order = ", ".join(s.name for s in sketches)
     return run_form(
         parent, "Loft", loft_fields(len(sketches)),
-        note=f"Joins the sketches' outlines with a smooth-sided skin, in the order you picked "
-             f"them: {order}. Each sketch needs one closed outline with no holes. The sides "
-             "are straight from one outline to the next.",
+        note=f"Joins the sketches' outlines with a skin, in the order you picked them: {order}. "
+             "Each sketch needs one closed outline with no holes. The sides run straight from "
+             "one outline to the next, or along a smooth curve through all of them (with three "
+             "or more outlines; with two, both are the same). Smooth sides are made of narrow "
+             "flat strips, like a cylinder's.",
     )
 
 
@@ -476,11 +480,13 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         return chosen
 
     @replayable()
-    def loft_selected(self, hole: bool = False, keep_sketch: bool = False) -> bool:
+    def loft_selected(self, hole: bool = False, keep_sketch: bool = False, sides: str = "straight") -> bool:
+        """Loft the selected sketches in the order picked, with straight or
+        smooth sides (features.LOFT_SIDES)."""
         sketches = self._sketches_in_order()
         if sketches is None:
             return False
-        shape = self._attempt("Cannot loft", lambda: create.make_loft(sketches, hole))
+        shape = self._attempt("Cannot loft", lambda: create.make_loft(sketches, hole, sides))
         if shape is None:
             return False
         self._add_from_sketches("loft", sketches, shape, keep_sketch)
@@ -492,7 +498,8 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
             return
         values = ask_loft(self, sketches)
         if values is not None:
-            self.loft_selected(values["result"] == "hole", values["keep_sketch"])
+            self.loft_selected(values["result"] == "hole", values["keep_sketch"],
+                               values.get("sides", "straight"))
 
     def do_extrude(self) -> None:
         chosen = self._extrude_selection()
