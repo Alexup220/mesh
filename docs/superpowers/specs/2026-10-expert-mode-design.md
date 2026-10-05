@@ -223,6 +223,43 @@ closest honest version, which its tooltip states and `docs/FOLLOWUPS.md` lists.
   scene before the newest change (`Document.action_before`), and the
   replay does the same after each tool step.
 
+## Closing the gaps (after Phase 5)
+
+Every gap listed in `docs/FOLLOWUPS.md` that mesh can close with the
+libraries it already has was closed, one commit each; what stays
+approximate is still listed there and in each tool's tooltip. Curves stay
+straight pieces, and sketches stay without constraints (both by the
+user's choice).
+
+- **History.** A step can be skipped (`"off": true` on the step; the
+  replay passes over it and keeps it as it was), moved (the list is
+  reordered and replayed; `history.made_later` turns a missing part that
+  a later step makes into a plain reason), used on the parts selected now
+  (its call's `picked` replaced; not for a step used on a clicked face or
+  on a part it names), and a step that drew or changed a sketch's curves
+  can be given new curves (its effect's `entities` replaced, then
+  replayed, so parts later made from the sketch follow). A tool used on a
+  clicked face no longer needs the rest of the selection it was recorded
+  with.
+- **Formulas in a step's settings.** `call["formulas"]` maps a field of
+  the tool's own form (the `editors()` entry) to a formula. On every
+  replay `_worked_call` fills the form's values from the step, puts in
+  what the formulas come to (`history.formula_values`: a count rounded,
+  each number inside the form field's limits) and turns them back into
+  settings with the form's own `back`, so the mapping is the same as
+  Change... uses. Typing a new number in Change... ends that formula.
+- **Sketch curves as links.** `parameters.linkable` lists each number of
+  each curve in a shape's `entities` ("curve2.width", "curve1.corner.x",
+  "curve3.points.2.y"); setting one rebuilds that curve through
+  `sketch.clean_entity`, so a link can never leave a curve a sketch can't
+  draw. Change Sketch ends the links of numbers typed over or curves
+  taken out (`parameters.links_kept`).
+- **Components inside components.** A component may have a `"parent"`.
+  `components.inside` gives a component and everything in it; select,
+  show or hide, copy and save for printing work on that whole set, while a
+  part's own `component` stays its direct one (so `carry_over` is
+  unchanged). `components.read` drops a parent that is missing or loops.
+
 ## Project files
 
 Phases 0 to 4 add no top-level fields and no `format_version` change. New
