@@ -178,7 +178,8 @@ def test_damaged_sketch_positions_are_refused():
 
 
 def test_sweep_is_an_off_the_shelf_primitive_standing_on_the_workplane():
-    assert PRIMITIVES["sweep"]["shelf"] is False and PRIMITIVES["sweep"]["defaults"] == {}
+    assert PRIMITIVES["sweep"]["shelf"] is False
+    assert PRIMITIVES["sweep"]["defaults"] == {"twist": 0.0, "end_scale": 100.0}
     tm = shape_geometry(new_primitive("sweep"))
     assert tm.is_watertight
     assert np.allclose(tm.bounds, [[-5, -5, 0], [5, 5, 20]])
@@ -390,3 +391,157 @@ def test_sweep_form_is_plain_language(qapp, close_qt_widget):
     for text in form.labels():
         assert_plain(text)
     assert form.values()["path"] == pair[1].id
+
+
+# --- Twist and size at the far end -----------------------------------------------------
+
+LINE = [{"type": "line", "start": [0, 0], "end": [0, 20]}]
+BRICK = [{"type": "rectangle", "corner": [-2, -1], "width": 4, "height": 2}]
+RING = [{"type": "circle", "centre": [0, 0], "diameter": 40}]
+
+
+def ends(tm, low=0.0, high=20.0):
+    """The points of the solid at its bottom and top."""
+    return tm.vertices[np.isclose(tm.vertices[:, 2], low)], tm.vertices[np.isclose(tm.vertices[:, 2], high)]
+
+
+def test_a_twist_turns_the_outline_evenly_along_the_path():
+    tm = features.sweep(BRICK, FLAT, LINE, UPRIGHT, twist=90.0)
+    assert tm.is_watertight
+    bottom, top = ends(tm)
+    assert np.allclose([bottom.min(axis=0)[:2], bottom.max(axis=0)[:2]], [[-2, -1], [2, 1]])
+    assert np.allclose([top.min(axis=0)[:2], top.max(axis=0)[:2]], [[-1, -2], [1, 2]])
+    # Half way up, turned 45 degrees: a corner (2, 1) is at 45 + 26.6 degrees.
+    middle = tm.vertices[np.isclose(tm.vertices[:, 2], 10.0)]
+    corner = np.degrees(np.arctan2(middle[:, 1], middle[:, 0]))
+    assert np.isclose(corner, 45 + np.degrees(np.arctan2(1, 2))).any()
+    # The twisted sides are flat strips about as fine as a cylinder's.
+    assert tm.volume == pytest.approx(8 * 20, rel=0.005)
+
+
+def test_a_twist_more_than_0_turns_like_a_screw_going_along_the_path():
+    tm = features.sweep(BRICK, FLAT, LINE, UPRIGHT, twist=30.0)
+    _bottom, top = ends(tm)
+    # Seen from above (ahead, along the path), the corner (2, 1) has gone anticlockwise.
+    turned = np.degrees(np.arctan2(top[:, 1], top[:, 0]))
+    assert np.isclose(turned, 30 + np.degrees(np.arctan2(1, 2))).any()
+
+
+def test_the_size_at_the_far_end_changes_evenly_and_exactly():
+    tm = features.sweep(SQUARE, FLAT, LINE, UPRIGHT, end_scale=50.0)
+    assert tm.is_watertight
+    assert tm.volume == pytest.approx(20 / 3 * (16 + 4 + 8))
+    _bottom, top = ends(tm)
+    assert np.allclose([top.min(axis=0)[:2], top.max(axis=0)[:2]], [[-1, -1], [1, 1]])
+
+
+def test_twist_and_size_change_round_a_corner_from_where_the_outline_is():
+    tm = features.sweep(SQUARE, FLAT, ELBOW, UPRIGHT, twist=45.0, end_scale=200.0)
+    assert tm.is_watertight
+    far = tm.vertices[np.isclose(tm.vertices[:, 0], 30.0)]
+    # 8 mm across at the far end, turned 45 degrees: corners 4 * sqrt(2) out.
+    assert np.ptp(far[:, 1]) == pytest.approx(8 * np.sqrt(2)) and np.ptp(far[:, 2]) == pytest.approx(8 * np.sqrt(2))
+
+
+def test_a_closed_path_twists_by_whole_turns():
+    tm = features.sweep(BRICK, FLAT, RING, FLAT, twist=360.0)
+    plain = features.sweep(BRICK, FLAT, RING, FLAT)
+    assert tm.is_watertight and tm.volume == pytest.approx(plain.volume, rel=0.005)
+
+
+@pytest.mark.parametrize("path, twist, end_scale, words", [
+    (RING, 90.0, 100.0, "whole turns"),
+    (RING, 0.0, 50.0, "can't change size"),
+    (LINE, 3601.0, 100.0, "between -3600 and 3600"),
+    (LINE, float("nan"), 100.0, "between -3600 and 3600"),
+    (LINE, 0.0, 0.5, "between 1% and 1000%"),
+    (LINE, 0.0, 1001.0, "between 1% and 1000%"),
+])
+def test_a_twist_or_size_the_sweep_cannot_take_is_refused(path, twist, end_scale, words):
+    with pytest.raises(sketch.SketchError) as err:
+        features.sweep(BRICK, FLAT, path, FLAT if path is RING else UPRIGHT, twist=twist, end_scale=end_scale)
+    assert words in str(err.value)
+    assert_plain(str(err.value))
+
+
+def test_a_fitted_hole_that_changes_size_keeps_its_gap_all_along():
+    tm = features.sweep(SQUARE, FLAT, LINE, UPRIGHT, clearance=0.2, end_scale=50.0)
+    assert tm.is_watertight
+    bottom, top = ends(tm, -0.2, 20.2)
+    assert np.allclose([bottom.min(axis=0)[:2], bottom.max(axis=0)[:2]], [[-2.2, -2.2], [2.2, 2.2]], atol=1e-5)
+    assert np.allclose([top.min(axis=0)[:2], top.max(axis=0)[:2]], [[-1.2, -1.2], [1.2, 1.2]], atol=1e-5)
+    twisted = features.sweep(SQUARE, FLAT, LINE, UPRIGHT, clearance=0.2, twist=90.0)
+    assert twisted.is_watertight and twisted.bounds[:, 2] == pytest.approx([-0.2, 20.2])
+
+
+def test_make_sweep_keeps_a_twist_and_size_only_when_used():
+    assert {"twist", "end_scale"}.isdisjoint(create.make_sweep(*make_pair()).params)
+    shape = create.make_sweep(*make_pair(), twist=30.0, end_scale=150.0)
+    assert (shape.params["twist"], shape.params["end_scale"]) == (30.0, 150.0)
+    with pytest.raises(BuildError) as err:
+        create.make_sweep(*make_pair(), end_scale=0.5)
+    assert "between 1% and 1000%" in str(err.value)
+
+
+def test_a_twisted_sweep_round_trips_through_a_project_file(tmp_path):
+    shape = create.make_sweep(*make_pair(), twist=-60.0, end_scale=75.0)
+    path = tmp_path / "twisted.mesh"
+    save_project(Scene(shapes=[shape]), path)
+    loaded = load_project(path).get(shape.id)
+    assert loaded.params == shape.params
+    assert shape_geometry(loaded).volume == pytest.approx(shape_geometry(shape).volume)
+
+
+def test_twisting_in_the_window_is_one_undo_step(window, monkeypatch):
+    sketches = add_pair(window)
+
+    def ask(parent, pair, path_id):
+        return {"path": path_id, "twist": 90.0, "end_scale": 50.0, "result": "part", "keep_sketch": False}
+
+    monkeypatch.setattr(expert_actions, "ask_sweep", ask)
+    steps = len(window.document._undo)
+    window.do_sweep()
+    shape = window.document.scene.shapes[0]
+    assert (shape.params["twist"], shape.params["end_scale"]) == (90.0, 50.0)
+    assert len(window.document._undo) == steps + 1
+    assert window.inspector.visible_param_fields() == {"twist", "end_scale"}
+    window.do_undo()
+    assert {s.id for s in window.document.scene.shapes} == {s.id for s in sketches.values()}
+
+
+def test_twist_and_size_are_in_the_details_panel(window, warnings):
+    add_pair(window)
+    window.sweep_selected()
+    shape = window.document.scene.shapes[0]
+    # A sweep made without them shows them as they act: no twist, 100%.
+    assert window.inspector.field_value("end_scale") == pytest.approx(100.0)
+    window._on_edited(shape.id, "end_scale", 50.0)
+    window._finish_edit()
+    assert shape.params["end_scale"] == 50.0
+    smaller = shape_geometry(shape).volume
+    window._on_edited(shape.id, "twist", 45.0)
+    window._finish_edit()
+    assert shape.params["twist"] == 45.0
+    window._on_edited(shape.id, "end_scale", 0.5)
+    assert shape.params["end_scale"] == 50.0 and warnings and "between 1% and 1000%" in warnings[0]
+    window.do_undo()
+    assert "twist" not in window.document.scene.shapes[0].params
+    assert shape_geometry(window.document.scene.shapes[0]).volume == pytest.approx(smaller)
+
+
+def test_a_closed_sweep_refuses_a_part_turn_in_the_details_panel(window, warnings):
+    window.add_sketch(BRICK, FLAT, "Outline")
+    window.add_sketch(RING, FLAT, "Path")
+    window.do_select_all()
+    window.sweep_selected(window.document.scene.shapes[1].id, twist=360.0)
+    shape = window.document.scene.shapes[0]
+    window._on_edited(shape.id, "twist", 90.0)
+    assert shape.params["twist"] == 360.0 and warnings and "whole turns" in warnings[0]
+
+
+def test_the_sweep_note_is_plain_language():
+    assert_plain(expert_actions.SWEEP_NOTE)
+    from mesh.panels import FIELD_LABELS
+
+    for key in ("twist", "end_scale"):
+        assert_plain(FIELD_LABELS[key])

@@ -113,19 +113,34 @@ def ask_revolve(parent, axes) -> dict | None:
     )
 
 
+def sweep_shape_fields():
+    """How a sweep's outline changes along its path."""
+    low, high = features.END_SCALE_LIMITS
+    return [
+        ("twist", "Twist along the path (degrees)", 0.0,
+         {"min": -features.TWIST_LIMIT, "max": features.TWIST_LIMIT}),
+        ("end_scale", "Size at the far end (%)", 100.0, {"min": low, "max": high}),
+    ]
+
+
 def sweep_fields(sketches, path_id: str):
     return [
         ("path", "Path to follow", path_id, {"choices": [(s.id, s.name) for s in sketches]}),
-    ] + _result_fields(len(sketches))
+    ] + sweep_shape_fields() + _result_fields(len(sketches))
+
+
+SWEEP_NOTE = (
+    "Carries the other sketch's closed outlines along the path, square to it. If the outline is "
+    "not drawn across an end of the path, it is moved to the nearer end. Curved paths are "
+    "followed in short straight steps. A twist turns the outline round the path as it goes (more "
+    "than 0 turns like a screw going along the path), and the size at the far end shrinks or "
+    "grows it towards the path; both change evenly along its length. On a closed path the twist "
+    "must be whole turns and the size can't change."
+)
 
 
 def ask_sweep(parent, sketches, path_id: str) -> dict | None:
-    return run_form(
-        parent, "Sweep", sweep_fields(sketches, path_id),
-        note="Carries the other sketch's closed outlines along the path, square to it. "
-             "If the outline is not drawn across an end of the path, it is moved to the nearer end. "
-             "Curved paths are followed in short straight steps.",
-    )
+    return run_form(parent, "Sweep", sweep_fields(sketches, path_id), note=SWEEP_NOTE)
 
 
 def loft_fields(count: int):
@@ -427,15 +442,16 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
 
     @replayable()
     def sweep_selected(self, path_id: str | None = None, hole: bool = False,
-                       keep_sketch: bool = False) -> bool:
+                       keep_sketch: bool = False, twist: float = 0.0, end_scale: float = 100.0) -> bool:
         """Sweep one selected sketch's outline along the other's path
-        (`path_id`, or the likelier one)."""
+        (`path_id`, or the likelier one), turning it `twist` degrees and
+        changing its size to `end_scale` percent by the far end."""
         pair = self._two_sketches()
         if pair is None:
             return False
         path = next((s for s in pair if s.id == path_id), None) or create.likely_path(*pair)
         outline = pair[1] if path is pair[0] else pair[0]
-        shape = self._attempt("Cannot sweep", lambda: create.make_sweep(outline, path, hole))
+        shape = self._attempt("Cannot sweep", lambda: create.make_sweep(outline, path, hole, twist, end_scale))
         if shape is None:
             return False
         self._add_from_sketches("sweep", pair, shape, keep_sketch)
@@ -447,7 +463,8 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
             return
         values = ask_sweep(self, pair, create.likely_path(*pair).id)
         if values is not None:
-            self.sweep_selected(values["path"], values["result"] == "hole", values["keep_sketch"])
+            self.sweep_selected(values["path"], values["result"] == "hole", values["keep_sketch"],
+                                values.get("twist", 0.0), values.get("end_scale", 100.0))
 
     LOFT_HINT = "Select two or more sketches, in the order to join them."
 

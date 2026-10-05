@@ -91,7 +91,15 @@ tools do the closest honest version of their Fusion counterparts:
   makes: Ungroup gives the part and the extrusion back. Its direction starts
   at "The way the sketch faces" for a cut or a hole too; the form says to
   choose "The other way" for a hole into a face sketched on.
-- **Sweep** has no twist, scale or guide rails. An outline drawn across
+- **Sweep** has no guide rails. Its twist and its size at the far end
+  change evenly with the distance along the path, turning and scaling the
+  outline about the path (Fusion can also scale about other points); on a
+  closed path the twist must be whole turns and the size can't change. A
+  twisted outline's straight pieces become narrow flat strips, about as fine
+  as a cylinder's, so a twisted part is up to about 0.5% smaller than the
+  true shape. A fitted Hole that changes size keeps the gap square to each
+  straight piece of the outline, so its corners stay sharp rather than
+  rounded. An outline drawn across
   either end of an open path, or anywhere round a closed one, is used where it
   is. Any other outline is moved to the nearer end (its middle onto the path),
   so an outline deliberately drawn beside the path is not swept at a distance.

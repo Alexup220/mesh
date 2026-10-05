@@ -72,8 +72,8 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "sweep", "create", "&Sweep...",
         "Carry one sketch's closed outlines along a path drawn in another sketch, into a "
-        "new part or a hole. Select both sketches first. Curved paths are followed in "
-        "short straight steps.",
+        "new part or a hole, turning them and changing their size evenly along the way if you "
+        "like. Select both sketches first. Curved paths are followed in short straight steps.",
         "do_sweep",
     ),
     ExpertTool(

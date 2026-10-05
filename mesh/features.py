@@ -18,9 +18,13 @@ sketch's: the shape's transform is the sketch's plane.
              fresh revolve stands upright on the workplane; the shape's
              transform is its sketch's plane times axis_frame(axis), which
              puts the axis back where it was drawn.
-    sweep    entities + profile_frame, path_entities + path_frame
+    sweep    entities + profile_frame, path_entities + path_frame,
+             twist, end_scale
              The outline carried along the path. Each frame is a 4x4 list
-             placing that sketch in the sweep's own coordinates.
+             placing that sketch in the sweep's own coordinates. With a
+             twist (degrees) the outline turns evenly along the path, and
+             with an end_scale (percent) its size changes evenly to that at
+             the far end; missing in older files, where they are 0 and 100.
     loft     sections: [{entities, frame}, ...]
              A skin through two or more outlines, in order, each placed by
              its frame like a sweep's sketches.
@@ -55,6 +59,13 @@ SIDES = [
 ]
 
 TAPER_LIMIT = 60.0  # degrees: the steepest an extrusion's sides may slope
+TWIST_LIMIT = 3600.0  # degrees: the most a sweep may twist (ten whole turns)
+END_SCALE_LIMITS = (1.0, 1000.0)  # percent: a sweep's size at the far end
+# A twisting sweep's sides are flat strips about as fine as a cylinder's:
+# the outline turns at most a cylinder's step from one point of the path to
+# the next, and no straight piece of it is longer than that step's arc at its
+# furthest point from the path.
+TWIST_STEP = 360.0 / SEGMENTS  # degrees
 
 DEFAULT_EXTRUDE = [{"type": "rectangle", "corner": [-10.0, -10.0], "width": 20.0, "height": 20.0}]
 # Turned about the sketch's Y line: a tube 10 mm across inside, 20 outside.
@@ -113,7 +124,7 @@ def build(kind: str, params: dict, clearance: float = 0.0) -> trimesh.Trimesh:
         return sweep(
             params.get("entities", DEFAULT_SWEEP_PROFILE), params.get("profile_frame", _FLAT),
             params.get("path_entities", DEFAULT_SWEEP_PATH), params.get("path_frame", _UPRIGHT),
-            clearance,
+            clearance, params.get("twist", 0.0), params.get("end_scale", 100.0),
         )
     if kind == "loft":
         return loft(params.get("sections") or DEFAULT_LOFT, clearance)
@@ -420,7 +431,70 @@ def _sweep_start(path: np.ndarray, closed: bool, area, profile_frame: np.ndarray
     return np.roll(path, -nearest, axis=0), False
 
 
-def sweep(entities, profile_frame, path_entities, path_frame, clearance: float = 0.0) -> trimesh.Trimesh:
+def _world_path(path_entities, path_frame) -> tuple[np.ndarray, np.ndarray, bool]:
+    """The one path a sketch draws, in the world through `path_frame`:
+    (points with no piece of no length, the points in the sketch, closed).
+    A closed path does not repeat its first point at the end."""
+    path_2d, path_closed = single_path(path_entities)
+    path = to_world(path_frame, path_2d)
+    keep = np.concatenate([[True], np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-9])
+    path = path[keep]
+    if path_closed and len(path) > 1 and np.linalg.norm(path[0] - path[-1]) < 1e-9:
+        path = path[:-1]
+    if len(path) < (3 if path_closed else 2):
+        raise SketchError("The path is too short to sweep along.")
+    return path, path_2d, path_closed
+
+
+def _twist_and_scale(twist, end_scale, closed: bool) -> tuple[float, float]:
+    """A sweep's twist (degrees) and size at the far end (percent), checked."""
+    try:
+        twist, end_scale = float(twist), float(end_scale)
+    except (TypeError, ValueError) as exc:
+        raise SketchError("The twist and the size at the far end must be numbers.") from exc
+    if not math.isfinite(twist) or abs(twist) > TWIST_LIMIT:
+        raise SketchError(f"The twist must be between -{TWIST_LIMIT:g} and {TWIST_LIMIT:g} degrees "
+                          "(ten whole turns).")
+    low, high = END_SCALE_LIMITS
+    if not math.isfinite(end_scale) or not low <= end_scale <= high:
+        raise SketchError(f"The size at the far end must be between {low:g}% and {high:g}%.")
+    if closed and end_scale != 100.0:
+        raise SketchError("A closed path ends where it starts, so the outline can't change size along "
+                          "it. Keep the size at the far end at 100%.")
+    if closed and abs(twist / 360.0 - round(twist / 360.0)) > 1e-9:
+        raise SketchError("A closed path ends where it starts, so the twist must be whole turns "
+                          "(360 degrees, 720 and so on).")
+    return twist, end_scale
+
+
+def _subdivided(path: np.ndarray, closed: bool, twist: float) -> np.ndarray:
+    """The path with points added along its pieces, so that a twist of
+    `twist` degrees spread evenly over its length turns the outline at most
+    TWIST_STEP degrees from one point to the next."""
+    loop = np.vstack([path, path[:1]]) if closed else path
+    lengths = np.linalg.norm(np.diff(loop, axis=0), axis=1)
+    total = lengths.sum()
+    out = []
+    for j, length in enumerate(lengths):
+        steps = max(1, int(math.ceil(abs(twist) * length / total / TWIST_STEP - 1e-9)))
+        out.extend(loop[j] + (loop[j + 1] - loop[j]) * (i / steps) for i in range(steps))
+    if not closed:
+        out.append(loop[-1])
+    return np.array(out)
+
+
+def _split_pieces(outline: np.ndarray, longest: float) -> np.ndarray:
+    """A closed outline with points added along its straight pieces, so
+    that none is longer than `longest`."""
+    out = []
+    for a, b in zip(outline, np.roll(outline, -1, axis=0)):
+        steps = max(1, int(math.ceil(np.linalg.norm(b - a) / max(longest, 1e-9) - 1e-9)))
+        out.extend(a + (b - a) * (i / steps) for i in range(steps))
+    return np.array(out)
+
+
+def sweep(entities, profile_frame, path_entities, path_frame, clearance: float = 0.0,
+          twist: float = 0.0, end_scale: float = 100.0) -> trimesh.Trimesh:
     """The outline carried along the path, staying square to it.
 
     If the outline is already drawn across the path at one of its ends (or
@@ -430,45 +504,86 @@ def sweep(entities, profile_frame, path_entities, path_frame, clearance: float =
     each corner of the path the outline is cut on the plane halfway between
     the two directions (a mitre), which is exact for paths of straight
     pieces; curves are many short pieces.
+
+    `twist` turns the outline about the path by that many degrees over the
+    whole path (like a right-hand screw going along it, for more than 0),
+    and `end_scale` makes it that percentage of its size at the far end,
+    both changing evenly with the distance along the path. A twisting
+    sweep has extra steps on long pieces of the path and of the outline
+    (TWIST_STEP), whose sides are flat strips between them. A fitted Hole
+    that changes size is `clearance` bigger square to every straight piece
+    of the outline all along.
     """
     profile_frame, path_frame = _frame(profile_frame), _frame(path_frame)
-    path_2d, path_closed = single_path(path_entities)
-    path = to_world(path_frame, path_2d)
-    keep = np.concatenate([[True], np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-9])
-    path = path[keep]
-    if path_closed and len(path) > 1 and np.linalg.norm(path[0] - path[-1]) < 1e-9:
-        path = path[:-1]
-    if len(path) < (3 if path_closed else 2):
-        raise SketchError("The path is too short to sweep along.")
+    path, path_2d, path_closed = _world_path(path_entities, path_frame)
+    twist, end_scale = _twist_and_scale(twist, end_scale, path_closed)
 
     # The outline in the world.
-    area = _grow(profile(entities), clearance)
+    plain = profile(entities)
+    area = _grow(plain, clearance)
     world = [to_world(profile_frame, np.asarray(p, dtype=np.float64)) for p in area.to_polygons()]
     flat = np.vstack(world)
     middle = (flat.min(axis=0) + flat.max(axis=0)) / 2.0
     path, in_place = _sweep_start(path, path_closed, area, profile_frame, middle)
+    if twist != 0.0:
+        path = _subdivided(path, path_closed, twist)
 
     m = len(path)
     pieces = m if path_closed else m - 1
     directions = [_unit(path[(j + 1) % m] - path[j]) for j in range(pieces)]
     start, t0 = path[0], directions[0]
+    # How far along the path each point is, from 0 at the start to 1 at the
+    # far end (round a closed path, back at the start).
+    lengths = np.linalg.norm(np.diff(np.vstack([path, path[:1]]) if path_closed else path, axis=0), axis=1)
+    along = np.concatenate([[0.0], np.cumsum(lengths)])[:m] / lengths.sum()
 
     # The outline in flat coordinates across the start.
     x_axis = profile_frame[:3, 0]
+    turn = np.eye(3)
     if not in_place:
         facing = _unit(np.cross(profile_frame[:3, 0], profile_frame[:3, 1]))
         turn = _turn(facing, t0)
-        world = [(w - middle) @ turn.T + start for w in world]
         x_axis = turn @ x_axis
     e1 = _unit(x_axis - np.dot(x_axis, t0) * t0)
     e2 = np.cross(t0, e1)
-    outlines = [np.column_stack([(w - start) @ e1, (w - start) @ e2]) for w in world]
-    # Filled again in these coordinates, so every outline runs anticlockwise
-    # seen from ahead along the path, and holes the other way.
-    area = m3.CrossSection([np.ascontiguousarray(o) for o in outlines], m3.FillRule.EvenOdd)
-    outlines = [np.asarray(p, dtype=np.float64) for p in area.to_polygons()]
+
+    def flattened(polygons) -> list:
+        """Sketch polygons as outlines in those flat coordinates, filled
+        again so every outline runs anticlockwise seen from ahead along the
+        path, and holes the other way."""
+        placed = [to_world(profile_frame, np.asarray(p, dtype=np.float64)) for p in polygons]
+        if not in_place:
+            placed = [(w - middle) @ turn.T + start for w in placed]
+        across = [np.column_stack([(w - start) @ e1, (w - start) @ e2]) for w in placed]
+        filled = m3.CrossSection([np.ascontiguousarray(o) for o in across], m3.FillRule.EvenOdd)
+        return [np.asarray(p, dtype=np.float64) for p in filled.to_polygons()]
+
+    outlines = flattened(area.to_polygons())
     if not outlines:
         raise SketchError("The outline encloses no area.")
+    grown_square = clearance > 0.0 and end_scale != 100.0
+    if grown_square:
+        # Scaled first, then grown: each straight piece moved out by the
+        # clearance, keeping its direction, so the gap stays the clearance.
+        outlines = flattened(plain.to_polygons())
+    if twist != 0.0:
+        reach = max(float(np.linalg.norm(o, axis=1).max()) for o in outlines)
+        outlines = [_split_pieces(o, reach * math.radians(TWIST_STEP)) for o in outlines]
+    if grown_square:
+        outward = [moved - points for moved, points in zip(_mitred(outlines, -1.0), outlines)]
+
+    def outlines_at(k: int) -> list:
+        """The outlines at path point k, turned and scaled for how far along
+        the path it is."""
+        if twist == 0.0 and end_scale == 100.0:
+            return outlines
+        size = 1.0 + (end_scale / 100.0 - 1.0) * along[k]
+        angle = math.radians(twist * along[k])
+        c, s = math.cos(angle), math.sin(angle)
+        spin = np.array([[c, -s], [s, c]])
+        if grown_square:
+            return [(size * o + clearance * d) @ spin.T for o, d in zip(outlines, outward)]
+        return [(size * o) @ spin.T for o in outlines]
 
     if clearance > 0.0 and not path_closed:
         # A fitted Hole also reaches `clearance` past each end.
@@ -480,8 +595,8 @@ def sweep(entities, profile_frame, path_entities, path_frame, clearance: float =
     # piece's axes are the piece before's, turned by the bend between them.
     frames = [(e1, e2)]
     for j in range(1, pieces):
-        turn = _turn(directions[j - 1], directions[j])
-        frames.append((turn @ frames[-1][0], turn @ frames[-1][1]))
+        bend = _turn(directions[j - 1], directions[j])
+        frames.append((bend @ frames[-1][0], bend @ frames[-1][1]))
 
     def ring(k: int, outline: np.ndarray) -> np.ndarray:
         """The outline at path point k: square to the piece arriving there,
@@ -499,7 +614,7 @@ def sweep(entities, profile_frame, path_entities, path_frame, clearance: float =
             points = points - np.outer((points - path[k]) @ mitre / np.dot(d_in, mitre), d_in)
         return points
 
-    rings = [[ring(k, o) for o in outlines] for k in range(m)]
+    rings = [[ring(k, o) for o in outlines_at(k)] for k in range(m)]
     if not (LinearRing(path_2d) if path_closed else LineString(path_2d)).is_simple:
         raise SketchError("The path crosses itself, so it can't be swept along.")
 
@@ -518,8 +633,8 @@ def sweep(entities, profile_frame, path_entities, path_frame, clearance: float =
     faces = [_skin(rings, path_closed)]
     if not path_closed:
         end = sum(len(o) for o in rings[0]) * (m - 1)
-        faces.append(_cap(outlines, np.vstack(rings[0]), 0, -directions[0]))
-        faces.append(_cap(outlines, np.vstack(rings[-1]), end, directions[-1]))
+        faces.append(_cap(outlines_at(0), np.vstack(rings[0]), 0, -directions[0]))
+        faces.append(_cap(outlines_at(m - 1), np.vstack(rings[-1]), end, directions[-1]))
     return _solid_from(vertices, np.vstack(faces), "sweep")
 
 

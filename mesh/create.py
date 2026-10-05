@@ -259,10 +259,13 @@ def likely_path(first: Shape, second: Shape) -> Shape:
     return second
 
 
-def make_sweep(outline: Shape, path: Shape, hole: bool = False) -> Shape:
+def make_sweep(outline: Shape, path: Shape, hole: bool = False, twist: float = 0.0,
+               end_scale: float = 100.0) -> Shape:
     """The closed outlines of the sketch `outline` carried along the one
-    path drawn in the sketch `path`. The part's own coordinates are the
-    world's, so both sketches are stored with where they were."""
+    path drawn in the sketch `path`, turning `twist` degrees and changing
+    to `end_scale` percent of their size by the far end. The part's own
+    coordinates are the world's, so both sketches are stored with where
+    they were."""
     if not (is_sketch(outline) and is_sketch(path)) or outline.id == path.id:
         raise BuildError("Select two sketches: the outline, and the path to sweep it along.")
     shape = Shape(
@@ -279,6 +282,11 @@ def make_sweep(outline: Shape, path: Shape, hole: bool = False) -> Shape:
         transform=np.eye(4),
         is_hole=bool(hole),
     )
+    # Kept only when used, so a plain sweep's settings are as before.
+    if float(twist) != 0.0:
+        shape.params["twist"] = float(twist)
+    if float(end_scale) != 100.0:
+        shape.params["end_scale"] = float(end_scale)
     _checked(lambda: shape_geometry(shape))
     return shape
 

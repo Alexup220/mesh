@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mesh.features import TAPER_LIMIT
+from mesh.features import END_SCALE_LIMITS, TAPER_LIMIT, TWIST_LIMIT
 from mesh.scene import DEFAULT_COLOR, DEFAULT_FIT, FITS, Shape, euler_from_transform
 from mesh.shapes import PRIMITIVES, is_reference, shelf_primitives
 from mesh.text import has_letters
@@ -85,6 +85,8 @@ FIELD_LABELS = {
     "side": "Direction",
     "angle": "Angle (degrees)",
     "taper": "Sides slope in (degrees)",
+    "twist": "Twist along the path (degrees)",
+    "end_scale": "Size at the far end (%)",
     "pitch": "Thread pitch (mm per turn)",
     "thread_length": "Threaded length (mm)",
     "end": "Thread starts",
@@ -134,6 +136,11 @@ class Inspector(QWidget):
             elif field == "taper":
                 # How far an Extrusion's sides slope in (out, below 0).
                 box.setRange(-TAPER_LIMIT, TAPER_LIMIT)
+            elif field == "twist":
+                # How far a Sweep turns along its path, either way.
+                box.setRange(-TWIST_LIMIT, TWIST_LIMIT)
+            elif field == "end_scale":
+                box.setRange(*END_SCALE_LIMITS)
             elif field in SIZE_FIELDS:
                 box.setRange(0.0 if field in ZERO_ALLOWED else 0.1, 10000.0)
             else:
@@ -282,10 +289,12 @@ class Inspector(QWidget):
                 self.fields[field].setValue(float(transform[axis, 3]))
 
             active = self._active_size_fields(shape)
+            # A number a part made before it existed lacks means its default.
+            defaults = PRIMITIVES[shape.params["primitive"]]["defaults"] if active else {}
             for field in SIZE_FIELDS:
                 self._layout.setRowVisible(self._rows[field], field in active)
                 if field in active:
-                    self.fields[field].setValue(float(shape.params.get(field, 0.0)))
+                    self.fields[field].setValue(float(shape.params.get(field, defaults.get(field, 0.0))))
             choices = self._choices(shape)
             for field, combo in self.choice_boxes.items():
                 shown = field in active
@@ -294,7 +303,7 @@ class Inspector(QWidget):
                 if shown:
                     for value, label in choices.get(field, []):
                         combo.addItem(label, value)
-                    combo.setCurrentIndex(max(combo.findData(shape.params.get(field)), 0))
+                    combo.setCurrentIndex(max(combo.findData(shape.params.get(field, defaults.get(field))), 0))
             for field, line in self.text_boxes.items():
                 shown = field in active
                 self._layout.setRowVisible(self._rows[field], shown)

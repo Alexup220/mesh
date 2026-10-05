@@ -303,6 +303,13 @@ def scenario_sweep(window):
     window.sweep_selected()
 
 
+def scenario_sweep_twisted(window):
+    add_sketch(window, ELBOW, sketch.named_plane_frame("xz"), "Path")
+    add_sketch(window, SQUARE, None, "Outline")
+    window.do_select_all()
+    window.sweep_selected(twist=90.0, end_scale=50.0)
+
+
 def scenario_loft(window):
     first = add_sketch(window, BIG)
     second = add_sketch(window, SMALL, sketch.named_plane_frame("xy", 15.0))
@@ -719,7 +726,7 @@ def test_the_history_window(window, monkeypatch):
 
 SAMPLE_ARGS = {
     "distance": 5.0, "side": "one", "hole": False, "keep_sketch": False, "taper": 0.0, "to_plane": False,
-    "combine": None, "axis": "z",
+    "combine": None, "twist": 0.0, "end_scale": 100.0, "axis": "z",
     "angle": 30.0,
     "pitch": 1.5, "length": 10.0, "end": "top", "hand": "right", "dx": 1.0, "dy": 0.0, "dz": 0.0,
     "make_copy": False, "size": 100.0, "stretch_x": 100.0, "stretch_y": 100.0, "stretch_z": 100.0,
