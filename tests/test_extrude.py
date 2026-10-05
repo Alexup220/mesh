@@ -335,3 +335,120 @@ def test_a_refused_slope_changes_nothing(window, warnings):
 def test_the_extrude_note_says_how_the_sides_slope():
     assert "at most 60 degrees" in expert_actions.EXTRUDE_NOTE
     assert_plain(expert_actions.EXTRUDE_NOTE)
+
+
+# --- Up to a construction plane ---------------------------------------------------------
+
+
+def plane_at(height, tilt=0.0, name="Plane 1"):
+    from mesh import construct
+
+    normal = (0.0, np.sin(np.radians(tilt)), np.cos(np.radians(tilt)))
+    return construct.new_plane((0.0, 0.0, height), normal, name=name)
+
+
+@pytest.mark.parametrize("height, distance, side", [(15.0, 15.0, "one"), (-4.0, 4.0, "other")])
+def test_the_distance_to_a_parallel_plane_is_worked_out(height, distance, side):
+    from mesh import construct
+
+    assert create.distance_to_plane(sketch_on(), plane_at(height)) == (pytest.approx(distance), side)
+    # The way the plane faces doesn't matter, only where it is.
+    upside_down = construct.new_plane((5.0, 5.0, height), (0.0, 0.0, -1.0))
+    assert create.distance_to_plane(sketch_on(), upside_down) == (pytest.approx(distance), side)
+
+
+def test_a_sketch_upright_extrudes_up_to_a_plane_the_way_it_lies():
+    # Sketched facing the front 3 mm in front of 0; the plane 10 mm behind 0.
+    from mesh import construct
+
+    source = sketch_on("xz", 3.0)
+    back = construct.new_plane((0.0, 10.0, 0.0), (0.0, 1.0, 0.0))
+    distance, side = create.distance_to_plane(source, back)
+    assert (distance, side) == (pytest.approx(13.0), "other")
+    tm = shape_geometry(create.make_extrude(source, distance, side))
+    assert tm.bounds[:, 1].tolist() == pytest.approx([-3.0, 10.0])
+
+
+@pytest.mark.parametrize("plane, words", [
+    (plane_at(10.0, tilt=20.0), "not parallel"),
+    (plane_at(0.0), "lies on"),
+], ids=["tilted", "on the sketch"])
+def test_a_plane_the_extrusion_cannot_end_on_is_refused(plane, words):
+    with pytest.raises(BuildError) as err:
+        create.distance_to_plane(sketch_on(), plane)
+    assert words in str(err.value)
+    assert_plain(str(err.value))
+
+
+def add_plane(window, height):
+    window.plane_at_distance_selected("xy", height)
+    return window.document.scene.selected()[0]
+
+
+def test_extruding_up_to_a_plane_is_one_undo_step_and_keeps_the_plane(window):
+    plane = add_plane(window, 12.0)
+    source = add_sketch(window)
+    window.document.scene.select([source.id, plane.id])
+    steps = len(window.document._undo)
+    assert window.extrude_selected(1.0, to_plane=True, taper=5.0)
+    scene = window.document.scene
+    assert scene.shapes[0].id == plane.id and len(scene.shapes) == 2
+    shape = scene.shapes[1]
+    assert (shape.params["distance"], shape.params["side"]) == (pytest.approx(12.0), "one")
+    assert shape_geometry(shape).bounds[:, 2].tolist() == pytest.approx([0.0, 12.0])
+    assert len(window.document._undo) == steps + 1
+    window.do_undo()
+    assert {s.id for s in window.document.scene.shapes} == {plane.id, source.id}
+
+
+def test_up_to_a_plane_needs_a_plane_and_one_that_fits(window, warnings):
+    source = add_sketch(window)
+    assert not window.extrude_selected(5.0, to_plane=True)
+    assert window.statusBar().currentMessage() == window.NO_PLANE
+    window.plane_at_angle_selected("x", 30.0)
+    window.document.scene.select([source.id, window.document.scene.shapes[-1].id])
+    steps = len(window.document._undo)
+    assert not window.extrude_selected(5.0, to_plane=True)
+    assert len(window.document._undo) == steps and warnings and "not parallel" in warnings[0]
+    for text in (window.NO_PLANE, window.EXTRUDE_EXTRAS):
+        assert_plain(text)
+
+
+def test_the_extrude_form_offers_the_selected_plane(window, monkeypatch):
+    plane = add_plane(window, 8.0)
+    source = add_sketch(window)
+    window.document.scene.select([source.id, plane.id])
+    seen = {}
+
+    def ask(parent, plane_name=None):
+        seen["plane"] = plane_name
+        return {"extent": "plane", "distance": 3.0, "side": "both", "taper": 0.0, "result": "hole",
+                "keep_sketch": True}
+
+    monkeypatch.setattr(expert_actions, "ask_extrude", ask)
+    window.do_extrude()
+    assert seen["plane"] == plane.name
+    shape = window.document.scene.shapes[-1]
+    assert shape.is_hole and (shape.params["distance"], shape.params["side"]) == (pytest.approx(8.0), "one")
+
+
+def test_the_up_to_plane_form_is_plain_language(qapp, close_qt_widget):
+    from mesh.panels import FormDialog
+
+    note = expert_actions.EXTRUDE_NOTE + expert_actions.EXTRUDE_TO_PLANE_NOTE
+    form = close_qt_widget(FormDialog(None, "Extrude", expert_actions.extrude_fields("Plane 1"), note=note))
+    for text in form.labels():
+        assert_plain(text)
+    assert form.values()["extent"] == "plane"
+
+
+def test_an_extrusion_up_to_a_plane_round_trips_through_a_project_file(window, tmp_path):
+    plane = add_plane(window, 9.0)
+    source = add_sketch(window, WASHER)
+    window.document.scene.select([source.id, plane.id])
+    window.extrude_selected(1.0, to_plane=True)
+    file = tmp_path / "up_to.mesh"
+    window.save_to(file)
+    loaded = load_project(file)
+    assert [s.params["primitive"] for s in loaded.shapes] == ["plane", "extrude"]
+    assert shape_geometry(loaded.shapes[1]).bounds[:, 2].tolist() == pytest.approx([0.0, 9.0])

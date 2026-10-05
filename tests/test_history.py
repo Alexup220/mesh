@@ -277,6 +277,13 @@ def scenario_extrude_sloped(window):
     window.extrude_selected(5.0, taper=10.0)
 
 
+def scenario_extrude_up_to_plane(window):
+    window.plane_at_distance_selected("xy", 12.0)
+    plane = window.document.scene.selected()[0]
+    pick(window, add_sketch(window, RECT), plane)
+    window.extrude_selected(1.0, to_plane=True)
+
+
 def scenario_revolve(window):
     add_sketch(window, BAND)
     window.revolve_selected("y", 270.0)
@@ -704,7 +711,8 @@ def test_the_history_window(window, monkeypatch):
 
 
 SAMPLE_ARGS = {
-    "distance": 5.0, "side": "one", "hole": False, "keep_sketch": False, "taper": 0.0, "axis": "z",
+    "distance": 5.0, "side": "one", "hole": False, "keep_sketch": False, "taper": 0.0, "to_plane": False,
+    "axis": "z",
     "angle": 30.0,
     "pitch": 1.5, "length": 10.0, "end": "top", "hand": "right", "dx": 1.0, "dy": 0.0, "dz": 0.0,
     "make_copy": False, "size": 100.0, "stretch_x": 100.0, "stretch_y": 100.0, "stretch_z": 100.0,
@@ -740,3 +748,14 @@ def test_history_text_is_plain_language(window):
                  *(history.label_words(label) for label in labels),
                  *(t.tip for t in TOOLS if t.key == "history")):
         assert_plain(text)
+
+
+def test_an_extrusion_up_to_a_plane_follows_the_plane_when_the_history_is_worked_out(window):
+    window.start_history()
+    scenario_extrude_up_to_plane(window)
+    assert window.change_history_step(0, {"distance": 20.0})
+    extrusion = window.document.scene.shapes[-1]
+    assert shape_geometry(extrusion).bounds[:, 2].tolist() == pytest.approx([0.0, 20.0])
+    _title, fields, back = window.step_editor(2)
+    assert fields[0][0] == "extent" and fields[0][2] == "plane"
+    assert back({f[0]: f[2] for f in fields})["to_plane"] is True

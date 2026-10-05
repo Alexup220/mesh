@@ -11,7 +11,7 @@ import uuid
 
 import numpy as np
 
-from mesh import features, sketch, threads
+from mesh import construct, features, sketch, threads
 from mesh.builders import BuildError
 from mesh.ops import face_direction
 from mesh.scene import Shape
@@ -176,6 +176,32 @@ def make_extrude(source: Shape, distance: float, side: str = "one", hole: bool =
     if float(taper) != 0.0:
         params["taper"] = float(taper)  # missing means straight sides, as before
     return _from_sketch(source, "extrude", "Extrusion", params, hole)
+
+
+# How square a plane must be to a sketch to count as parallel to it (the
+# cosine of the angle between the ways they face): within about 0.1 degrees.
+PARALLEL = 1.0 - 1e-6
+
+
+def distance_to_plane(source: Shape, plane: Shape) -> tuple[float, str]:
+    """How far to extrude the sketch `source` so its far end lies on the
+    construction plane `plane`, and which way: (distance, side). Fusion's
+    "To object" extent, for a plane parallel to the sketch; worked out
+    once, from where the plane is now."""
+    if not is_sketch(source) or not construct.is_guide(plane, "plane"):
+        raise BuildError("Select a sketch and a construction plane to extrude up to.")
+    frame = np.asarray(source.transform, dtype=np.float64)
+    facing = frame[:3, 2] / np.linalg.norm(frame[:3, 2])
+    point, normal = construct.plane_of(plane)
+    if abs(float(facing @ normal)) < PARALLEL:
+        raise BuildError(
+            f"{plane.name} is not parallel to {source.name}, so an extrusion can't end flat on it. "
+            "Use a plane parallel to the sketch, or type a distance."
+        )
+    distance = float((point - frame[:3, 3]) @ facing)
+    if abs(distance) < sketch.MIN_SIZE:
+        raise BuildError(f"{plane.name} lies on {source.name}'s plane, so there is no distance to extrude.")
+    return abs(distance), ("one" if distance > 0.0 else "other")
 
 
 def revolve_axes(source: Shape) -> list[tuple[str, str]]:

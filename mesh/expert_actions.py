@@ -40,9 +40,17 @@ def _result_fields(sketches: int = 1):
     ]
 
 
-def extrude_fields():
+def extrude_fields(plane: str | None = None):
+    """The Extrude form's fields; with the name of a construction plane
+    selected with the sketch, a choice to extrude up to it."""
     slope = {"min": -features.TAPER_LIMIT, "max": features.TAPER_LIMIT}
-    return [
+    extent = []
+    if plane is not None:
+        extent = [("extent", "How far", "plane", {"choices": [
+            ("distance", "The distance typed below"),
+            ("plane", f"Up to {plane} (parallel to the sketch)"),
+        ]})]
+    return extent + [
         ("distance", "Distance (mm)", 20.0, {"min": 0.1, "max": 10000.0}),
         ("side", "Direction", "one", {"choices": features.SIDES}),
         ("taper", "Sides slope in (degrees)", 0.0, slope),
@@ -56,9 +64,16 @@ EXTRUDE_NOTE = (
     f"{features.TAPER_LIMIT:g} degrees), and the corners stay sharp."
 )
 
+EXTRUDE_TO_PLANE_NOTE = (
+    " Up to a plane: the plane must be parallel to the sketch, and the distance and which way "
+    "are worked out from where it is now. They stay numbers in the Details panel, so moving the "
+    "plane later does not move the end."
+)
 
-def ask_extrude(parent) -> dict | None:
-    return run_form(parent, "Extrude", extrude_fields(), note=EXTRUDE_NOTE)
+
+def ask_extrude(parent, plane: str | None = None) -> dict | None:
+    note = EXTRUDE_NOTE + (EXTRUDE_TO_PLANE_NOTE if plane is not None else "")
+    return run_form(parent, "Extrude", extrude_fields(plane), note=note)
 
 
 def revolve_fields(axes):
@@ -290,14 +305,43 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         scene.select([shape.id])
         self.sync()
 
+    EXTRUDE_HINT = "Select one sketch to extrude."
+    EXTRUDE_EXTRAS = ("Select one sketch to extrude, and if you like one construction plane to "
+                      "extrude up to.")
+    NO_PLANE = "Select a construction plane with the sketch to extrude up to it."
+
+    def _extrude_selection(self):
+        """(the selected sketch, the construction plane selected with it or
+        None), or None and a message."""
+        chosen = self._picked()
+        sketches = [s for s in chosen if create.is_sketch(s)]
+        planes = [s for s in chosen if construct.is_guide(s, "plane")]
+        if len(sketches) != 1:
+            self.statusBar().showMessage(self.EXTRUDE_HINT)
+            return None
+        if len(planes) > 1 or len(chosen) > 1 + len(planes):
+            self.statusBar().showMessage(self.EXTRUDE_EXTRAS)
+            return None
+        return sketches[0], (planes[0] if planes else None)
+
     @replayable()
     def extrude_selected(self, distance: float, side: str = "one", hole: bool = False,
-                         keep_sketch: bool = False, taper: float = 0.0) -> bool:
-        source = self._chosen_sketch("extrude")
-        if source is None:
+                         keep_sketch: bool = False, taper: float = 0.0, to_plane: bool = False) -> bool:
+        """Extrude the selected sketch `distance` mm (or, with `to_plane`, up
+        to the construction plane selected with it). One undo step."""
+        chosen = self._extrude_selection()
+        if chosen is None:
             return False
-        shape = self._attempt("Cannot extrude",
-                              lambda: create.make_extrude(source, distance, side, hole, taper))
+        source, plane = chosen
+        if to_plane and plane is None:
+            self.statusBar().showMessage(self.NO_PLANE)
+            return False
+
+        def build():
+            far, way = create.distance_to_plane(source, plane) if to_plane else (distance, side)
+            return create.make_extrude(source, far, way, hole, taper)
+
+        shape = self._attempt("Cannot extrude", build)
         if shape is None:
             return False
         self._add_from_sketches("extrude", [source], shape, keep_sketch)
@@ -393,12 +437,15 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
             self.loft_selected(values["result"] == "hole", values["keep_sketch"])
 
     def do_extrude(self) -> None:
-        if self._chosen_sketch("extrude") is None:
+        chosen = self._extrude_selection()
+        if chosen is None:
             return
-        values = ask_extrude(self)
+        _source, plane = chosen
+        values = ask_extrude(self, plane.name) if plane is not None else ask_extrude(self)
         if values is not None:
             self.extrude_selected(values["distance"], values["side"], values["result"] == "hole",
-                                  values["keep_sketch"], values.get("taper", 0.0))
+                                  values["keep_sketch"], values.get("taper", 0.0),
+                                  values.get("extent") == "plane")
 
     # --- Thread ----------------------------------------------------------------------
 

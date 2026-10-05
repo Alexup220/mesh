@@ -79,9 +79,13 @@ tools do the closest honest version of their Fusion counterparts:
 - **Sketches are not dragged.** A flat sketch's handle box would have no
   thickness, so the drag handles are hidden for sketches; they are moved and
   turned with the Details panel.
-- **Extrude** has no "up to a face". Its sides slope by one angle (typed in
-  the form, or later with Slope the Sides), which "Both ways" uses on both
-  halves; Fusion can slope the two halves differently. Joining or cutting
+- **Extrude** goes "up to" a construction plane selected with the sketch
+  only when the plane is parallel to the sketch (Fusion also ends on a face,
+  a part, a point or a slanted plane). The distance is worked out once and
+  kept as a number: moving the plane later leaves the end where it was,
+  until the History is worked out again. Its sides slope by one angle (typed
+  in the form, or later with Slope the Sides), which "Both ways" uses on
+  both halves; Fusion can slope the two halves differently. Joining or cutting
   other parts goes through Make Hole + Group (or Join / Cut Out), not inside
   Extrude. Its direction starts at "The way the sketch faces" for a hole too;
   the form says to choose "The other way" for a hole into a face sketched on.

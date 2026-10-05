@@ -81,9 +81,12 @@ def editors() -> dict:
     nothing = [SimpleNamespace(id="", name="")]
     results = (lambda a: _filled(ea.loft_fields(2), _results(a)), lambda v, _a: _from_results(v))
     return {
-        "extrude_selected": ("Extrude", lambda a: _filled(ea.extrude_fields(), {**a, **_results(a)}),
-                             lambda v, _a: {"distance": v["distance"], "side": v["side"], "taper": v["taper"],
-                                           **_from_results(v)}),
+        "extrude_selected": (
+            "Extrude",
+            lambda a: _filled(ea.extrude_fields("the selected plane" if a.get("to_plane") else None),
+                              {**a, **_results(a), "extent": "plane" if a.get("to_plane") else "distance"}),
+            lambda v, _a: {"distance": v["distance"], "side": v["side"], "taper": v["taper"],
+                           "to_plane": v.get("extent") == "plane", **_from_results(v)}),
         "revolve_selected": ("Revolve",
                              lambda a: _filled(_without(ea.revolve_fields([(a["axis"], "")]), "axis"),
                                                {**a, **_results(a)}),
