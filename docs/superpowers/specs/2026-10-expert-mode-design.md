@@ -184,10 +184,56 @@ closest honest version, which its tooltip states and `docs/FOLLOWUPS.md` lists.
   the same sizes fits inside it. Pitch, threaded length, end and hand are
   Details panel fields, checked through `create.edit_refusal`.
 
+## Phase 5 as built: parameters, history, components
+
+- **Modules.** `mesh/parameters.py` (formulas and links),
+  `mesh/history.py` (steps, what a step changed, finding a clicked face
+  again) and `mesh/components.py` are core, in the purity list. The window
+  side is `ParameterActions`, `HistoryActions` and `ComponentActions`
+  (`mesh/parameter_actions.py`, `mesh/history_actions.py`,
+  `mesh/component_actions.py`), mixed into `ExpertActions`. Components
+  have their own Assemble menu.
+- **Parameters** are a table on the scene (`Scene.parameters`: name,
+  formula, note). A part's links (`Shape.links`, field to formula) set its
+  position, turn or size numbers whenever the parameters change. Formulas
+  are read by a small calculator built on Python's `ast`, never `eval`.
+  Typing a number in the Details panel ends that number's link
+  (`app._on_edited` calls `_end_link`). Every linked part is built on a
+  copy first, so a parameter that would break one changes nothing.
+- **History** is a list on the scene (`Scene.history`: the scene when it
+  started, then the steps), so undo and saving carry it. `Document.snapshot`
+  adds a step when the project keeps a history; `Document.settle` works
+  out what the newest step changed (`history.changes`) by comparing the
+  scene before it (the undo copy) with the scene now. Window methods
+  marked `@replayable` (the tools) also record their call: settings, the
+  selection in picked order and, for a clicked face, where it was and
+  which way it faced. Changing or removing a step replays the whole list
+  from the start on a scratch document: a tool step calls its method
+  again (its new parts get back their recorded ids, so later steps find
+  them; a clicked face is found again by `history.find_face`), other steps
+  apply what they changed (a move as a move). The result replaces the
+  project as one undo step that is not itself a history step. With a
+  history kept, new parameter values replay it too, so tools downstream
+  of a linked size follow (Fusion's parametric timeline).
+- **Components** are a list on the scene (`Scene.components`: id, name),
+  and each part names its component (`Shape.component`). Ids come from
+  what a component was made from (`components.new_id`), so a replay gives
+  the same ids. What a tool makes by replacing parts of one component
+  joins it: the window's `sync` calls `components.carry_over` with the
+  scene before the newest change (`Document.action_before`), and the
+  replay does the same after each tool step.
+
 ## Project files
 
-No new top-level fields and no `format_version` change are planned. New shape
-types store their data (for example a sketch's curves) inside `params`, as
-PR #1's rounded box and text do. Older builds can't open files that use them.
-Phase 5 (named parameters, an editable history, components) would need new
-project-file fields and is not started without asking first.
+Phases 0 to 4 add no top-level fields and no `format_version` change. New
+shape types store their data (for example a sketch's curves) inside
+`params`, as PR #1's rounded box and text do. Older builds can't open files
+that use them.
+
+Phase 5's data is saved only when used: `parameters`, `components` and
+`history` in the scene, and `links` and `component` on a shape. A project
+that uses any of them is saved as `format_version` 2
+(`io_formats.format_version`); every other project is still saved as
+version 1, exactly as before. Loading refuses a version above 2 with a
+plain message (a newer mesh saved it), and old STL shape blobs still
+decode.
