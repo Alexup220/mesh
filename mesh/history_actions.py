@@ -103,7 +103,7 @@ def editors() -> dict:
                              _same),
         "split_body_selected": ("Split Body",
                                 lambda a: _filled(_without(ma.split_body_fields(nothing), "part"), a), _same),
-        "shell_face": ("Shell", lambda a: _filled(ma.shell_fields(), a), _same),
+        "shell_face": ("Shell", lambda a: _filled(_without(ma.shell_fields(), "faces"), a), _same),
         "push_pull_face": ("Push/Pull", lambda a: _filled(ma.push_pull_fields(), a), _same),
         "round_edge": ("Round an Edge", lambda a: _filled(_without(ma.fillet_fields(), "edges"), a), _same),
         "bevel_edge": ("Bevel an Edge", lambda a: _filled(_without(ma.chamfer_fields(), "edges"), a), _same),

@@ -341,6 +341,12 @@ def scenario_shell(window):
     window.shell_face(box.id, face_towards(box, (0, 0, 1)), 2.0)
 
 
+def scenario_shell_more_faces_walls_outside(window):
+    box = add(window)
+    top, side = face_towards(box, (0, 0, 1)), face_towards(box, (1, 0, 0))
+    window.shell_face(box.id, top, 2.0, more=[[side, (10.0, 0.0, 10.0)]], walls="outside")
+
+
 def scenario_push_pull(window):
     box = add(window)
     window.push_pull_face(box.id, face_towards(box, (1, 0, 0)), 5.0)
@@ -790,7 +796,7 @@ SAMPLE_ARGS = {
     "radius": 2.0, "count": 3, "spacing": 10.0, "count2": 1, "spacing2": 30.0, "axis2": "y",
     "centre": [0.0, 0.0, 0.0], "follow": False, "plane": "x", "open_top": False, "drain": 0.0,
     "pegs": False, "peg_diameter": 4.0, "join": False, "extent": False, "symmetric": False, "skip": "",
-    "how": "equal", "distance2": 1.0,
+    "how": "equal", "distance2": 1.0, "walls": "inside",
 }
 
 

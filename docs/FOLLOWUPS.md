@@ -127,15 +127,22 @@ tools do the closest honest version of their Fusion counterparts:
   Pre-existing: a stretched group's parts, once ungrouped, carry the stretch
   in their transforms, so a primitive's Details numbers show its size before
   the stretch (the same happens after dragging a group's handles today).
-- **Shell** leaves one clicked flat face open, or that face and the one
-  across from it; Fusion's free choice of any number of faces, and walls
-  grown outward instead of inward, are not offered. Boxes and cylinders (with
-  no bottom chamfer) are exact through their flat sides and ends. Anything
-  else is shelled approximately, the same way as Hollow out: the room inside
-  keeps a 24-sided ball's distance from the outside, so walls can come out a
-  little thinner in places, and a detailed part can take a few seconds. A
-  round surface is narrow flat strips, so clicking one opens just that strip,
-  and only with a wall thinner than the strip is wide.
+- **Shell** leaves open the flat face clicked, the one across from it if
+  asked, and any more faces clicked on the same part (picked faces are
+  drawn; Shell is chosen again to hollow it out). The walls go inside the
+  part (its outside keeps its shape), outside it (its inside keeps its
+  shape, and the walls stop level with each open face) or half each side.
+  Boxes and cylinders (with no bottom chamfer) are exact through their flat
+  sides and ends. Anything else is shelled approximately, the same way as
+  Hollow out: the room inside keeps a 24-sided ball's distance from the
+  outside, so walls can come out a little thinner in places; walls outside
+  are grown with the same ball, so their outside corners come out rounded
+  (Fusion keeps them sharp), and they are cut off level with an open face as
+  far as three walls from its edge, so beside a side curving gently away
+  from that face a low ridge can be left. A detailed part can take a few
+  seconds (several with walls on both sides). A round surface is narrow
+  flat strips, so clicking one opens just that strip, and only with a wall
+  thinner than the strip is wide.
 - **Push/Pull** moves the clicked flat face straight out or in, square to
   itself: the face's outline is pushed out as a new piece, or pushed in as a
   Hole. That is exact where the sides next to the face are square to it.

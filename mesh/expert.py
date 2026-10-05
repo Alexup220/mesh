@@ -155,9 +155,11 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "shell", "modify", "S&hell",
         "Click a flat face of a part to hollow it out with walls of an even thickness, "
-        "leaving that face open (and, if you like, the face across from it). Exact for "
+        "leaving that face open (and, if you like, the face across from it, or more faces "
+        "you click). The walls go inside the part, outside it, or half each side. Exact for "
         "boxes and cylinders through their flat sides and ends; other parts are shelled "
-        "approximately, and their walls can come out a little thinner in places.",
+        "approximately: walls inside can come out a little thinner in places, and walls "
+        "outside get rounded corners.",
         "do_shell",
     ),
     ExpertTool(

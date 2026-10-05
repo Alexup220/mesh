@@ -95,17 +95,30 @@ def ask_split_body(parent, parts) -> dict | None:
     )
 
 
+SHELL_WALLS = [
+    ("inside", "Inside the part (its outside keeps its shape)"),
+    ("outside", "Outside the part (its inside keeps its shape)"),
+    ("both", "Half inside, half outside"),
+]
+
+
 def shell_fields():
     return [
         ("wall", "Wall thickness (mm)", 2.0, {"min": 0.1, "max": 100.0}),
         ("far_side", "Also leave open the face across from it", False, {}),
+        ("walls", "Walls", "inside", {"choices": SHELL_WALLS}),
+        ("faces", "Leave open", "face", {"choices": [
+            ("face", "The face you clicked"),
+            ("more", "That face and others you click next (then choose Shell again)"),
+        ]}),
     ]
 
 
 APPROXIMATE_SHELL_NOTE = (
-    "This part is shelled approximately: the walls follow the outside evenly, but may come out "
-    "a little thinner in places than the number you type. Boxes and cylinders are shelled "
-    "exactly through their flat sides and ends."
+    "This part is shelled approximately: the walls follow the outside evenly, but walls inside "
+    "may come out a little thinner in places than the number you type, and walls outside get "
+    "rounded corners and are cut off level round each open face. Boxes and cylinders are "
+    "shelled exactly through their flat sides and ends."
 )
 
 
@@ -225,7 +238,7 @@ class ModifyActions:
     # The click-on-a-part tools of the Modify menu, their prompts, and the
     # method each click goes to.
     MODIFY_CLICK_TOOLS = ("align_from", "align_to", "shell", "push_pull", "fillet", "chamfer",
-                          "fillet_more", "chamfer_more")
+                          "fillet_more", "chamfer_more", "shell_more")
     MODIFY_TOOL_PROMPTS = {
         "align_from": "Click the flat face of the part to move. Esc cancels.",
         "align_to": "Now click the face to put it against. Esc cancels.",
@@ -237,6 +250,8 @@ class ModifyActions:
                        "out), then choose Round an Edge again to round them all. Esc cancels.",
         "chamfer_more": "Click next to more edges of the part to bevel (a picked edge again leaves it "
                         "out), then choose Bevel an Edge again to bevel them all. Esc cancels.",
+        "shell_more": "Click more flat faces of the part to leave open (a picked face again leaves it "
+                      "out), then choose Shell again to hollow it out. Esc cancels.",
     }
     MODIFY_CLICK_HANDLERS = {
         "align_from": "_align_from_picked",
@@ -247,6 +262,7 @@ class ModifyActions:
         "chamfer": "_edge_picked",
         "fillet_more": "_more_picked",
         "chamfer_more": "_more_picked",
+        "shell_more": "_more_picked",
     }
 
     # --- Move or Copy ------------------------------------------------------------
@@ -502,22 +518,36 @@ class ModifyActions:
     # --- Shell -------------------------------------------------------------------------
 
     def do_shell(self) -> None:
+        if self.tool == "shell_more":
+            self._finish_picking()
+            return
         self._start_face_tool("shell")
 
-    def _shell_picked(self, shape_id: str, face_index: int, _point=None) -> None:
+    def _shell_picked(self, shape_id: str, face_index: int, point=None) -> None:
         self._face_clicked("shell", shape_id, face_index,
-                           lambda shape: self._ask_shell(shape, face_index))
+                           lambda shape: self._ask_shell(shape, face_index, point))
 
-    def _ask_shell(self, shape, face_index: int) -> None:
+    def _ask_shell(self, shape, face_index: int, point=None) -> None:
         self.viewport.end_drag()
         values = ask_shell(self, modify.shells_exactly(shape))
-        if values is not None:
-            self.shell_face(shape.id, face_index, values["wall"], values["far_side"])
+        if values is None:
+            return
+        if values.get("faces") == "more":
+            self._start_picking("shell", shape, face_index, point, values)
+            return
+        self.shell_face(shape.id, face_index, values["wall"], values["far_side"],
+                        walls=values.get("walls", "inside"))
 
-    @replayable(("shape_id", "face_index"))
-    def shell_face(self, shape_id: str, face_index: int, wall: float, far_side: bool = False) -> bool:
+    @replayable(("shape_id", "face_index"), Clicks("shape_id", "more"))
+    def shell_face(self, shape_id: str, face_index: int, wall: float, far_side: bool = False,
+                   more=(), walls: str = "inside") -> bool:
         """Hollow out a part, leaving the face `face_index` open (and the
-        one across from it, with `far_side`). One undo step on success."""
+        one across from it, with `far_side`, and the faces of the further
+        clicks `more`: [face, point] pairs on the same part), with the walls
+        inside it, outside it or half each side (`walls`). One undo step on
+        success."""
+        if walls not in modify.SHELL_WALLS:
+            raise ValueError(f"unknown place for the walls {walls!r}")
         scene = self.document.scene
         try:
             shape = scene.get(shape_id)
@@ -525,7 +555,7 @@ class ModifyActions:
             return False
         group = self._attempt(
             "Cannot shell",
-            lambda: modify.shell(shape, face_index, wall, far_side, scene.fit_clearances),
+            lambda: modify.shell(shape, face_index, wall, far_side, scene.fit_clearances, more, walls),
         )
         if group is None:
             return False
@@ -586,6 +616,9 @@ class ModifyActions:
         """What a click picks for `tool`, as (what it is, the lines that
         show it). Raises BuildError if the click picks nothing."""
         fits = self.document.scene.fit_clearances
+        if tool == "shell":
+            face = modify.flat_face(shape, face_index, fits)
+            return frozenset(int(i) for i in face.faces), modify.face_outline(face)
         tm = edges._part_surface(shape, fits)
         run = edges.find_run(tm, face_index, point)
         return run.key, [edges.run_line(tm, run)]
@@ -633,6 +666,9 @@ class ModifyActions:
             self.bevel_edge(shape_id, first["face"], first["point"], values["distance"],
                             values.get("how", "equal"), values.get("distance2", 1.0),
                             values.get("angle", 45.0), more=more)
+        elif state["tool"] == "shell":
+            self.shell_face(shape_id, first["face"], values["wall"], values.get("far_side", False),
+                            more=more, walls=values.get("walls", "inside"))
 
     # --- Round or bevel an edge ----------------------------------------------------------
 
