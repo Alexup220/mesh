@@ -80,6 +80,13 @@ def _same(values: dict, _args: dict) -> dict:
     return values
 
 
+def _numbers(skip) -> str:
+    """Copy numbers to leave out, as the text their box shows."""
+    if isinstance(skip, (list, tuple)):
+        return ", ".join(str(n) for n in skip)
+    return str(skip or "")
+
+
 def editors() -> dict:
     """The tools whose steps can be changed: method -> (form title, the
     form's fields from the step's settings, the settings from the form's
@@ -108,26 +115,35 @@ def editors() -> dict:
                              _same),
         "split_body_selected": ("Split Body",
                                 lambda a: _filled(_without(ma.split_body_fields(nothing), "part"), a), _same),
-        "shell_face": ("Shell", lambda a: _filled(ma.shell_fields(), a), _same),
+        "shell_face": ("Shell", lambda a: _filled(_without(ma.shell_fields(), "faces"), a), _same),
         "push_pull_face": ("Push/Pull", lambda a: _filled(ma.push_pull_fields(), a), _same),
-        "round_edge": ("Round an Edge", lambda a: _filled(ma.fillet_fields(), a), _same),
-        "bevel_edge": ("Bevel an Edge", lambda a: _filled(ma.chamfer_fields(), a), _same),
+        "round_edge": ("Round an Edge", lambda a: _filled(_without(ma.fillet_fields(), "edges"), a), _same),
+        "bevel_edge": ("Bevel an Edge", lambda a: _filled(_without(ma.chamfer_fields(), "edges"), a), _same),
         "draft_selected": ("Slope the Sides",
                            lambda a: ma.draft_fields(abs(float(a["angle"])), "out" if a["angle"] < 0 else "in"),
                            lambda v, _a: {"angle": v["angle"] * (-1.0 if v["direction"] == "out" else 1.0)}),
-        "rectangular_pattern_selected": ("Pattern in Rows", lambda a: _filled(pa.rectangular_fields(), a), _same),
+        "rectangular_pattern_selected": (
+            "Pattern in Rows",
+            lambda a: _filled(pa.rectangular_fields("axis" if "selected" in (a["axis"], a["axis2"]) else None),
+                              {**a, "skip": _numbers(a.get("skip"))}),
+            _same),
         "circular_pattern_selected": (
-            "Pattern Around a Line", lambda a: _filled(pa.circular_fields(a["centre"]), a),
+            "Pattern Around a Line",
+            lambda a: _filled(pa.circular_fields(a["centre"]), {**a, "skip": _numbers(a.get("skip"))}),
             lambda v, _a: {"count": v["count"], "angle": v["angle"], "axis": v["axis"],
-                           "centre": [v["centre_x"], v["centre_y"], v["centre_z"]]}),
+                           "centre": [v["centre_x"], v["centre_y"], v["centre_z"]],
+                           "symmetric": v["symmetric"], "skip": v["skip"]}),
         "path_pattern_selected": (
             "Pattern Along a Path",
             lambda a: _filled(pa.path_fields(), {**a, "even": a["spacing"] is None,
-                                                 "spacing": a["spacing"] or 10.0}),
+                                                 "spacing": a["spacing"] or 10.0,
+                                                 "skip": _numbers(a.get("skip"))}),
             lambda v, _a: {"count": v["count"], "spacing": None if v["even"] else v["spacing"],
-                           "follow": v["follow"]}),
-        "mirror_copy_selected": ("Mirror", lambda a: [("plane", "Mirror across", a["plane"],
-                                                       {"choices": pa.MIRROR_PLANES[1:]})], _same),
+                           "follow": v["follow"], "skip": v["skip"]}),
+        "mirror_copy_selected": ("Mirror", lambda a: _filled(
+            [("plane", "Mirror across", a["plane"], {"choices": pa.MIRROR_PLANES[1:]}), pa.JOIN_FIELD], a),
+            _same),
+        "mirror_across_face": ("Mirror", lambda a: _filled([pa.JOIN_FIELD], a), _same),
         "plane_at_distance_selected": (
             "Plane at a Distance", lambda a: _filled(_without(ca.plane_distance_fields(), "source"), a), _same),
         "plane_from_face": (

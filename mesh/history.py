@@ -13,7 +13,8 @@ project and undone with it:
 
 - "call" is set for the tools that can run again (the window methods
   marked @replayable): {"method", "args": its settings, "picked": the ids
-  selected, in the order picked, "faces": where each clicked face was}.
+  selected, in the order picked, "faces": where each clicked face was (a
+  list of them for a list of further clicks)}.
   Such a step runs the tool again; a clicked face is found again by the
   way it faces and where it was (find_face).
 - "formulas" (only when used) is in "call": the step's settings that
@@ -37,6 +38,7 @@ replays them (mesh.history_actions).
 import copy
 import functools
 import inspect
+from typing import NamedTuple
 
 import re
 
@@ -212,6 +214,16 @@ def plain(value):
     raise TypeError(f"can't keep {type(value).__name__}")
 
 
+class Clicks(NamedTuple):
+    """A clicked-face spec for any number of further clicks on one part:
+    argument `picks` holds [face, point] pairs on the part whose id is in
+    argument `shape` (the more edges picked for a rounding, say). Read as
+    an (id argument, face argument) pair, its part is the one clicked."""
+
+    shape: str
+    picks: str
+
+
 def _face_args(spec, args):
     """(shape id, face index) of a clicked-face spec: an (id argument,
     face argument) pair, or one argument holding (id, face)."""
@@ -259,6 +271,10 @@ def placed_args(call: dict, faces, scene, clearances) -> dict:
     clicked point on it) found again on the parts as they are now."""
     args = copy.deepcopy(call["args"])
     for spec, hint in zip(faces, call.get("faces") or []):
+        if isinstance(spec, Clicks):
+            args[spec.picks] = _placed_clicks(args.get(spec.shape), args.get(spec.picks), hint,
+                                              scene, clearances)
+            continue
         shape_id, index = _face_args(spec, args)
         if hint is None or shape_id is None:
             continue
@@ -276,10 +292,45 @@ def placed_args(call: dict, faces, scene, clearances) -> dict:
     return args
 
 
+def _placed_clicks(shape_id, picks, hints, scene, clearances) -> list:
+    """Further clicks ([face, point] pairs) found again on the part as it
+    is now, each point moved as its face moved."""
+    picks = [list(p) for p in picks or []]
+    if not picks or not hints:
+        return picks
+    try:
+        shape = scene.get(shape_id)
+    except KeyError:
+        return picks  # the part's own clicked face says it's gone
+    placed = []
+    for pick, hint in zip(picks, hints):
+        if hint is None:
+            placed.append(pick)
+            continue
+        index, moved = find_face(shape, int(pick[0]), hint, clearances)
+        point = pick[1] if len(pick) > 1 else None
+        if point is not None:
+            point = (np.asarray(point, dtype=np.float64) + moved).tolist()
+        placed.append([index, point])
+    return placed
+
+
+def _clicks_hints(scene, shape_id, picks) -> list:
+    """Where each of further clicks ([face, point] pairs) on one part was."""
+    hints = []
+    for pick in picks or []:
+        try:
+            hints.append(face_hint(scene.get(shape_id), int(pick[0]), scene.fit_clearances))
+        except (KeyError, TypeError, ValueError, IndexError):
+            hints.append(None)
+    return hints
+
+
 def replayable(*faces):
     """Mark a window method as a tool the history can run again. `faces`
     names its clicked faces: (id argument, face argument) pairs, or the
-    name of one argument holding (id, face).
+    name of one argument holding (id, face), or Clicks for a list of
+    further clicks on one part.
 
     While the project keeps a history, the outermost such call is noted on
     the document, and the snapshot the method takes records it with its
@@ -317,6 +368,9 @@ def _call(scene, name: str, signature, faces, args, kwargs) -> dict | None:
         return None  # settings a file can't hold: the step replays its effect
     hints = []
     for spec in faces:
+        if isinstance(spec, Clicks):
+            hints.append(_clicks_hints(scene, settings.get(spec.shape), settings.get(spec.picks)))
+            continue
         shape_id, index = _face_args(spec, settings)
         try:
             hints.append(face_hint(scene.get(shape_id), int(index), scene.fit_clearances))

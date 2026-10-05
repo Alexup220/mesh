@@ -9,7 +9,7 @@ from PySide6.QtCore import QTimer
 
 from mesh import edges, features, modify
 from mesh.builders import GUIDES_ARE_NOT_PARTS, BuildError
-from mesh.history import replayable
+from mesh.history import Clicks, replayable
 from mesh.panels import run_form
 from mesh.shapes import is_reference
 
@@ -95,17 +95,30 @@ def ask_split_body(parent, parts) -> dict | None:
     )
 
 
+SHELL_WALLS = [
+    ("inside", "Inside the part (its outside keeps its shape)"),
+    ("outside", "Outside the part (its inside keeps its shape)"),
+    ("both", "Half inside, half outside"),
+]
+
+
 def shell_fields():
     return [
         ("wall", "Wall thickness (mm)", 2.0, {"min": 0.1, "max": 100.0}),
         ("far_side", "Also leave open the face across from it", False, {}),
+        ("walls", "Walls", "inside", {"choices": SHELL_WALLS}),
+        ("faces", "Leave open", "face", {"choices": [
+            ("face", "The face you clicked"),
+            ("more", "That face and others you click next (then choose Shell again)"),
+        ]}),
     ]
 
 
 APPROXIMATE_SHELL_NOTE = (
-    "This part is shelled approximately: the walls follow the outside evenly, but may come out "
-    "a little thinner in places than the number you type. Boxes and cylinders are shelled "
-    "exactly through their flat sides and ends."
+    "This part is shelled approximately: the walls follow the outside evenly, but walls inside "
+    "may come out a little thinner in places than the number you type, and walls outside get "
+    "rounded corners and are cut off level round each open face. Boxes and cylinders are "
+    "shelled exactly through their flat sides and ends."
 )
 
 
@@ -129,14 +142,27 @@ def ask_push_pull(parent) -> dict | None:
 
 
 EDGE_NOTE = (
-    "{what} the edge next to where you clicked, and the edges it runs on into smoothly (all "
-    "the way round a cylinder's rim, say). Where {done} edges meet at a corner, the corner "
-    "is not blended into a ball."
+    "{what} the edge next to where you clicked and the edges it runs on into smoothly (all "
+    "the way round a cylinder's rim, say); or every edge round the face you clicked; or that "
+    "edge and others you click next, all in one go. Where {done} edges meet at a corner, the "
+    "corner is not blended into a ball: the two meet in a crease."
 )
 
 
+def edge_choices(tool: str):
+    """Which edges a rounding or bevel changes; `tool` is its menu name."""
+    return [
+        ("edge", "The edge next to where you clicked (and those it runs on into)"),
+        ("face", "Every edge round the face you clicked"),
+        ("more", f"That edge and others you click next (then choose {tool} again)"),
+    ]
+
+
 def fillet_fields():
-    return [("radius", "Radius (mm)", 2.0, {"min": 0.01, "max": 1000.0})]
+    return [
+        ("radius", "Radius (mm)", 2.0, {"min": 0.01, "max": 1000.0}),
+        ("edges", "Round", "edge", {"choices": edge_choices("Round an Edge")}),
+    ]
 
 
 FILLET_NOTE = EDGE_NOTE.format(what="Rounds", done="rounded")
@@ -146,11 +172,27 @@ def ask_fillet(parent) -> dict | None:
     return run_form(parent, "Round an Edge", fillet_fields(), note=FILLET_NOTE)
 
 
+BEVEL_SET_BACKS = [
+    ("equal", "The same distance back on both faces"),
+    ("two", "That far along the face you clicked, and a second distance along the other"),
+    ("angle", "That far along the face you clicked, then sloping at an angle from it"),
+]
+
+
 def chamfer_fields():
-    return [("distance", "Set back along each face (mm)", 1.0, {"min": 0.01, "max": 1000.0})]
+    return [
+        ("distance", "Set back from the edge (mm)", 1.0, {"min": 0.01, "max": 1000.0}),
+        ("how", "Set back", "equal", {"choices": BEVEL_SET_BACKS}),
+        ("distance2", "Second distance, along the other face (mm)", 1.0, {"min": 0.01, "max": 1000.0}),
+        ("angle", "Angle from the face you clicked (degrees)", 45.0, {"min": 0.1, "max": 179.0}),
+        ("edges", "Bevel", "edge", {"choices": edge_choices("Bevel an Edge")}),
+    ]
 
 
-CHAMFER_NOTE = EDGE_NOTE.format(what="Bevels flat", done="bevelled")
+CHAMFER_NOTE = EDGE_NOTE.format(what="Bevels flat", done="bevelled") + (
+    " The bevel can be set back the same on both faces, a different distance on each, or a "
+    "distance along the face you clicked and an angle from it."
+)
 
 
 def ask_chamfer(parent) -> dict | None:
@@ -195,7 +237,8 @@ class ModifyActions:
 
     # The click-on-a-part tools of the Modify menu, their prompts, and the
     # method each click goes to.
-    MODIFY_CLICK_TOOLS = ("align_from", "align_to", "shell", "push_pull", "fillet", "chamfer")
+    MODIFY_CLICK_TOOLS = ("align_from", "align_to", "shell", "push_pull", "fillet", "chamfer",
+                          "fillet_more", "chamfer_more", "shell_more")
     MODIFY_TOOL_PROMPTS = {
         "align_from": "Click the flat face of the part to move. Esc cancels.",
         "align_to": "Now click the face to put it against. Esc cancels.",
@@ -203,6 +246,12 @@ class ModifyActions:
         "push_pull": "Click the flat face of a part to push in or pull out. Esc cancels.",
         "fillet": "Click a face of a part, next to the edge to round. Esc cancels.",
         "chamfer": "Click a face of a part, next to the edge to bevel. Esc cancels.",
+        "fillet_more": "Click next to more edges of the part to round (a picked edge again leaves it "
+                       "out), then choose Round an Edge again to round them all. Esc cancels.",
+        "chamfer_more": "Click next to more edges of the part to bevel (a picked edge again leaves it "
+                        "out), then choose Bevel an Edge again to bevel them all. Esc cancels.",
+        "shell_more": "Click more flat faces of the part to leave open (a picked face again leaves it "
+                      "out), then choose Shell again to hollow it out. Esc cancels.",
     }
     MODIFY_CLICK_HANDLERS = {
         "align_from": "_align_from_picked",
@@ -211,6 +260,9 @@ class ModifyActions:
         "push_pull": "_push_pull_picked",
         "fillet": "_edge_picked",
         "chamfer": "_edge_picked",
+        "fillet_more": "_more_picked",
+        "chamfer_more": "_more_picked",
+        "shell_more": "_more_picked",
     }
 
     # --- Move or Copy ------------------------------------------------------------
@@ -466,22 +518,36 @@ class ModifyActions:
     # --- Shell -------------------------------------------------------------------------
 
     def do_shell(self) -> None:
+        if self.tool == "shell_more":
+            self._finish_picking()
+            return
         self._start_face_tool("shell")
 
-    def _shell_picked(self, shape_id: str, face_index: int, _point=None) -> None:
+    def _shell_picked(self, shape_id: str, face_index: int, point=None) -> None:
         self._face_clicked("shell", shape_id, face_index,
-                           lambda shape: self._ask_shell(shape, face_index))
+                           lambda shape: self._ask_shell(shape, face_index, point))
 
-    def _ask_shell(self, shape, face_index: int) -> None:
+    def _ask_shell(self, shape, face_index: int, point=None) -> None:
         self.viewport.end_drag()
         values = ask_shell(self, modify.shells_exactly(shape))
-        if values is not None:
-            self.shell_face(shape.id, face_index, values["wall"], values["far_side"])
+        if values is None:
+            return
+        if values.get("faces") == "more":
+            self._start_picking("shell", shape, face_index, point, values)
+            return
+        self.shell_face(shape.id, face_index, values["wall"], values["far_side"],
+                        walls=values.get("walls", "inside"))
 
-    @replayable(("shape_id", "face_index"))
-    def shell_face(self, shape_id: str, face_index: int, wall: float, far_side: bool = False) -> bool:
+    @replayable(("shape_id", "face_index"), Clicks("shape_id", "more"))
+    def shell_face(self, shape_id: str, face_index: int, wall: float, far_side: bool = False,
+                   more=(), walls: str = "inside") -> bool:
         """Hollow out a part, leaving the face `face_index` open (and the
-        one across from it, with `far_side`). One undo step on success."""
+        one across from it, with `far_side`, and the faces of the further
+        clicks `more`: [face, point] pairs on the same part), with the walls
+        inside it, outside it or half each side (`walls`). One undo step on
+        success."""
+        if walls not in modify.SHELL_WALLS:
+            raise ValueError(f"unknown place for the walls {walls!r}")
         scene = self.document.scene
         try:
             shape = scene.get(shape_id)
@@ -489,7 +555,7 @@ class ModifyActions:
             return False
         group = self._attempt(
             "Cannot shell",
-            lambda: modify.shell(shape, face_index, wall, far_side, scene.fit_clearances),
+            lambda: modify.shell(shape, face_index, wall, far_side, scene.fit_clearances, more, walls),
         )
         if group is None:
             return False
@@ -529,12 +595,93 @@ class ModifyActions:
         self._replace_with("push/pull", shape, [group])
         return True
 
+    # --- Picking more edges or faces of the same part --------------------------------------
+
+    PICKED = "Picked: {count}. {prompt}"
+    SAME_PART = "Click the same part as before. {prompt}"
+    NOTHING_PICKED = "Nothing is picked. {prompt}"
+
+    def _start_picking(self, tool: str, shape, face_index: int, point, values: dict) -> None:
+        """Keep `tool` waiting for more clicks on `shape`, the click
+        (`face_index`, `point`) already picked and the form's `values` kept
+        for when the tool is chosen again. Nothing changes yet: no undo step."""
+        self._picking = {"tool": tool, "shape_id": shape.id, "values": values, "picks": []}
+        self.start_tool(f"{tool}_more")
+        try:
+            self._toggle_pick(shape, face_index, point)
+        except BuildError:
+            pass  # the first click was checked already
+
+    def _pick_mark(self, tool: str, shape, face_index: int, point):
+        """What a click picks for `tool`, as (what it is, the lines that
+        show it). Raises BuildError if the click picks nothing."""
+        fits = self.document.scene.fit_clearances
+        if tool == "shell":
+            face = modify.flat_face(shape, face_index, fits)
+            return frozenset(int(i) for i in face.faces), modify.face_outline(face)
+        tm = edges._part_surface(shape, fits)
+        run = edges.find_run(tm, face_index, point)
+        return run.key, [edges.run_line(tm, run)]
+
+    def _toggle_pick(self, shape, face_index: int, point) -> None:
+        state = self._picking
+        key, lines = self._pick_mark(state["tool"], shape, face_index, point)
+        picks = state["picks"]
+        again = [i for i, pick in enumerate(picks) if pick["key"] == key]
+        if again:
+            del picks[again[0]]
+        else:
+            picks.append({"face": int(face_index), "point": point, "key": key, "lines": lines})
+        self.viewport.set_marked_lines([line for pick in picks for line in pick["lines"]])
+        self.statusBar().showMessage(self.PICKED.format(count=len(picks), prompt=self.TOOL_PROMPTS[self.tool]))
+
+    def _more_picked(self, shape_id: str, face_index: int, point=None) -> None:
+        """A further click while picking: pick what it lands on, or leave
+        it out if it was picked already. Nothing changes yet: no undo step."""
+        prompt = self.TOOL_PROMPTS[self.tool]
+        if shape_id != self._picking["shape_id"]:
+            self.statusBar().showMessage(self.SAME_PART.format(prompt=prompt))
+            return
+        try:
+            self._toggle_pick(self.document.scene.get(shape_id), face_index, point)
+        except KeyError:
+            self.statusBar().showMessage(prompt)
+        except BuildError as exc:
+            self.statusBar().showMessage(f"{exc} {prompt}")
+
+    def _finish_picking(self) -> None:
+        """The tool was chosen again: change everything picked, in one go."""
+        state = self._picking
+        if not state["picks"]:
+            self.statusBar().showMessage(self.NOTHING_PICKED.format(prompt=self.TOOL_PROMPTS[self.tool]))
+            return
+        self._clear_tool()
+        self.sync()
+        first, *rest = state["picks"]
+        more = [[pick["face"], pick["point"]] for pick in rest]
+        values, shape_id = state["values"], state["shape_id"]
+        if state["tool"] == "fillet":
+            self.round_edge(shape_id, first["face"], first["point"], values["radius"], more=more)
+        elif state["tool"] == "chamfer":
+            self.bevel_edge(shape_id, first["face"], first["point"], values["distance"],
+                            values.get("how", "equal"), values.get("distance2", 1.0),
+                            values.get("angle", 45.0), more=more)
+        elif state["tool"] == "shell":
+            self.shell_face(shape_id, first["face"], values["wall"], values.get("far_side", False),
+                            more=more, walls=values.get("walls", "inside"))
+
     # --- Round or bevel an edge ----------------------------------------------------------
 
     def do_fillet(self) -> None:
+        if self.tool == "fillet_more":
+            self._finish_picking()
+            return
         self._start_face_tool("fillet")
 
     def do_chamfer(self) -> None:
+        if self.tool == "chamfer_more":
+            self._finish_picking()
+            return
         self._start_face_tool("chamfer")
 
     def _edge_picked(self, shape_id: str, face_index: int, point=None) -> None:
@@ -557,14 +704,19 @@ class ModifyActions:
 
     def _ask_edge(self, tool: str, shape, face_index: int, point) -> None:
         self.viewport.end_drag()
+        values = ask_fillet(self) if tool == "fillet" else ask_chamfer(self)
+        if values is None:
+            return
+        which = values.get("edges", "edge")
+        if which == "more":
+            self._start_picking(tool, shape, face_index, point, values)
+            return
+        whole = which == "face"
         if tool == "fillet":
-            values = ask_fillet(self)
-            if values is not None:
-                self.round_edge(shape.id, face_index, point, values["radius"])
+            self.round_edge(shape.id, face_index, point, values["radius"], whole)
         else:
-            values = ask_chamfer(self)
-            if values is not None:
-                self.bevel_edge(shape.id, face_index, point, values["distance"])
+            self.bevel_edge(shape.id, face_index, point, values["distance"], values.get("how", "equal"),
+                            values.get("distance2", 1.0), values.get("angle", 45.0), whole)
 
     def _change_edge(self, label: str, title: str, shape_id: str, build) -> bool:
         scene = self.document.scene
@@ -578,22 +730,36 @@ class ModifyActions:
         self._replace_with(label, shape, [group])
         return True
 
-    @replayable(("shape_id", "face_index"))
-    def round_edge(self, shape_id: str, face_index: int, point, radius: float) -> bool:
+    @replayable(("shape_id", "face_index"), Clicks("shape_id", "more"))
+    def round_edge(self, shape_id: str, face_index: int, point, radius: float,
+                   whole_face: bool = False, more=()) -> bool:
         """Round the edge of the clicked face nearest `point`, and the run
-        it belongs to. One undo step on success."""
+        it belongs to (with `whole_face`, every edge round that face), and
+        the edges of the further clicks `more` ([face, point] pairs on the
+        same part), all at once. One undo step on success."""
         return self._change_edge(
             "round edge", "Cannot round the edge", shape_id,
-            lambda shape, fits: edges.fillet(shape, face_index, point, radius, fits),
+            lambda shape, fits: edges.fillet(shape, face_index, point, radius, fits, whole_face, more),
         )
 
-    @replayable(("shape_id", "face_index"))
-    def bevel_edge(self, shape_id: str, face_index: int, point, distance: float) -> bool:
+    @replayable(("shape_id", "face_index"), Clicks("shape_id", "more"))
+    def bevel_edge(self, shape_id: str, face_index: int, point, distance: float, how: str = "equal",
+                   distance2: float = 1.0, angle: float = 45.0, whole_face: bool = False,
+                   more=()) -> bool:
         """Bevel the edge of the clicked face nearest `point`, and the run
-        it belongs to. One undo step on success."""
+        it belongs to: set back `distance` on both faces ("equal"), or along
+        the face clicked and `distance2` along the other ("two"), or along
+        the face clicked at `angle` degrees from it ("angle"). `whole_face`
+        and `more` pick further edges, as for round_edge. One undo step on
+        success."""
+        if how not in ("equal", "two", "angle"):
+            raise ValueError(f"unknown way to set a bevel back {how!r}")
+        second = distance2 if how == "two" else None
+        slope = angle if how == "angle" else None
         return self._change_edge(
             "chamfer edge", "Cannot bevel the edge", shape_id,
-            lambda shape, fits: edges.chamfer(shape, face_index, point, distance, fits),
+            lambda shape, fits: edges.chamfer(shape, face_index, point, distance, fits, second, slope,
+                                              whole_face, more),
         )
 
     # --- Draft: sloped sides -------------------------------------------------------------

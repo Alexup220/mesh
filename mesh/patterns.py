@@ -7,7 +7,8 @@ patterned Hole still cuts once grouped. Sketches are guides: they are never
 copied here, and a sketch can be the path or the mirror plane. A request
 that can't be met raises BuildError with a plain message.
 
-    rectangular  rows and columns along two of the world's directions
+    rectangular  rows and columns along two directions: the world's, or a
+                 construction axis's
     circular     round a line through a point, along one of the world's
                  directions (Repeat in a Circle, extended: any of the three
                  lines, several parts at once, and the parts stay where
@@ -16,7 +17,11 @@ that can't be met raises BuildError with a plain message.
                  place relative to the path's start, and optionally turning
                  with it
     mirrored     reflected across a plane: a sketch's, a flat face's, or one
-                 of the middle planes through 0
+                 of the middle planes through 0 (mirrored_into_one also
+                 joins each image to its part, as Combine's Join does)
+
+Rows and Around a Line can also go both ways from the parts (symmetric),
+and every pattern can leave out copies by their number (the parts are 1).
 
 All exact: copies are the same shapes moved, turned or reflected. Along a
 curved path the copies sit on the path's straight pieces (64 per circle).
@@ -29,7 +34,7 @@ import numpy as np
 
 from mesh import create, sketch
 from mesh.builders import GUIDES_ARE_NOT_PARTS, MAX_COPIES, BuildError, _check_count, _copy
-from mesh.modify import MOVE_LIMIT, _bounds, flat_face
+from mesh.modify import MOVE_LIMIT, _bounds, combine, flat_face
 from mesh.ops import AXES, _canonical
 from mesh.shapes import is_reference
 
@@ -69,33 +74,110 @@ def _distance(value: float, what: str) -> float:
     return value
 
 
+# --- Leaving copies out -------------------------------------------------------------
+
+LEAVE_OUT_HINT = "Type the numbers of the copies to leave out, such as 3, 5 or 7-9."
+
+
+def copy_numbers(text) -> list[int]:
+    """The copy numbers typed as text ("3, 5, 7-9"), or given as a list of
+    numbers already. Nothing typed means none."""
+    if isinstance(text, (list, tuple)):
+        try:
+            return sorted({int(v) for v in text})
+        except (TypeError, ValueError) as exc:
+            raise BuildError(LEAVE_OUT_HINT) from exc
+    numbers = set()
+    for piece in str(text or "").replace(";", ",").replace(" ", ",").split(","):
+        if not piece:
+            continue
+        low, dash, high = piece.partition("-")
+        try:
+            first = int(low)
+            last = int(high) if dash else first
+        except ValueError as exc:
+            raise BuildError(LEAVE_OUT_HINT) from exc
+        if last < first or last - first > MAX_COPIES:
+            raise BuildError(LEAVE_OUT_HINT)
+        numbers.update(range(first, last + 1))
+    return sorted(numbers)
+
+
+def _left_out(skip, total: int) -> set[int]:
+    """The numbers in `skip`, checked against a pattern of `total` (the
+    parts are number 1)."""
+    numbers = set(copy_numbers(skip))
+    if 1 in numbers:
+        raise BuildError("Number 1 is the parts themselves, so it can't be left out.")
+    beyond = [n for n in sorted(numbers) if not 2 <= n <= total]
+    if beyond:
+        raise BuildError(f"The pattern has {total} in all, so there is no number {beyond[0]} to leave out.")
+    if len(numbers) >= total - 1:
+        raise BuildError("That would leave out every copy.")
+    return numbers
+
+
+def _steps(count: int, symmetric: bool) -> list[int]:
+    """How many steps from the parts each place in a row is, in the order
+    they are numbered: the parts, then one way, then (both ways) the other."""
+    return list(range(count)) + ([-i for i in range(1, count)] if symmetric else [])
+
+
 # --- Rectangular --------------------------------------------------------------------
 
 
-def rectangular(shapes, count: int, spacing: float, axis: str = "x",
-                count2: int = 1, spacing2: float = 10.0, axis2: str = "y") -> list:
+def _direction(axis) -> np.ndarray:
+    """A row's direction: one of the world's ("x", "y", "z"), or any
+    direction given as three numbers (a construction axis's, say)."""
+    if isinstance(axis, str):
+        if axis not in AXES:
+            raise ValueError(f"unknown direction {axis!r}")
+        out = np.zeros(3)
+        out[AXES[axis]] = 1.0
+        return out
+    out = np.asarray([float(v) for v in axis], dtype=np.float64)
+    length = float(np.linalg.norm(out)) if out.shape == (3,) else 0.0
+    if not math.isfinite(length) or length < 1e-9:
+        raise BuildError("The direction for the rows has no length.")
+    return out / length
+
+
+def rectangular(shapes, count: int, spacing: float, axis="x", count2: int = 1,
+                spacing2: float = 10.0, axis2="y", extent: bool = False,
+                symmetric: bool = False, skip=()) -> list:
     """Copies of the parts in rows along `axis` (`count` in a row,
     `spacing` mm apart, less than 0 going the other way) and, with `count2`
-    more than 1, columns along `axis2`. Counts include the originals."""
+    more than 1, columns along `axis2`. A direction is "x", "y", "z" or
+    three numbers. Counts include the originals.
+
+    With `extent`, each spacing is the whole length from the parts to the
+    last copy instead of the gap from one to the next. With `symmetric`,
+    each row (and column) goes the same again the other way from the parts.
+    `skip` lists the numbers of copies to leave out: the parts are 1, then
+    along the first row (the other way after, both ways), row by row."""
     parts = _parts(shapes)
-    if axis not in AXES or axis2 not in AXES:
-        raise ValueError(f"unknown direction {axis!r} or {axis2!r}")
+    first_way, second_way = _direction(axis), _direction(axis2)
     count, count2 = int(count), int(count2)
     if count < 1 or count2 < 1:
         raise BuildError("Each direction needs at least 1 in a row.")
-    _check_count(count * count2)
-    _check_total(count * count2, parts)
+    along, across = _steps(count, symmetric), _steps(count2, symmetric)
+    total = len(along) * len(across)
+    _check_count(total)
+    _check_total(total, parts)
     first = _distance(spacing, "spacing") if count > 1 else 0.0
     second = _distance(spacing2, "spacing") if count2 > 1 else 0.0
-    if count > 1 and count2 > 1 and axis == axis2:
+    if extent:
+        first, second = first / max(count - 1, 1), second / max(count2 - 1, 1)
+    if count > 1 and count2 > 1 and np.linalg.norm(np.cross(first_way, second_way)) < 1e-9:
         raise BuildError("Choose two different directions for the rows and the columns.")
-    step, step2 = np.zeros(3), np.zeros(3)
-    step[AXES[axis]] = first
-    step2[AXES[axis2]] = second
+    left_out = _left_out(skip, total)
+    step, step2 = first * first_way, second * second_way
     out = []
-    for j in range(count2):
-        for i in range(count):
-            if i == 0 and j == 0:
+    number = 0
+    for j in across:
+        for i in along:
+            number += 1
+            if (i == 0 and j == 0) or number in left_out:
                 continue
             matrix = np.eye(4)
             matrix[:3, 3] = i * step + j * step2
@@ -106,37 +188,49 @@ def rectangular(shapes, count: int, spacing: float, axis: str = "x",
 # --- Circular -----------------------------------------------------------------------
 
 
-def circular(shapes, count: int, axis: str = "z", centre=(0.0, 0.0, 0.0), angle: float = 360.0) -> list:
+def circular(shapes, count: int, axis: str = "z", centre=(0.0, 0.0, 0.0), angle: float = 360.0,
+             symmetric: bool = False, skip=()) -> list:
     """Copies of the parts turned round the line along `axis` through
     `centre`, anticlockwise seen from the line's positive end. A full 360
     degrees spaces them evenly all the way round; a smaller angle puts the
     first and last exactly that far apart. The parts stay where they are,
-    and `count` includes them."""
+    and `count` includes them. With `symmetric`, the same again the other
+    way round (the count and the angle each way); `skip` as rectangular,
+    numbered round from the parts."""
     if axis not in AXES:
         raise ValueError(f"unknown direction {axis!r}")
     direction = np.zeros(3)
     direction[AXES[axis]] = 1.0
-    return circular_about(shapes, count, centre, direction, angle)
+    return circular_about(shapes, count, centre, direction, angle, symmetric, skip)
 
 
-def circular_about(shapes, count: int, point, direction, angle: float = 360.0) -> list:
+def circular_about(shapes, count: int, point, direction, angle: float = 360.0,
+                   symmetric: bool = False, skip=()) -> list:
     """As circular, round the line through `point` along `direction` (a
     construction axis, say), anticlockwise seen from its tip."""
     parts = _parts(shapes)
     count = _check_count(count)
-    _check_total(count, parts)
+    turns = _steps(count, symmetric)
+    _check_count(len(turns))
+    _check_total(len(turns), parts)
     angle = float(angle)
     if not math.isfinite(angle) or not 0.0 < angle <= 360.0:
         raise BuildError("The angle must be more than 0 and at most 360 degrees.")
+    if symmetric and angle >= 180.0:
+        raise BuildError("Both ways, the angle each way must be less than 180 degrees, so the two "
+                         "sides don't meet.")
     centre = np.asarray([float(v) for v in point], dtype=np.float64)
     if centre.shape != (3,) or not np.isfinite(centre).all():
         raise BuildError("Type ordinary numbers for the centre.")
+    left_out = _left_out(skip, len(turns))
     k = np.asarray(direction, dtype=np.float64)
     k = k / np.linalg.norm(k)
     full = angle >= 360.0 - 1e-9
     step = angle / count if full else angle / (count - 1)
     out = []
-    for i in range(1, count):
+    for number, i in enumerate(turns, 1):
+        if i == 0 or number in left_out:
+            continue
         a = math.radians(i * step)
         cross = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
         turn = np.eye(3) * math.cos(a) + math.sin(a) * cross + (1.0 - math.cos(a)) * np.outer(k, k)
@@ -235,16 +329,19 @@ def _path(guide, near) -> tuple[_Path, np.ndarray]:
     return _Path(points, closed, starts, lengths, headings), frame
 
 
-def along_path(shapes, guide, count: int, spacing: float | None = None, follow: bool = False) -> list:
+def along_path(shapes, guide, count: int, spacing: float | None = None, follow: bool = False,
+               skip=()) -> list:
     """Copies of the parts along the sketch `guide`'s path, from the end
     nearest them (round a closed path, from the point nearest them):
     `spacing` mm apart along it, or spread evenly over the whole path for
     None. Each copy keeps the parts' place relative to the path's start;
     with `follow`, it also turns as the path turns. `count` includes the
-    originals."""
+    originals; `skip` lists copies to leave out, numbered along the path
+    from the parts (1)."""
     parts = _parts(shapes)
     count = _check_count(count)
     _check_total(count, parts)
+    left_out = _left_out(skip, count)
     path, frame = _path(guide, _bounds(parts).mean(axis=0))
     total = path.length
     if spacing is None:
@@ -263,6 +360,8 @@ def along_path(shapes, guide, count: int, spacing: float | None = None, follow: 
     back = np.linalg.inv(frame)
     out = []
     for i in range(1, count):
+        if i + 1 in left_out:
+            continue
         s = i * spacing
         local = np.eye(4)
         if follow:
@@ -296,6 +395,26 @@ def mirrored(shapes, origin, normal) -> list:
     for clone in out:
         clone.name = f"{clone.name} (mirrored)"
     return out
+
+
+def mirrored_into_one(shapes, origin, normal) -> list:
+    """Each part joined with its mirror image across the plane into one
+    part, as Combine's Join joins two parts: a group per part, which
+    Ungroup takes apart into the part and its image. The image need not
+    touch the part. Holes are refused: joined, a Hole's fit could no
+    longer be added exactly."""
+    holes = [s for s in shapes if s.is_hole and not is_reference(s)]
+    if holes:
+        raise BuildError(
+            f"Joining a mirror image to its part works on solid parts, and {holes[0].name} is a "
+            "Hole. Mirror it as a separate copy, or group it with its part first."
+        )
+    joined = []
+    for part, image in zip(shapes, mirrored(shapes, origin, normal)):
+        group = combine(part, [image], "union")
+        group.name = f"{part.name} (mirrored, joined)"
+        joined.append(group)
+    return joined
 
 
 def plane_of_sketch(guide) -> tuple[np.ndarray, np.ndarray]:

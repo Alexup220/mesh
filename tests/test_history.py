@@ -179,6 +179,18 @@ def test_a_face_is_found_again_when_the_triangles_changed():
     assert tm.triangles_center[found][2] == pytest.approx(tm.bounds[1][2])
 
 
+def test_further_clicks_are_found_again_on_a_part_that_grew():
+    box = new_primitive("cube")
+    top, side = face_towards(box, (0, 0, 1)), face_towards(box, (1, 0, 0))
+    faces = (("shape_id", "face_index"), history.Clicks("shape_id", "more"))
+    args = {"shape_id": box.id, "face_index": top, "point": [0.0, -10.0, 20.0], "more": [[side, [10.0, 0.0, 1.0]]]}
+    call = {"args": args, "faces": [history.face_hint(box, top, None), [history.face_hint(box, side, None)]]}
+    box.params["width"] = 40.0
+    placed = history.placed_args(call, faces, Scene(shapes=[box]), None)
+    assert placed["more"][0][0] == side and np.allclose(placed["more"][0][1], [20.0, 0.0, 1.0])
+    assert args["more"][0][1] == [10.0, 0.0, 1.0]  # the recorded settings are left as they were
+
+
 def test_a_face_that_is_gone_is_refused():
     box = new_primitive("cube")
     hint = {"centre": [0, 0, 0], "normal": list(np.ones(3) / np.sqrt(3))}
@@ -261,7 +273,8 @@ def test_a_tool_records_its_call_and_where_its_face_was(window):
     assert [s["label"] for s in steps] == ["add", "round edge"]
     call = steps[1]["call"]
     assert call["method"] == "round_edge" and call["picked"] == [box.id]
-    assert call["args"] == {"shape_id": box.id, "face_index": face, "point": [10.0, 0.0, 20.0], "radius": 3.0}
+    assert call["args"] == {"shape_id": box.id, "face_index": face, "point": [10.0, 0.0, 20.0], "radius": 3.0,
+                            "whole_face": False, "more": []}
     assert np.allclose(call["faces"][0]["normal"], [0, 0, 1])
     assert steps[0]["call"] is None
     assert history.describe(steps[1]).startswith("Round edge: ")
@@ -328,6 +341,12 @@ def scenario_shell(window):
     window.shell_face(box.id, face_towards(box, (0, 0, 1)), 2.0)
 
 
+def scenario_shell_more_faces_walls_outside(window):
+    box = add(window)
+    top, side = face_towards(box, (0, 0, 1)), face_towards(box, (1, 0, 0))
+    window.shell_face(box.id, top, 2.0, more=[[side, (10.0, 0.0, 10.0)]], walls="outside")
+
+
 def scenario_push_pull(window):
     box = add(window)
     window.push_pull_face(box.id, face_towards(box, (1, 0, 0)), 5.0)
@@ -343,6 +362,43 @@ def scenario_bevel_edge(window):
     window.bevel_edge(box.id, face_towards(box, (0, 0, 1)), (10.0, 0.0, 20.0), 2.0)
 
 
+def scenario_bevel_edge_unevenly(window):
+    box = add(window)
+    window.bevel_edge(box.id, face_towards(box, (0, 0, 1)), (10.0, 0.0, 20.0), 2.0, "two", 3.0)
+    group = window.document.scene.selected()[0]
+    window.bevel_edge(group.id, face_towards(group, (1, 0, 0)), (10.0, 5.0, 10.0), 1.5, "angle", angle=30.0)
+
+
+def scenario_round_edges_of_a_face(window):
+    box = add(window)
+    window.round_edge(box.id, face_towards(box, (0, 0, 1)), (10.0, 0.0, 20.0), 2.0, whole_face=True)
+
+
+def scenario_round_more_edges(window):
+    box = add(window)
+    top, side = face_towards(box, (0, 0, 1)), face_towards(box, (1, 0, 0))
+    window.round_edge(box.id, top, (10.0, 0.0, 20.0), 2.0, more=[[top, (0.0, -10.0, 20.0)], [side, (10.0, 0.0, 1.0)]])
+
+
+def scenario_bevel_more_edges(window):
+    box = add(window)
+    top, side = face_towards(box, (0, 0, 1)), face_towards(box, (1, 0, 0))
+    window.bevel_edge(box.id, top, (0.0, -10.0, 20.0), 1.0, "two", 2.0, more=[[side, (10.0, 0.0, 1.0)]])
+
+
+def test_more_edges_follow_their_part_when_an_earlier_step_changes(window):
+    window.start_history()
+    box = add(window)
+    window.scale_selected(150.0)
+    top, side = face_towards(box, (0, 0, 1)), face_towards(box, (1, 0, 0))
+    assert window.round_edge(box.id, top, (15.0, 0.0, 30.0), 2.0, more=[[side, (15.0, 0.0, 1.0)]])
+    assert window.change_history_step(1, {"size": 200.0})
+    [group] = window.document.scene.shapes
+    tm = shape_geometry(group)
+    assert np.allclose(tm.bounds, [[-20, -20, 0], [20, 20, 40]])
+    assert len(group.params["children"]) == 3
+
+
 def scenario_draft(window):
     add(window)
     window.draft_selected(5.0)
@@ -353,9 +409,26 @@ def scenario_rectangular(window):
     window.rectangular_pattern_selected(3, 30.0, "x", 2, 25.0, "y")
 
 
+def scenario_rectangular_both_ways(window):
+    add(window)
+    window.rectangular_pattern_selected(3, 60.0, "x", 2, 25.0, "z", extent=True, symmetric=True, skip="2, 7")
+
+
+def scenario_rectangular_along_an_axis(window):
+    box = add(window)
+    window.axis_through_spots([(0.0, 0.0, 0.0), (1.0, 1.0, 0.0)])
+    pick(window, box, window.document.scene.selected()[0])
+    window.rectangular_pattern_selected(3, 30.0, "selected")
+
+
 def scenario_circular(window):
     add(window)
     window.circular_pattern_selected(4, "z", (40.0, 0.0, 0.0), 360.0)
+
+
+def scenario_circular_both_ways(window):
+    add(window)
+    window.circular_pattern_selected(3, "z", (40.0, 0.0, 0.0), 90.0, symmetric=True, skip=[3])
 
 
 def scenario_path(window):
@@ -363,6 +436,13 @@ def scenario_path(window):
     path = add_sketch(window, LINE)
     pick(window, box, path)
     window.path_pattern_selected(3)
+
+
+def scenario_path_leaving_out(window):
+    box = add(window)
+    path = add_sketch(window, LINE)
+    pick(window, box, path)
+    window.path_pattern_selected(4, 15.0, skip="3")
 
 
 def scenario_mirror_copy(window):
@@ -373,6 +453,16 @@ def scenario_mirror_copy(window):
 def scenario_mirror_across_face(window):
     first, second = two_boxes(window)
     window.mirror_across_face(second.id, face_towards(second, (1, 0, 0)), [first.id])
+
+
+def scenario_mirror_into_one(window):
+    add(window, dx=5.0)
+    window.mirror_copy_selected("x", join=True)
+
+
+def scenario_mirror_into_one_across_face(window):
+    first, second = two_boxes(window)
+    window.mirror_across_face(second.id, face_towards(second, (1, 0, 0)), [first.id], join=True)
 
 
 def scenario_plane_distance(window):
@@ -1167,7 +1257,8 @@ SAMPLE_ARGS = {
     "about": "base", "op": "union", "keep_tools": False, "keep_tool": False, "wall": 2.0, "far_side": False,
     "radius": 2.0, "count": 3, "spacing": 10.0, "count2": 1, "spacing2": 30.0, "axis2": "y",
     "centre": [0.0, 0.0, 0.0], "follow": False, "plane": "x", "open_top": False, "drain": 0.0,
-    "pegs": False, "peg_diameter": 4.0, "from_end": False,
+    "pegs": False, "peg_diameter": 4.0, "from_end": False, "join": False, "extent": False, "symmetric": False,
+    "skip": "", "how": "equal", "distance2": 1.0, "walls": "inside",
 }
 
 

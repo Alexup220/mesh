@@ -231,3 +231,131 @@ def test_fillet_form_is_plain_language(qapp, close_qt_widget):
                                         note=modify_actions.FILLET_NOTE))
     for text in dialog.labels():
         assert_plain(text)
+
+
+# --- Several edges in one go ----------------------------------------------------------
+
+# Where two rounds made in one go cross at a corner of a box, what both
+# would take is taken once: (16 - 4 pi - 8/3) mm^3 for a true circle's
+# round of 2 mm (the 16 straight pieces make it a little more).
+CROSSING = 16 - 4 * math.pi - 8 / 3
+
+
+def test_every_edge_round_a_face_is_rounded_in_one_go():
+    box, cylinder = new_primitive("cube"), new_primitive("cylinder")
+    top = face_towards(box, (0, 0, 1))
+    assert len(edges.face_runs(shape_geometry(box), top)) == 4
+    assert len(edges.face_runs(shape_geometry(cylinder), face_towards(cylinder, (0, 0, 1)))) == 1
+    group = edges.fillet(box, top, (10, 0, 20), 2.0, whole_face=True)
+    tm = shape_geometry(group)
+    assert tm.is_volume
+    assert tm.volume == pytest.approx(8000.0 - 80 * corner_area(2.0) + 4 * CROSSING, abs=0.1)
+    assert len(ops.ungroup(group)) == 5  # the part and a piece for each edge
+    assert not solid_at(group, (9.8, 9.8, 19.8))  # the corner, where two rounds cross
+    assert solid_at(group, (9.9, 9.9, 10.0))  # the upright edges are left sharp
+
+
+def test_more_clicks_round_more_edges_and_an_edge_picked_twice_is_rounded_once():
+    box = new_primitive("cube")
+    top, side = face_towards(box, (0, 0, 1)), face_towards(box, (1, 0, 0))
+    group = edges.fillet(box, top, (10, 0, 20), 2.0, more=[[top, (0, -10, 20)], [top, (9, 1, 20)]])
+    assert len(ops.ungroup(group)) == 3
+    assert shape_geometry(group).volume == pytest.approx(8000.0 - 40 * corner_area(2.0) + CROSSING, abs=0.05)
+    three = edges.fillet(box, top, (10, 0, 20), 2.0, more=[[side, (10, 0, 1)], [side, (10, 9.5, 10)]])
+    assert shape_geometry(three).is_volume and len(ops.ungroup(three)) == 4
+    assert not solid_at(three, (9.9, 9.9, 10.0)) and not solid_at(three, (9.8, 0.0, 0.2))
+
+
+def test_a_face_with_inside_and_outside_edges_is_rounded_all_round():
+    part = l_shape()
+    step = face_towards(part, (0, 1, 0), near=(15, 5, 5))
+    assert [run.convex for run in edges.face_runs(shape_geometry(part), step)].count(False) == 1
+    group = edges.fillet(part, step, (10.1, 5, 5), 1.0, whole_face=True)
+    assert shape_geometry(group).is_volume
+    assert [child.is_hole for child in ops.ungroup(group)[1:]].count(False) == 1
+
+
+def test_a_further_click_off_the_part_is_refused():
+    box = new_primitive("cube")
+    with pytest.raises(BuildError) as err:
+        edges.fillet(box, face_towards(box, (0, 0, 1)), (10, 0, 20), 2.0, more=[[10**6, (0, 0, 0)]])
+    assert_plain(str(err.value))
+
+
+def test_rounding_more_edges_picks_them_click_by_click_then_rounds_them_in_one_undo_step(
+        window, monkeypatch, qapp):
+    window.add_primitive("cube")
+    window.add_primitive("sphere")
+    box, ball = window.document.scene.shapes
+    top, side = face_towards(box, (0, 0, 1)), face_towards(box, (1, 0, 0))
+    monkeypatch.setattr(modify_actions, "ask_fillet", lambda parent: {"radius": 2.0, "edges": "more"})
+    steps = len(window.document._undo)
+    window.do_fillet()
+    window._on_surface_picked(box.id, top, (10, 0, 20))
+    qapp.processEvents()  # the form opens once the click is over
+    assert window.tool == "fillet_more" and window.viewport.marked_actor is not None
+    assert window.statusBar().currentMessage().startswith("Picked: 1.")
+    window._on_surface_picked(box.id, top, (0, -10, 20))
+    window._on_surface_picked(box.id, side, (10, 0, 1))
+    assert window.statusBar().currentMessage().startswith("Picked: 3.")
+    window._on_surface_picked(box.id, side, (10, 5, 0.5))  # the same edge again: left out
+    assert window.statusBar().currentMessage().startswith("Picked: 2.")
+    window._on_surface_picked(ball.id, 0, (0, 0, 20))
+    assert window.statusBar().currentMessage() == window.SAME_PART.format(
+        prompt=window.TOOL_PROMPTS["fillet_more"])
+    assert len(window.document._undo) == steps
+    window.expert_actions["fillet"].trigger()  # chosen again: round them all
+    assert window.tool is None and window.viewport.marked_actor is None
+    assert len(window.document._undo) == steps + 1
+    [group] = [s for s in window.document.scene.shapes if s.name == "Box (rounded)"]
+    assert shape_geometry(group).volume == pytest.approx(8000.0 - 40 * corner_area(2.0) + CROSSING, abs=0.05)
+    window.do_undo()
+    assert [s.id for s in window.document.scene.shapes] == [box.id, ball.id]
+
+
+def test_rounding_every_edge_round_a_face_from_the_form(window, monkeypatch, qapp):
+    window.add_primitive("cube")
+    box = window.document.scene.shapes[0]
+    monkeypatch.setattr(modify_actions, "ask_fillet", lambda parent: {"radius": 2.0, "edges": "face"})
+    steps = len(window.document._undo)
+    window.do_fillet()
+    window._on_surface_picked(box.id, face_towards(box, (0, 0, 1)), (9, 0, 20))
+    qapp.processEvents()
+    assert window.tool is None and len(window.document._undo) == steps + 1
+    group = window.document.scene.shapes[0]
+    assert len(ops.ungroup(group)) == 5
+    window.do_undo()
+    assert window.document.scene.shapes[0].id == box.id
+
+
+def test_turning_expert_mode_off_stops_picking_and_changes_nothing(window, monkeypatch, qapp):
+    window.add_primitive("cube")
+    box = window.document.scene.shapes[0]
+    monkeypatch.setattr(modify_actions, "ask_fillet", lambda parent: {"radius": 2.0, "edges": "more"})
+    monkeypatch.setattr(window.settings, "save", lambda: True)
+    steps = len(window.document._undo)
+    window.do_fillet()
+    window._on_surface_picked(box.id, face_towards(box, (0, 0, 1)), (10, 0, 20))
+    qapp.processEvents()
+    assert window.tool == "fillet_more"
+    window.set_expert_mode(False)
+    assert window.tool is None and window.viewport.marked_actor is None
+    assert len(window.document._undo) == steps and window.document.scene.shapes[0].id == box.id
+
+
+def test_several_rounded_edges_round_trip_through_a_project_file(tmp_path):
+    box = new_primitive("cube")
+    group = edges.fillet(box, face_towards(box, (0, 0, 1)), (10, 0, 20), 2.0, whole_face=True)
+    path = tmp_path / "part.mesh"
+    save_project(Scene(shapes=[group]), path)
+    loaded = load_project(path).shapes[0]
+    assert shape_geometry(loaded).volume == pytest.approx(shape_geometry(group).volume)
+    assert len(ops.ungroup(loaded)) == 5
+
+
+def test_picking_more_edges_is_plain_language(window):
+    for text in (window.TOOL_PROMPTS["fillet_more"], window.TOOL_PROMPTS["chamfer_more"],
+                 window.PICKED, window.SAME_PART, window.NOTHING_PICKED, modify_actions.FILLET_NOTE):
+        assert_plain(text)
+    for _key, label in modify_actions.edge_choices("Round an Edge"):
+        assert_plain(label)

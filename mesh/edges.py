@@ -4,19 +4,24 @@ An edge is where two faces meet at a sharp angle (more than SHARP_DEGREES).
 A click on a face picks the edge of that face nearest the click, and follows
 it along while it runs on smoothly into the next edge (round the rim of a
 cylinder, say). The run stops where it turns a corner, or where another edge
-meets it.
+meets it. Several runs can be changed in one go: every edge round the face
+clicked (face_runs), or the runs of further clicks on the same part.
 
 Along the run, the corner between the two faces is cut away (an outside
 edge) or filled in (an inside edge), leaving a round of the given radius or
-a flat bevel set back the given distance on both faces. The piece is built
+a flat bevel: set back the given distance on both faces, a different
+distance on each (the first along the face clicked), or a distance along
+the face clicked and an angle from it. The piece is built
 as a ring of points at every point of the run, square to the run there,
 skinned from one ring to the next; a round's arc is narrow straight pieces,
 as many per turn as a circle has. The result is an ordinary group of the
-part and that piece, so Ungroup gives the part back.
+part and those pieces (one per run), so Ungroup gives the part back.
 
 Exact for a straight edge between flat faces. Along a curved run the faces
 are narrow flat strips, and the piece follows them. Where rounded or
-bevelled edges meet at a corner, the corner is not blended into a ball.
+bevelled edges meet at a corner, the corner is not blended into a ball:
+changed together, each run's piece reaches the corner square to its run,
+so two rounds meet in a crease there (and three come to a point).
 """
 
 import copy
@@ -49,6 +54,13 @@ class Run:
     convex: bool              # an outside edge: the part lies between the faces
     sides: list[tuple[int, int]]  # each piece of the run: (triangle on side A, on side B)
 
+    @property
+    def key(self) -> frozenset:
+        """Which edges it is made of, whichever way and from wherever it
+        was found."""
+        ends = self.vertices[1:] + self.vertices[:1] if self.closed else self.vertices[1:]
+        return frozenset(_edge_key(a, b) for a, b in zip(self.vertices, ends))
+
 
 def _edge_key(a: int, b: int) -> tuple[int, int]:
     return (a, b) if a < b else (b, a)
@@ -67,29 +79,53 @@ def _part_surface(shape, clearances):
     return tm
 
 
-def find_run(tm, face_index: int, point) -> Run:
-    """The run of edges through the sharp edge of the clicked face (the
-    flat face containing triangle `face_index`) nearest `point`."""
+def _sharp(tm):
+    """The part's sharp edges: (the two triangles, the two corner points,
+    whether it is an outside edge), one row each."""
+    sharp = np.flatnonzero(tm.face_adjacency_angles > math.radians(SHARP_DEGREES))
+    return tm.face_adjacency[sharp], tm.face_adjacency_edges[sharp], tm.face_adjacency_convex[sharp]
+
+
+def _edges_of_face(tm, face_index: int, pairs) -> list[int]:
+    """The sharp edges (rows of `pairs`) round the flat face clicked."""
     if not 0 <= face_index < len(tm.faces):
         raise BuildError("Click on a face of a part, next to the edge.")
-    sharp = np.flatnonzero(tm.face_adjacency_angles > math.radians(SHARP_DEGREES))
-    pairs = tm.face_adjacency[sharp]
-    corners = tm.face_adjacency_edges[sharp]
-    convex = tm.face_adjacency_convex[sharp]
-
-    clicked = {face_index}
-    for facet in tm.facets:
-        if face_index in facet:
-            clicked = set(int(f) for f in facet)
-            break
+    clicked = _clicked_faces(tm, face_index)
     near = [i for i, (f1, f2) in enumerate(pairs) if int(f1) in clicked or int(f2) in clicked]
     if not near:
         raise BuildError("The face you clicked has no sharp edge. Click a face next to the edge.")
+    return near
+
+
+def find_run(tm, face_index: int, point) -> Run:
+    """The run of edges through the sharp edge of the clicked face (the
+    flat face containing triangle `face_index`) nearest `point`."""
+    pairs, corners, convex = _sharp(tm)
+    near = _edges_of_face(tm, face_index, pairs)
     point = np.asarray(point, dtype=np.float64)
     a, b = tm.vertices[corners[near, 0]], tm.vertices[corners[near, 1]]
     along = np.clip(np.einsum("ij,ij->i", point - a, b - a) / np.einsum("ij,ij->i", b - a, b - a), 0, 1)
     first = near[int(np.argmin(np.linalg.norm(a + along[:, None] * (b - a) - point, axis=1)))]
+    return _run_from(tm, (pairs, corners, convex), first)[0]
 
+
+def face_runs(tm, face_index: int) -> list[Run]:
+    """Every run through a sharp edge round the clicked flat face (its
+    outline and any holes in it), each once."""
+    sharp = _sharp(tm)
+    runs, done = [], set()
+    for edge in _edges_of_face(tm, face_index, sharp[0]):
+        if edge in done:
+            continue
+        run, used = _run_from(tm, sharp, edge)
+        done.update(used)
+        runs.append(run)
+    return runs
+
+
+def _run_from(tm, sharp, first: int) -> tuple[Run, list[int]]:
+    """The run through sharp edge `first`, and the sharp edges it is made of."""
+    pairs, corners, convex = sharp
     at_corner: dict[int, list[int]] = {}
     for i, (u, w) in enumerate(corners):
         at_corner.setdefault(int(u), []).append(i)
@@ -139,7 +175,14 @@ def find_run(tm, face_index: int, point) -> Run:
         tri = list(tm.faces[f1])
         directed = any(tri[i] == start and tri[(i + 1) % 3] == end for i in range(3))
         sides.append((f1, f2) if directed else (f2, f1))
-    return Run(forward, closed, bool(convex[first]), sides)
+    return Run(forward, closed, bool(convex[first]), sides), edges
+
+
+def run_line(tm, run: Run) -> np.ndarray:
+    """The run as a line of points in the world (back to its start, if it
+    goes all the way round), to show which edges are picked."""
+    points = tm.vertices[run.vertices]
+    return np.vstack([points, points[:1]]) if run.closed else np.asarray(points)
 
 
 def _unit(v) -> np.ndarray:
@@ -170,11 +213,18 @@ class _Corner:
         """How far along each face a round of `radius` starts."""
         return radius / math.tan(self.angle / 2.0)
 
-    def ring(self, set_back: float, radius: float | None, pieces: int) -> np.ndarray:
+    def far_set_back(self, near: float, angle: float) -> float:
+        """How far along the other face a bevel reaches that starts `near`
+        along one face and leaves it at `angle` (radians) to it."""
+        if self.angle + angle >= math.pi - 1e-6:
+            raise BuildError(BEVEL_TOO_STEEP)
+        return near * math.sin(angle) / math.sin(self.angle + angle)
+
+    def ring(self, back_a: float, back_b: float, radius: float | None, pieces: int) -> np.ndarray:
         """The piece's cross-section here: a round of `radius` (or a flat
-        bevel, for None) starting `set_back` along each face, closed off
-        just outside the wedge."""
-        ta, tb = self.p + set_back * self.a, self.p + set_back * self.b
+        bevel, for None) starting `back_a` along face A and `back_b` along
+        face B (the same, for a round), closed off just outside the wedge."""
+        ta, tb = self.p + back_a * self.a, self.p + back_b * self.b
         if radius is None:
             arc = [ta, tb]
         else:
@@ -238,35 +288,100 @@ def _round_down(value: float) -> float:
     return math.floor(value * 10.0 + 1e-9) / 10.0
 
 
-def _edge_piece(shape, face_index: int, point, size: float, rounded: bool, clearances):
-    """(the part's surface, the run, the piece to cut away or add)."""
+BEVEL_TOO_STEEP = (
+    "That angle is too steep for this edge: the bevel would never reach the other face. "
+    "Try a smaller angle."
+)
+
+
+def _clicked_faces(tm, face_index: int) -> set[int]:
+    """The triangles of the flat face holding `face_index`."""
+    for facet in tm.facets:
+        if face_index in facet:
+            return set(int(f) for f in facet)
+    return {int(face_index)}
+
+
+def _clicked_is_b(run: Run, clicked: set[int]) -> bool:
+    """Whether the face clicked is on the run's side B (else side A)."""
+    for a, b in run.sides:
+        if a in clicked:
+            return False
+        if b in clicked:
+            return True
+    return False
+
+
+def _positive(value, what: str) -> float:
+    value = float(value)
+    if not math.isfinite(value) or value <= 0.0:
+        raise BuildError(f"The {what} must be more than 0 mm.")
+    return value
+
+
+def _checked_sizes(size, rounded: bool, other, angle) -> tuple[float, float | None, float | None]:
+    """The sizes, checked: (size, the other set back or None, the angle
+    in radians or None)."""
     what = "rounding" if rounded else "bevel"
-    size = float(size)
-    if not math.isfinite(size) or size <= 0.0:
-        raise BuildError(f"The {what} size must be more than 0 mm.")
-    tm = _part_surface(shape, clearances)
-    run = find_run(tm, face_index, point)
+    size = _positive(size, f"{what} size")
+    if other is not None:
+        other = _positive(other, "set back along the other face")
+    if angle is not None:
+        angle = float(angle)
+        if not math.isfinite(angle) or not 0.0 < angle < 180.0:
+            raise BuildError("The bevel's angle must be more than 0 and less than 180 degrees.")
+        angle = math.radians(angle)
+    return size, other, angle
+
+
+def _edge_piece(tm, run: Run, clicked: set[int], size: float, rounded: bool,
+                other: float | None = None, angle: float | None = None):
+    """The piece to cut away (an outside edge) or add (an inside edge)
+    along `run`, found from a click on the face `clicked`. A bevel is set
+    back `size` along the face clicked and, along the other face, `other`
+    mm, or as far as leaving the face clicked at `angle` (radians)
+    reaches, or (neither) `size` too."""
+    what = "rounding" if rounded else "bevel"
     corners = _corners(tm, run)
+    flip = _clicked_is_b(run, clicked)
+
+    backs = []
+    for corner in corners:
+        if rounded:
+            backs.append((corner.set_back(size),) * 2)
+            continue
+        far = corner.far_set_back(size, angle) if angle is not None else (size if other is None else other)
+        backs.append((far, size) if flip else (size, far))
 
     cache: dict = {}
     count = len(run.vertices)
     pieces = count if run.closed else count - 1
-    largest = math.inf
+    largest, scale = math.inf, math.inf
     for k, corner in enumerate(corners):
         side = run.sides[min(k, pieces - 1)]
-        room = min(_space(tm, side[0], corner.p, corner.a, cache),
-                   _space(tm, side[1], corner.p, corner.b, cache))
-        largest = min(largest, room * math.tan(corner.angle / 2.0) if rounded else room)
+        room_a = _space(tm, side[0], corner.p, corner.a, cache)
+        room_b = _space(tm, side[1], corner.p, corner.b, cache)
+        if rounded:
+            largest = min(largest, min(room_a, room_b) * math.tan(corner.angle / 2.0))
+        else:
+            scale = min(scale, room_a / backs[k][0], room_b / backs[k][1])
+    if not rounded:
+        largest = size * scale
     if size > largest + 1e-9:
-        hint = (f"Try {_round_down(largest):.1f} mm or less." if largest >= 0.1
-                else "There is no room for one here.")
+        if rounded or (other is None and angle is None):
+            hint = (f"Try {_round_down(largest):.1f} mm or less." if largest >= 0.1
+                    else "There is no room for one here.")
+        elif largest >= 0.1:
+            hint = f"Try {_round_down(largest):.1f} mm or less along the face you clicked"
+            hint += f", and {_round_down(other * scale):.1f} mm along the other." if other is not None else "."
+        else:
+            hint = "There is no room for one here."
         raise BuildError(f"That {what} is too big for the faces next to the edge. {hint}")
 
     arc = max(2, max(math.ceil(ARC_SEGMENTS * (math.pi - c.angle) / (2.0 * math.pi)) for c in corners))
     rings = []
     for k, corner in enumerate(corners):
-        set_back = corner.set_back(size) if rounded else size
-        ring = corner.ring(set_back, size if rounded else None, arc)
+        ring = corner.ring(*backs[k], size if rounded else None, arc)
         if run.convex and not run.closed and k in (0, count - 1):
             # Reaching just past the ends of an outside edge cuts only air.
             ring = ring + (NUDGE if k else -NUDGE) * corner.t
@@ -289,19 +404,44 @@ def _edge_piece(shape, face_index: int, point, size: float, rounded: bool, clear
             outline = np.column_stack([(rings[k] - c.p) @ c.a, (rings[k] - c.p) @ np.cross(c.t, c.a)])
             faces.append(_cap([outline], rings[k], offset, facing))
     try:
-        piece = _solid_from(vertices, np.vstack(faces), what)
+        return _solid_from(vertices, np.vstack(faces), what)
     except sketch.SketchError as exc:
         raise BuildError(NOT_CLEAN) from exc
-    return tm, run, piece
 
 
-def _edge_group(shape, face_index: int, point, size: float, rounded: bool, clearances):
-    tm, run, piece = _edge_piece(shape, face_index, point, size, rounded, clearances)
+def picked_runs(tm, face_index: int, point, whole_face: bool = False, more=()) -> list[tuple[Run, set]]:
+    """The runs to change, each with the face clicked for it: the run
+    nearest the click (or, with `whole_face`, every run round the face
+    clicked) and the run of each further click in `more` ((face, point)
+    pairs). A run picked twice is changed once."""
+    clicked = _clicked_faces(tm, face_index)
+    found = face_runs(tm, face_index) if whole_face else [find_run(tm, face_index, point)]
+    runs = [(run, clicked) for run in found]
+    for pick in more or ():
+        index, where = int(pick[0]), pick[1]
+        runs.append((find_run(tm, index, where), _clicked_faces(tm, index)))
+    out, seen = [], set()
+    for run, faces in runs:
+        if run.key not in seen:
+            seen.add(run.key)
+            out.append((run, faces))
+    return out
+
+
+def _edge_group(shape, face_index: int, point, size: float, rounded: bool, clearances,
+                other: float | None = None, angle: float | None = None,
+                whole_face: bool = False, more=()):
+    size, other, angle = _checked_sizes(size, rounded, other, angle)
+    tm = _part_surface(shape, clearances)
+    runs = picked_runs(tm, face_index, point, whole_face, more)
     name = "Rounded edge" if rounded else "Bevelled edge"
-    child = _baked_child(piece, name, shape.color, is_hole=run.convex)
+    children = [copy.deepcopy(shape)]
+    for run, clicked in runs:
+        piece = _edge_piece(tm, run, clicked, size, rounded, other, angle)
+        children.append(_baked_child(piece, name, shape.color, is_hole=run.convex))
     label = "rounded" if rounded else "chamfered"
     try:
-        group = _group([copy.deepcopy(shape), child], f"{shape.name} ({label})", clearances)
+        group = _group(children, f"{shape.name} ({label})", clearances)
     except NothingToCombineError as exc:
         raise BuildError(NOT_CLEAN) from exc
     if abs(shape_geometry(group).volume - tm.volume) < 1e-9:
@@ -309,15 +449,28 @@ def _edge_group(shape, face_index: int, point, size: float, rounded: bool, clear
     return group
 
 
-def fillet(shape, face_index: int, point, radius: float, clearances: dict | None = None):
+def fillet(shape, face_index: int, point, radius: float, clearances: dict | None = None,
+           whole_face: bool = False, more=()):
     """The edge next to the click rounded to `radius` mm, along its run (see
-    the module notes). A group of the part and the piece cut away (an
-    outside edge) or added (an inside edge)."""
-    return _edge_group(shape, face_index, point, radius, True, clearances)
+    the module notes); with `whole_face`, every edge round the face clicked
+    instead, and with `more` ((face, point) clicks on the same part) their
+    edges too, all at once. A group of the part and the pieces cut away (at
+    outside edges) or added (at inside edges)."""
+    return _edge_group(shape, face_index, point, radius, True, clearances, whole_face=whole_face, more=more)
 
 
-def chamfer(shape, face_index: int, point, distance: float, clearances: dict | None = None):
-    """The edge next to the click bevelled flat, set back `distance` mm on
-    both faces, along its run (see the module notes). A group of the part
-    and the piece cut away (an outside edge) or added (an inside edge)."""
-    return _edge_group(shape, face_index, point, distance, False, clearances)
+def chamfer(shape, face_index: int, point, distance: float, clearances: dict | None = None,
+            distance2: float | None = None, angle: float | None = None,
+            whole_face: bool = False, more=()):
+    """The edge next to the click bevelled flat, along its run (see the
+    module notes): set back `distance` mm on both faces; or `distance` along
+    the face clicked and `distance2` along the other; or `distance` along
+    the face clicked, leaving it at `angle` degrees. Exact for a straight
+    edge between flat faces. `whole_face` and `more` pick further edges, as
+    for fillet (each run's face clicked is the one its click was on). A
+    group of the part and the pieces cut away (at outside edges) or added
+    (at inside edges)."""
+    if distance2 is not None and angle is not None:
+        raise ValueError("give a second distance or an angle, not both")
+    return _edge_group(shape, face_index, point, distance, False, clearances, distance2, angle,
+                       whole_face, more)

@@ -82,29 +82,32 @@ TOOLS: tuple[ExpertTool, ...] = (
     ),
     ExpertTool(
         "rectangular_pattern", "create", "Pattern in Ro&ws (Rectangular)...",
-        "Copy the selected parts in a row, a set distance apart, and in more rows if you "
-        "like: left/right, forward/back or up/down.",
+        "Copy the selected parts in a row, a set distance apart (or spread over a set length), "
+        "and in more rows if you like: left/right, forward/back, up/down or along a construction "
+        "axis selected with them, one way or both ways from the parts. Copies can be left out "
+        "by their number.",
         "do_rectangular_pattern",
     ),
     ExpertTool(
         "circular_pattern", "create", "Pattern Aro&und a Line (Circular)...",
         "Copy the selected parts round a line through a point you type, or round a "
-        "construction axis selected with them, turning each copy with it: all the way round "
-        "or over a set angle. The parts stay where they are.",
+        "construction axis selected with them, turning each copy with it: all the way round, "
+        "over a set angle, or spread evenly either side of the parts. The parts stay where they "
+        "are, and copies can be left out by their number.",
         "do_circular_pattern",
     ),
     ExpertTool(
         "path_pattern", "create", "Pattern Along a &Path...",
         "Select the parts and a sketch of a path: copies go along the path, spread evenly or "
-        "a set distance apart, and can turn as it turns. Curves are followed in short "
-        "straight pieces.",
+        "a set distance apart, and can turn as it turns. Copies can be left out by their "
+        "number. Curves are followed in short straight pieces.",
         "do_path_pattern",
     ),
     ExpertTool(
         "mirror", "create", "&Mirror...",
         "Add a mirror image of the selected parts across a flat face you click, a middle "
-        "plane, or a sketch or construction plane selected with them. The images are "
-        "separate parts; Combine joins one to its part.",
+        "plane, or a sketch or construction plane selected with them: as separate parts, or "
+        "each joined to its part into one part (Ungroup takes them apart again).",
         "do_mirror_copy",
     ),
     ExpertTool(
@@ -152,9 +155,11 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "shell", "modify", "S&hell",
         "Click a flat face of a part to hollow it out with walls of an even thickness, "
-        "leaving that face open (and, if you like, the face across from it). Exact for "
+        "leaving that face open (and, if you like, the face across from it, or more faces "
+        "you click). The walls go inside the part, outside it, or half each side. Exact for "
         "boxes and cylinders through their flat sides and ends; other parts are shelled "
-        "approximately, and their walls can come out a little thinner in places.",
+        "approximately: walls inside can come out a little thinner in places, and walls "
+        "outside get rounded corners.",
         "do_shell",
     ),
     ExpertTool(
@@ -167,16 +172,19 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "fillet", "modify", "&Round an Edge (Fillet)",
         "Click a face of a part next to an edge, then type the radius. The edge is rounded "
-        "along with the edges it runs on into smoothly; an inside edge is filled in round. "
-        "Round surfaces are narrow flat strips, and corners where rounded edges meet are "
-        "not blended into a ball.",
+        "along with the edges it runs on into smoothly, or every edge round that face, or more "
+        "edges you click; an inside edge is filled in round. Round surfaces are narrow flat "
+        "strips, and corners where rounded edges meet are not blended into a ball: they meet "
+        "in a crease.",
         "do_fillet",
     ),
     ExpertTool(
         "chamfer", "modify", "Be&vel an Edge (Chamfer)",
-        "Click a face of a part next to an edge, then type how far back to bevel it on both "
-        "faces. The edge is cut flat along with the edges it runs on into smoothly; an "
-        "inside edge is filled in flat.",
+        "Click a face of a part next to an edge, then type how far back to bevel it: the same "
+        "on both faces, a different distance on each, or a distance and an angle. The edge is "
+        "cut flat along with the edges it runs on into smoothly, or every edge round that face, "
+        "or more edges you click; an inside edge is filled in flat. Corners where bevelled "
+        "edges meet are not blended: they meet in a crease.",
         "do_chamfer",
     ),
     ExpertTool(

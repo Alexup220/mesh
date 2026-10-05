@@ -534,77 +534,88 @@ def shells_exactly(shape) -> bool:
             and float(shape.params.get("chamfer", 0.0)) <= 0.0)
 
 
-def _exact_room(shape, wall: float, opens: list) -> list | None:
+# Where a shell's walls go: inside the part (its outside keeps its shape),
+# outside it (its inside keeps its shape), or half each side.
+SHELL_WALLS = ("inside", "outside", "both")
+
+
+def _wall_sides(wall: float, walls: str) -> tuple[float, float]:
+    """(how far the walls reach in from the outside, how far out)."""
+    if walls == "inside":
+        return wall, 0.0
+    if walls == "outside":
+        return 0.0, wall
+    if walls == "both":
+        return wall / 2.0, wall / 2.0
+    raise ValueError(f"unknown place for the walls {walls!r}")
+
+
+def _box_child(shape, kind: str, low, high, name: str, is_hole: bool):
+    """A box or cylinder (`kind`) filling `low`..`high` in `shape`'s own
+    frame (a cylinder upright and centred), placed as `shape` is."""
+    size = np.asarray(high) - np.asarray(low)
+    params = ({"width": size[0], "depth": size[1], "height": size[2]} if kind == "cube"
+              else {"diameter": size[0], "height": size[2]})
+    place = np.eye(4)
+    place[:3, 3] = ((low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0, low[2])
+    child = _hole_child(kind, {k: float(v) for k, v in params.items()},
+                        np.asarray(shape.transform, dtype=np.float64) @ place, shape.color, name)
+    child.is_hole = is_hole
+    return child
+
+
+def _exact_room(shape, wall: float, opens: list, walls: str = "inside") -> list | None:
     """The room inside a box or cylinder as one Hole of the same kind,
-    reaching out through each open face (own directions in `opens`). None
-    if a face to open isn't one of its flat sides or ends."""
+    reaching out through each open face (own directions in `opens`), and
+    for walls outside the part, the walls' outside as a part of the same
+    kind, grown on every side but the open ones. None if a face to open
+    isn't one of its flat sides or ends."""
     kind = shape.params["primitive"]
     p = shape.params
+    inner, outer = _wall_sides(wall, walls)
     if kind == "cube":
         half = np.array([float(p["width"]), float(p["depth"])]) / 2.0
-        low = np.array([-half[0] + wall, -half[1] + wall, wall])
-        high = np.array([half[0] - wall, half[1] - wall, float(p["height"]) - wall])
+        part_low = np.array([-half[0], -half[1], 0.0])
+        part_high = np.array([half[0], half[1], float(p["height"])])
     else:
-        r = float(p["diameter"]) / 2.0 - wall
-        low = np.array([-r, -r, wall])
-        high = np.array([r, r, float(p["height"]) - wall])
+        r = float(p["diameter"]) / 2.0
+        part_low = np.array([-r, -r, 0.0])
+        part_high = np.array([r, r, float(p["height"])])
+    low, high = part_low + inner, part_high - inner
     if (high - low).min() <= 0.0:
         limit = min(float(p.get("width", p.get("diameter"))), float(p.get("depth", p.get("diameter"))),
-                    2.0 * float(p["height"])) / 2.0
+                    2.0 * float(p["height"])) / 2.0 * wall / inner
         raise BuildError(f"That wall is too thick for this part. Try a wall thinner than {limit:.1f} mm.")
+    grown_low, grown_high = part_low - outer, part_high + outer
     for direction in opens:
         if kind == "cylinder" and direction[2] == 0.0:
             return None
         i = int(np.argmax(np.abs(direction)))
         if direction[i] > 0:
-            high[i] += wall + REACH
+            high[i] += inner + REACH
+            grown_high[i] = part_high[i]
         else:
-            low[i] -= wall + REACH
-    size = high - low
-    params = ({"width": size[0], "depth": size[1], "height": size[2]} if kind == "cube"
-              else {"diameter": size[0], "height": size[2]})
-    place = np.eye(4)
-    place[:3, 3] = ((low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0, low[2])
-    return [_hole_child(kind, {k: float(v) for k, v in params.items()},
-                        np.asarray(shape.transform, dtype=np.float64) @ place, shape.color, "Inside")]
+            low[i] -= inner + REACH
+            grown_low[i] = part_low[i]
+    room = [_box_child(shape, kind, low, high, "Inside", True)]
+    if outer > 0.0:
+        room.insert(0, _box_child(shape, kind, grown_low, grown_high, "Walls", False))
+    return room
 
 
-def shell(shape, face_index: int, wall: float, far_side: bool = False,
-          clearances: dict | None = None):
-    """`shape` hollowed out to walls `wall` mm thick, with the flat face
-    clicked left open (and, with `far_side`, the face across from it).
-
-    Returns a group of the part and the room inside it (a Hole reaching out
-    through the open faces), so Ungroup gives the part back. Exact for a
-    box or cylinder opened through its flat sides or ends; otherwise the
-    room keeps an even distance from the outside, made with a many-sided
-    ball, so the walls can come out a little thinner in places.
-    """
-    if is_reference(shape):
-        raise BuildError(GUIDES_ARE_NOT_PARTS.format(tool="Shell"))
-    if shape.is_hole:
-        raise BuildError("Shell works on solid parts. This one is a Hole.")
-    wall = float(wall)
-    if not math.isfinite(wall) or wall <= 0.0:
-        raise BuildError("The wall thickness must be more than 0 mm.")
-    faces = [flat_face(shape, face_index, clearances)]
-    if far_side:
-        faces.append(_far_face(shape, faces[0], clearances))
-
-    room = None
-    if shells_exactly(shape):
-        opens = [_own_direction(shape, face.normal) for face in faces]
-        if all(direction is not None for direction in opens):
-            room = _exact_room(shape, wall, opens)
-    if room is None:
-        outside = shape_geometry(shape, clearances)
-        if len(outside.faces) > APPROXIMATE_FACE_LIMIT:
-            raise BuildError("This part is too detailed to shell.")
-        reach = to_manifold(outside)
+def _approximate_room(shape, faces: list, inner: float, outer: float, clearances) -> list:
+    """The room inside any part (and, for walls outside it, the walls'
+    outside), made with a many-sided ball: see shell."""
+    outside = shape_geometry(shape, clearances)
+    if len(outside.faces) > APPROXIMATE_FACE_LIMIT:
+        raise BuildError("This part is too detailed to shell.")
+    part = to_manifold(outside)
+    if inner > 0.0:
+        reach = part
         for face in faces:
-            reach = reach + to_manifold(_prism(face, -0.01, wall + REACH))
-        inside = reach.minkowski_difference(m3.Manifold.sphere(wall, 24))
-        if inside.is_empty() or (inside ^ to_manifold(outside)).volume() < 1e-3:
+            reach = reach + to_manifold(_prism(face, -0.01, inner + REACH))
+        inside = reach.minkowski_difference(m3.Manifold.sphere(inner, 24))
+        if inside.is_empty() or (inside ^ part).volume() < 1e-3:
             raise BuildError(
                 "That wall is too thick for this part: there would be no space left inside. "
                 "Try a thinner wall."
@@ -615,7 +626,86 @@ def shell(shape, face_index: int, wall: float, far_side: bool = False,
                     "That face is too small to leave open with walls this thick. "
                     "Try a thinner wall, or a bigger face."
                 )
-        room = [_baked_child(from_manifold(inside), "Inside", shape.color, is_hole=True)]
+    else:
+        inside = part
+        for face in faces:
+            inside = inside + to_manifold(_prism(face, -0.01, REACH))
+    room = [_baked_child(from_manifold(inside), "Inside", shape.color, is_hole=True)]
+    if outer > 0.0:
+        grown = part.minkowski_sum(m3.Manifold.sphere(outer, 24))
+        room.insert(0, _baked_child(from_manifold(grown), "Walls", shape.color, is_hole=False))
+        for face in faces:
+            # What is grown round an open face, cut off level with it as far
+            # as three walls from its edge (round a side curving away from it).
+            rim = to_manifold(_prism(face, 0.0, outer + 0.01, face.region.buffer(3.0 * outer))) - part
+            if not rim.is_empty():
+                room.append(_baked_child(from_manifold(rim), "Opening", shape.color, is_hole=True))
+    return room
+
+
+def _open_faces(shape, face_index: int, far_side: bool, more, clearances) -> list:
+    """The flat faces to leave open: the one clicked, the one across from
+    it with `far_side`, and the faces of the further clicks `more` ((face,
+    point) pairs); each once."""
+    faces = [flat_face(shape, face_index, clearances)]
+    if far_side:
+        faces.append(_far_face(shape, faces[0], clearances))
+    for pick in more or ():
+        faces.append(flat_face(shape, int(pick[0]), clearances))
+    kept, seen = [], set()
+    for face in faces:
+        key = frozenset(int(i) for i in face.faces)
+        if key not in seen:
+            seen.add(key)
+            kept.append(face)
+    return kept
+
+
+def face_outline(face: FlatFace) -> list[np.ndarray]:
+    """A flat face's outline (and the outlines of any holes in it) as
+    closed lines of points in the world, to show it is picked."""
+    polygons = [face.region] if face.region.geom_type == "Polygon" else list(getattr(face.region, "geoms", []))
+    lines = []
+    for polygon in polygons:
+        for ring in [polygon.exterior, *polygon.interiors]:
+            lines.append(sketch.to_world(face.frame, np.asarray(ring.coords, dtype=np.float64)))
+    return lines
+
+
+def shell(shape, face_index: int, wall: float, far_side: bool = False,
+          clearances: dict | None = None, more=(), walls: str = "inside"):
+    """`shape` hollowed out to walls `wall` mm thick, with the flat face
+    clicked left open (and, with `far_side`, the face across from it, and
+    the faces of the further clicks `more`: (face, point) pairs on the
+    same part). The walls go inside the part ("inside": its outside keeps
+    its shape), outside it ("outside": its inside keeps its shape, and the
+    walls stop level with each open face), or half each side ("both").
+
+    Returns a group of the part, the walls' outside when they go outside
+    it, and the room inside it (a Hole reaching out through the open
+    faces), so Ungroup gives the part back. Exact for a box or cylinder
+    opened through its flat sides or ends; otherwise the room and the
+    walls' outside keep an even distance from the part's outside, made
+    with a many-sided ball, so walls inside can come out a little thinner
+    in places and walls outside get rounded corners.
+    """
+    if is_reference(shape):
+        raise BuildError(GUIDES_ARE_NOT_PARTS.format(tool="Shell"))
+    if shape.is_hole:
+        raise BuildError("Shell works on solid parts. This one is a Hole.")
+    wall = float(wall)
+    if not math.isfinite(wall) or wall <= 0.0:
+        raise BuildError("The wall thickness must be more than 0 mm.")
+    inner, outer = _wall_sides(wall, walls)
+    faces = _open_faces(shape, face_index, far_side, more, clearances)
+
+    room = None
+    if shells_exactly(shape):
+        opens = [_own_direction(shape, face.normal) for face in faces]
+        if all(direction is not None for direction in opens):
+            room = _exact_room(shape, wall, opens, walls)
+    if room is None:
+        room = _approximate_room(shape, faces, inner, outer, clearances)
     try:
         return _group([copy.deepcopy(shape)] + room, f"{shape.name} (shell)", clearances)
     except NothingToCombineError as exc:

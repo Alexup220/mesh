@@ -127,38 +127,51 @@ tools do the closest honest version of their Fusion counterparts:
   Pre-existing: a stretched group's parts, once ungrouped, carry the stretch
   in their transforms, so a primitive's Details numbers show its size before
   the stretch (the same happens after dragging a group's handles today).
-- **Shell** leaves one clicked flat face open, or that face and the one
-  across from it; Fusion's free choice of any number of faces, and walls
-  grown outward instead of inward, are not offered. Boxes and cylinders (with
-  no bottom chamfer) are exact through their flat sides and ends. Anything
-  else is shelled approximately, the same way as Hollow out: the room inside
-  keeps a 24-sided ball's distance from the outside, so walls can come out a
-  little thinner in places, and a detailed part can take a few seconds. A
-  round surface is narrow flat strips, so clicking one opens just that strip,
-  and only with a wall thinner than the strip is wide.
+- **Shell** leaves open the flat face clicked, the one across from it if
+  asked, and any more faces clicked on the same part (picked faces are
+  drawn; Shell is chosen again to hollow it out). The walls go inside the
+  part (its outside keeps its shape), outside it (its inside keeps its
+  shape, and the walls stop level with each open face) or half each side.
+  Boxes and cylinders (with no bottom chamfer) are exact through their flat
+  sides and ends. Anything else is shelled approximately, the same way as
+  Hollow out: the room inside keeps a 24-sided ball's distance from the
+  outside, so walls can come out a little thinner in places; walls outside
+  are grown with the same ball, so their outside corners come out rounded
+  (Fusion keeps them sharp), and they are cut off level with an open face as
+  far as three walls from its edge, so beside a side curving gently away
+  from that face a low ridge can be left. A detailed part can take a few
+  seconds (several with walls on both sides). A round surface is narrow
+  flat strips, so clicking one opens just that strip, and only with a wall
+  thinner than the strip is wide.
 - **Push/Pull** moves the clicked flat face straight out or in, square to
   itself: the face's outline is pushed out as a new piece, or pushed in as a
   Hole. That is exact where the sides next to the face are square to it.
   Unlike Fusion, sloping sides next to the face are not extended along their
   slope, and a round surface can't be pushed as a whole: it is narrow flat
   strips, and only the strip clicked moves.
-- **Round an Edge (Fillet)** rounds one run of edges per click: the edge
-  next to the click and the edges it runs on into smoothly (turning less than
-  30 degrees), such as a cylinder's whole rim. Picking several separate edges
-  at once is not offered. It is exact for a straight edge between flat faces,
-  with the round made of 16 straight pieces per quarter turn, as a circle has.
-  Round surfaces are narrow flat strips, and the round follows them. Where
-  rounded edges meet at a corner, the corner is not blended into a ball, and
-  rounding the next edge of a box after one is rounded follows the first
-  round down the side; at a radius as big as the first one's it is refused
-  ("too big for how tightly this edge bends"), where Fusion would blend the
-  corner. A radius that would run off the faces next to the edge is refused
-  with the largest that fits. Variable radius and setback corners are not
-  offered.
+- **Round an Edge (Fillet)** rounds runs of edges: a run is the edge next
+  to a click and the edges it runs on into smoothly (turning less than 30
+  degrees), such as a cylinder's whole rim. One go can round the run
+  clicked, every run round the face clicked, or the runs of more clicks on
+  the same part (picked edges are drawn; the tool is chosen again to round
+  them). It is exact for a straight edge between flat faces, with the round
+  made of 16 straight pieces per quarter turn, as a circle has. Round
+  surfaces are narrow flat strips, and the round follows them. Where
+  rounded edges meet at a corner, the corner is not blended into a ball:
+  rounded in one go, each run's round reaches the corner square to its
+  edge, so two rounds meet in a crease and three come to a point. Rounding
+  the next edge of a box after one is rounded, in a later go, follows the
+  first round down the side; at a radius as big as the first one's it is
+  refused ("too big for how tightly this edge bends"). A radius that would
+  run off the faces next to the edge is refused with the largest that fits.
+  Variable radius and setback corners are not offered, and edges are picked
+  only by clicking a face beside them.
 - **Bevel an Edge (Chamfer)** works the same way and has the same limits, with
-  the edge cut flat, set back the same distance on both faces. A bevel set
-  back a different distance on each face, or given by an angle, is not
-  offered.
+  the edge cut flat: set back the same distance on both faces, a different
+  distance on each (the first along the face clicked), or a distance along
+  the face clicked and an angle from it. Exact for a straight edge between
+  flat faces; along a curved run the second set back is worked out at each
+  point from the faces' angle there.
 - **Slope the Sides (Draft)** slopes every side of an Extrusion by one angle
   (at most 60 degrees), going away from its sketch's plane; a box, cylinder
   or tube becomes an Extrusion first (its base's outline pushed up its
@@ -176,14 +189,21 @@ tools do the closest honest version of their Fusion counterparts:
 The copies themselves are exact: each is the same part moved, turned or
 reflected. What differs from Fusion is how the pattern is chosen.
 
-- **Directions are the world's.** Pattern in Rows goes along left/right,
-  forward/back or up/down, and Pattern Around a Line turns round a line
-  along one of those three, through a point typed in millimetres, or round
-  a construction axis selected with the parts (Phase 4). Fusion also lets
-  an edge or a sloping face set the direction; picking one is not offered.
-- **No suppressing single copies**, no "symmetric" (both ways from the
-  part) option, and no spacing by total extent in Rows: spacing is from one
-  copy to the next.
+- **Directions.** Pattern in Rows goes along left/right, forward/back,
+  up/down or a construction axis selected with the parts, and Pattern
+  Around a Line turns round a line along one of those three, through a
+  point typed in millimetres, or round a construction axis selected with
+  the parts (Phase 4). Fusion also lets an edge or a sloping face set the
+  direction; picking one is not offered (make an axis through two points
+  on the edge first).
+- **Copies are left out by number**, typed (the parts are 1), where Fusion
+  ticks them off in the view. Both ways (Fusion's symmetric) and spacing by
+  the whole length are offered in Rows, and both ways in Around a Line; in
+  both, the count and the spacing or angle go each way from the parts (so
+  Around a Line's angle each way is less than 180 degrees). Along a Path
+  goes one way only, and its spacing is from one copy to the next or spread
+  over the whole path. Rows' two directions share one choice of spacing
+  and of both ways.
 - **Pattern Along a Path** needs a sketch as the path; a part's edge can't
   be picked. Curves are followed in their straight pieces (64 per circle),
   so a copy sits on a piece, slightly inside the true curve. With "Turn the
@@ -193,10 +213,12 @@ reflected. What differs from Fusion is how the pattern is chosen.
 - **Copies are separate parts**, as Duplicate makes, not one feature.
   Changing the original later does not change the copies, and patterned
   Holes cut once grouped with the part, like any Hole.
-- **Mirror makes copies only.** Fusion can also mirror a part into one
-  joined body; here Combine (Join) joins a copy to its part. The plane is a
-  selected sketch's plane or construction plane, a clicked flat face, or one
-  of the three middle planes through 0.
+- **Mirror** makes copies, or joins each image to its part into one part
+  as Combine's Join does (a group, so Ungroup takes them apart; an image
+  that doesn't touch its part is still joined into the same part, where
+  Fusion would keep two bodies). The plane is a selected sketch's plane or
+  construction plane, a clicked flat face, or one of the three middle
+  planes through 0.
 
 ## Expert mode, Phase 4 (Construct and Inspect): approximations and limits
 

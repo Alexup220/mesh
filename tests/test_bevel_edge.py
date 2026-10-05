@@ -162,6 +162,97 @@ def test_a_bevelled_part_round_trips_through_a_project_file(tmp_path):
     assert ops.ungroup(loaded)[0].params == box.params
 
 
+# --- Set back differently on each face, or by an angle ---------------------------------------
+
+
+def test_a_bevel_set_back_differently_on_each_face_starts_on_the_face_clicked():
+    box = new_primitive("cube")
+    group = edges.chamfer(box, face_towards(box, (0, 0, 1)), (10, 0, 20), 2.0, distance2=4.0)
+    assert shape_geometry(group).volume == pytest.approx(8000.0 - 20 * 0.5 * 2.0 * 4.0)
+    # 2 mm in along the top, 4 mm down the side.
+    assert solid_at(group, (7.9, 0, 19.9)) and not solid_at(group, (9.9, 0, 17.0))
+    assert solid_at(group, (9.9, 0, 15.8))
+    side = edges.chamfer(box, face_towards(box, (1, 0, 0)), (10, 0, 20), 2.0, distance2=4.0)
+    # Clicked on the side instead: 2 mm down it, 4 mm in along the top.
+    assert not solid_at(side, (7.0, 0, 19.9)) and solid_at(side, (9.9, 0, 17.0))
+
+
+@pytest.mark.parametrize("angle, other", [(45.0, 2.0), (60.0, 2.0 * np.sqrt(3.0)), (30.0, 2.0 / np.sqrt(3.0))])
+def test_a_bevel_given_by_a_distance_and_an_angle_from_the_face_clicked(angle, other):
+    box = new_primitive("cube")
+    group = edges.chamfer(box, face_towards(box, (0, 0, 1)), (10, 0, 20), 2.0, angle=angle)
+    assert shape_geometry(group).volume == pytest.approx(8000.0 - 20 * 0.5 * 2.0 * other, rel=1e-6)
+    assert solid_at(group, (7.9, 0, 19.9)) and not solid_at(group, (9.9, 0, 20 - 0.5 * other))
+
+
+def test_an_angled_bevel_round_a_cylinders_rim():
+    cylinder = new_primitive("cylinder")
+    group = edges.chamfer(cylinder, face_towards(cylinder, (0, 0, 1)), (10, 0, 20), 1.0, angle=60.0)
+    taken = shape_geometry(cylinder).volume - shape_geometry(group).volume
+    # A 1 by 1.73 triangle carried round at its centre, 10 - 1/3 mm out.
+    assert taken == pytest.approx(2.0 * np.pi * (10 - 1 / 3) * 0.5 * np.sqrt(3.0), rel=0.01)
+
+
+def test_an_uneven_inside_bevel_fills_in_flat():
+    part = create.make_extrude(create.new_sketch(L_SHAPE, np.eye(4)), 10.0)
+    step = face_towards(part, (0, 1, 0), near=(15, 5, 5))
+    group = edges.chamfer(part, step, (10.1, 5, 5), 2.0, distance2=3.0)
+    added = shape_geometry(group).volume - shape_geometry(part).volume
+    assert added == pytest.approx(10 * 0.5 * 2.0 * 3.0)
+    assert solid_at(group, (11.5, 5.15, 5)) and not solid_at(group, (12.2, 5.15, 5))  # 2 mm along the step
+
+
+@pytest.mark.parametrize("kwargs, words", [
+    ({"distance2": 0.0}, "more than 0"), ({"angle": 0.0}, "more than 0 and less than 180"),
+    ({"angle": 90.0}, "too steep"), ({"distance2": 25.0}, "Try 1.6 mm or less along the face you clicked, and 20.0 mm along the other."),
+    ({"angle": 85.0}, "along the face you clicked."),
+])
+def test_uneven_bevels_it_cant_make_are_refused(kwargs, words):
+    box = new_primitive("cube")
+    with pytest.raises(BuildError) as err:
+        edges.chamfer(box, face_towards(box, (0, 0, 1)), (10, 0, 20), 2.0, **kwargs)
+    assert words in str(err.value)
+    assert_plain(str(err.value))
+
+
+def test_the_form_bevels_by_a_distance_and_an_angle_in_one_undo_step(window, monkeypatch, qapp):
+    window.add_primitive("cube")
+    box = window.document.scene.shapes[0]
+    monkeypatch.setattr(modify_actions, "ask_chamfer", lambda parent: {
+        "distance": 2.0, "how": "angle", "distance2": 9.0, "angle": 60.0})
+    window.do_chamfer()
+    steps = len(window.document._undo)
+    window._on_surface_picked(box.id, face_towards(box, (0, 0, 1)), (9, 0, 20))
+    qapp.processEvents()
+    group = window.document.scene.shapes[0]
+    assert len(window.document._undo) == steps + 1
+    assert shape_geometry(group).volume == pytest.approx(8000.0 - 20 * 2.0 * np.sqrt(3.0), rel=1e-6)
+    window.do_undo()
+    assert window.document.scene.shapes[0].id == box.id
+
+
+def test_the_window_bevels_by_two_distances(window, warnings):
+    window.add_primitive("cube")
+    box = window.document.scene.shapes[0]
+    top = face_towards(box, (0, 0, 1))
+    assert window.bevel_edge(box.id, top, (10, 0, 20), 2.0, "two", 4.0)
+    assert shape_geometry(window.document.scene.shapes[0]).volume == pytest.approx(8000.0 - 80.0)
+    steps = len(window.document._undo)
+    group = window.document.scene.shapes[0]
+    assert not window.bevel_edge(group.id, face_towards(group, (0, 0, 1)), (0, -10, 20), 2.0, "angle", angle=95.0)
+    assert warnings and len(window.document._undo) == steps
+
+
+def test_an_uneven_bevel_round_trips_through_a_project_file(tmp_path):
+    box = new_primitive("cube")
+    group = edges.chamfer(box, face_towards(box, (0, 0, 1)), (10, 0, 20), 2.0, angle=30.0)
+    path = tmp_path / "part.mesh"
+    save_project(Scene(shapes=[group]), path)
+    loaded = load_project(path).shapes[0]
+    assert shape_geometry(loaded).volume == pytest.approx(shape_geometry(group).volume)
+    assert ops.ungroup(loaded)[0].params == box.params
+
+
 def test_chamfer_form_is_plain_language(qapp, close_qt_widget):
     from mesh.panels import FormDialog
 
@@ -169,3 +260,64 @@ def test_chamfer_form_is_plain_language(qapp, close_qt_widget):
                                         note=modify_actions.CHAMFER_NOTE))
     for text in dialog.labels():
         assert_plain(text)
+
+
+# --- Several edges in one go ----------------------------------------------------------
+
+
+def test_every_edge_round_a_face_is_bevelled_in_one_go():
+    box = new_primitive("cube")
+    group = edges.chamfer(box, face_towards(box, (0, 0, 1)), (10, 0, 20), 2.0, whole_face=True)
+    # Four 2 mm bevels, less the corners where two cross (8/3 mm^3 each, taken once).
+    assert shape_geometry(group).volume == pytest.approx(8000.0 - 4 * 20 * 2.0 + 4 * 8 / 3)
+    assert len(ops.ungroup(group)) == 5
+
+
+def test_more_edges_bevelled_unevenly_start_on_the_face_each_was_clicked_on():
+    box = new_primitive("cube")
+    top, side = face_towards(box, (0, 0, 1)), face_towards(box, (1, 0, 0))
+    group = edges.chamfer(box, top, (0, -10, 20), 1.0, distance2=3.0, more=[[side, (10, 0, 1)]])
+    assert len(ops.ungroup(group)) == 3
+    assert shape_geometry(group).volume == pytest.approx(8000.0 - 2 * 20 * 1.5)
+    assert not solid_at(group, (0, -9.9, 18.0))  # 1 mm across the top clicked, 3 mm down the front
+    assert not solid_at(group, (8.5, 0, 0.2)) and solid_at(group, (9.9, 0, 1.5))  # 1 mm up the side
+
+
+def test_finishing_with_nothing_picked_keeps_waiting_and_esc_changes_nothing(window, monkeypatch, qapp):
+    window.add_primitive("cube")
+    box = window.document.scene.shapes[0]
+    top = face_towards(box, (0, 0, 1))
+    monkeypatch.setattr(modify_actions, "ask_chamfer",
+                        lambda parent: {"distance": 1.0, "how": "equal", "edges": "more"})
+    steps = len(window.document._undo)
+    window.do_chamfer()
+    window._on_surface_picked(box.id, top, (10, 0, 20))
+    qapp.processEvents()
+    assert window.tool == "chamfer_more"
+    window._on_surface_picked(box.id, top, (9.5, 5, 20))  # the same edge again: left out
+    assert window.statusBar().currentMessage().startswith("Picked: 0.")
+    assert window.viewport.marked_actor is None
+    window.do_chamfer()
+    assert window.tool == "chamfer_more"
+    assert window.statusBar().currentMessage() == window.NOTHING_PICKED.format(
+        prompt=window.TOOL_PROMPTS["chamfer_more"])
+    window.stop_tool()
+    assert window.tool is None and len(window.document._undo) == steps
+
+
+def test_bevelling_more_edges_in_one_undo_step(window, monkeypatch, qapp):
+    window.add_primitive("cube")
+    box = window.document.scene.shapes[0]
+    top = face_towards(box, (0, 0, 1))
+    monkeypatch.setattr(modify_actions, "ask_chamfer",
+                        lambda parent: {"distance": 2.0, "how": "equal", "edges": "more"})
+    steps = len(window.document._undo)
+    window.do_chamfer()
+    window._on_surface_picked(box.id, top, (10, 0, 20))
+    qapp.processEvents()
+    window._on_surface_picked(box.id, top, (-10, 0, 20))
+    window.do_chamfer()
+    assert window.tool is None and len(window.document._undo) == steps + 1
+    assert shape_geometry(window.document.scene.shapes[0]).volume == pytest.approx(8000.0 - 2 * 20 * 2.0)
+    window.do_undo()
+    assert window.document.scene.shapes[0].id == box.id
