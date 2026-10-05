@@ -195,9 +195,9 @@ TOOLS: tuple[ExpertTool, ...] = (
     ),
     ExpertTool(
         "link_sizes", "modify", "&Link Sizes to Parameters...",
-        "Make the selected part's sizes, position or turn follow formulas of your parameters, "
-        "such as width / 2. Typing a number in the Details panel ends that link. Sketch "
-        "curves can't be linked.",
+        "Make the selected part's sizes, position or turn, or a sketch's curves, follow "
+        "formulas of your parameters, such as width / 2. Typing a number in the Details panel "
+        "or Change Sketch ends that link. A sweep's path and a loft's outlines can't be linked.",
         "do_link_sizes",
     ),
     ExpertTool(

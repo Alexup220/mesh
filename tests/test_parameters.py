@@ -119,6 +119,56 @@ def test_links_that_cannot_be_used(links, words):
     assert_plain(str(err.value))
 
 
+CURVES = [{"type": "rectangle", "corner": [0.0, 0.0], "width": 20.0, "height": 10.0},
+          {"type": "polygon", "centre": [40.0, 0.0], "sides": 6, "radius": 5.0, "angle": 0.0},
+          {"type": "spline", "points": [[0.0, 30.0], [10.0, 40.0], [20.0, 30.0]], "closed": False}]
+
+
+def test_a_sketchs_curves_can_be_linked():
+    from mesh import create
+
+    drawn = create.new_sketch(CURVES, np.eye(4))
+    fields = parameters.linkable(drawn)
+    assert fields[:6] == ["x", "y", "z", "rx", "ry", "rz"]
+    assert {"curve1.corner.x", "curve1.width", "curve2.sides", "curve2.angle", "curve3.points.2.y"} <= set(fields)
+    assert "curve3.closed" not in fields
+    assert parameters.field_words("curve3.points.2.y") == "curve 3 point 2 Y"
+    assert parameters.curve_label(drawn, "curve1.corner.x") == "Curve 1 (rectangle): corner X (mm)"
+    assert parameters.curve_label(drawn, "curve2.angle") == "Curve 2 (polygon): turn (degrees)"
+    drawn.links = {"curve1.width": "width", "curve2.sides": "wall * 2.2", "curve3.points.2.y": "inner"}
+    assert parameters.apply_links([drawn], parameters.values(TABLE)) == [drawn]
+    rect, polygon, spline = drawn.params["entities"]
+    assert rect["width"] == 40.0 and polygon["sides"] == 4 and spline["points"][1] == [10.0, 36.0]
+    assert CURVES[0]["width"] == 20.0  # the curves given are not changed
+    assert parameters.current(drawn, "curve2.sides") == 4
+
+
+@pytest.mark.parametrize("links, words", [
+    ({"curve1.width": "wall - 2"}, "curve 1 width would be 0"),
+    ({"curve2.sides": "wall"}, "curve 2 sides would be 2"),
+    ({"curve4.width": "2"}, "has no curve 4 width"),
+])
+def test_curve_links_that_cannot_be_used(links, words):
+    from mesh import create
+
+    drawn = create.new_sketch(CURVES, np.eye(4))
+    with pytest.raises(parameters.ParameterError) as err:
+        parameters.check_links(drawn, links, parameters.values(TABLE))
+    assert words in str(err.value)
+    assert_plain(str(err.value))
+
+
+def test_a_curve_a_sketch_cannot_draw_is_refused():
+    from mesh import create
+
+    drawn = create.new_sketch([{"type": "line", "start": [0.0, 0.0], "end": [10.0, 0.0]}], np.eye(4))
+    drawn.links = {"curve1.end.x": "wall - 2"}
+    with pytest.raises(parameters.ParameterError) as err:
+        parameters.apply_links([drawn], parameters.values(TABLE))
+    assert "curve 1 can't take 0 there" in str(err.value)
+    assert_plain(str(err.value))
+
+
 def test_users_of_a_parameter():
     a, b = new_primitive("cube"), new_primitive("cube")
     a.links = {"width": "inner + 1"}
@@ -261,6 +311,81 @@ def test_linking_through_the_form(window, monkeypatch):
         shape=shape.name, known=known) or {"height": "wall * 3"})
     window.do_link_sizes()
     assert seen["known"]["inner"] == 36 and box.params["height"] == 6
+
+
+RECT = [{"type": "rectangle", "corner": [0.0, 0.0], "width": 20.0, "height": 10.0},
+        {"type": "circle", "centre": [10.0, 5.0], "diameter": 4.0}]
+
+
+def drawn_sketch(window):
+    window.add_sketch(RECT, np.eye(4))
+    return window.document.scene.selected()[0]
+
+
+def test_a_part_made_from_a_sketch_follows_its_linked_curves(window, tmp_path):
+    window.set_parameters(TABLE)
+    drawn = drawn_sketch(window)
+    window.extrude_selected(5.0)
+    part = window.document.scene.selected()[0]
+    assert window.set_links(part.id, {"curve1.width": "width", "curve2.diameter": "wall * 3"})
+    assert part.params["entities"][0]["width"] == 40.0
+    volume = shape_geometry(part).volume
+    assert volume == pytest.approx((40 * 10 - np.pi * 9) * 5, rel=0.01)
+    window.set_parameters([{**TABLE[0], "formula": "30"}, *TABLE[1:]])
+    assert shape_geometry(part).volume == pytest.approx((30 * 10 - np.pi * 9) * 5, rel=0.01)
+    window.do_undo()
+    assert window.document.scene.get(part.id).params["entities"][0]["width"] == 40.0
+    file = tmp_path / "curves.mesh"
+    window.save_to(file)
+    loaded = load_project(file).get(part.id)
+    assert loaded.links == {"curve1.width": "width", "curve2.diameter": "wall * 3"}
+    assert drawn.id not in {s.id for s in window.document.scene.shapes}
+
+
+def test_change_sketch_ends_the_links_of_numbers_typed_over(window):
+    window.set_parameters(TABLE)
+    drawn = drawn_sketch(window)
+    assert window.set_links(drawn.id, {"curve1.width": "width", "curve1.height": "inner / 4",
+                                       "curve2.diameter": "wall"})
+    entities = [dict(e) for e in drawn.params["entities"]]
+    entities[0] = {**entities[0], "width": 25.0}  # typed over
+    assert window.set_sketch_entities(drawn, entities)
+    assert drawn.links == {"curve1.height": "inner / 4", "curve2.diameter": "wall"}
+    assert window.statusBar().currentMessage() == window.LINK_ENDED
+    # Taking the circle out ends its link too.
+    assert window.set_sketch_entities(drawn, entities[:1])
+    assert drawn.links == {"curve1.height": "inner / 4"}
+    window.do_undo()
+    window.do_undo()
+    assert window.document.scene.get(drawn.id).links["curve1.width"] == "width"
+
+
+def test_with_a_history_parts_follow_their_sketchs_linked_curves(window):
+    window.set_parameters(TABLE)
+    window.start_history()
+    drawn = drawn_sketch(window)
+    window.set_links(drawn.id, {"curve1.width": "width"})
+    window.extrude_selected(5.0, keep_sketch=True)
+    part = window.document.scene.selected()[0]
+    assert np.ptp(shape_geometry(part).bounds, axis=0)[0] == pytest.approx(40.0)
+    assert window.set_parameters([{**TABLE[0], "formula": "60"}, *TABLE[1:]])
+    part = window.document.scene.get(part.id)
+    assert np.ptp(shape_geometry(part).bounds, axis=0)[0] == pytest.approx(60.0)
+
+
+def test_curve_labels_in_the_link_form(qapp, close_qt_widget):
+    from mesh import create
+    from mesh.panels import FormDialog
+
+    drawn = create.new_sketch(CURVES, np.eye(4))
+    fields = parameter_actions.link_fields(drawn)
+    labels = {key: label for key, label, _value, _options in fields}
+    assert labels["curve1.width"] == "Curve 1 (rectangle): width (mm)"
+    assert labels["curve3.points.1.x"] == "Curve 3 (spline): point 1 X (mm)"
+    assert labels["x"] == "Left / right (mm)"
+    dialog = close_qt_widget(FormDialog(None, "Link Sizes of Sketch", fields, note=parameter_actions.link_note({})))
+    for text in dialog.labels():
+        assert_plain(text)
 
 
 def test_parameter_text_is_plain_language(qapp, close_qt_widget):

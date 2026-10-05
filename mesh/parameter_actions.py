@@ -147,8 +147,16 @@ def ask_parameters(parent, rows) -> list | None:
         dialog.deleteLater()
 
 
+def link_label(shape, field: str) -> str:
+    if field in FIELD_LABELS:
+        return FIELD_LABELS[field]
+    if field.startswith("curve"):
+        return parameters.curve_label(shape, field)
+    return parameters.field_words(field).capitalize()
+
+
 def link_fields(shape):
-    return [(field, FIELD_LABELS[field], str(shape.links.get(field, "")), {})
+    return [(field, link_label(shape, field), str(shape.links.get(field, "")), {})
             for field in parameters.linkable(shape)]
 
 
@@ -156,7 +164,8 @@ def link_note(known: dict) -> str:
     listed = ", ".join(f"{name} = {value:g}" for name, value in known.items())
     return (f"Type a formula for each number that should follow your parameters ({listed}); "
             "leave a box empty for a number you set yourself. Typing a number in the Details "
-            "panel later ends that link.")
+            "panel or Change Sketch later ends that link. A sketch's curves are numbered as "
+            "Change Sketch lists them.")
 
 
 def ask_links(parent, shape, known: dict) -> dict | None:

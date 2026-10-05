@@ -15,7 +15,7 @@ on success.
 
 from PySide6.QtCore import QTimer
 
-from mesh import construct, create, features, sketch, sketch_editor, threads
+from mesh import construct, create, features, parameters, sketch, sketch_editor, threads
 from mesh.component_actions import ComponentActions
 from mesh.construct_actions import ConstructActions
 from mesh.history import replayable
@@ -258,10 +258,17 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
     def _apply_sketch_change(self, shape, changed) -> bool:
         if changed.params == shape.params:
             return False
+        # A curve number typed over, or a curve taken out, no longer
+        # follows its parameter.
+        kept = parameters.links_kept(shape, changed)
         self.document.snapshot("change sketch")
         shape.params = changed.params
         shape.transform = changed.transform
+        if kept != (shape.links or {}):
+            shape.links = kept
+            self._link_ended = True
         self.sync()
+        self._said_link_ended()
         return True
 
     def set_sketch_entities(self, shape, entities) -> bool:
