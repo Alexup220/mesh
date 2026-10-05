@@ -1,8 +1,8 @@
 """The window's Expert mode actions: the Sketch and Create menus.
 
 Create's patterns and Mirror are in mesh.pattern_actions, the Modify menu
-in mesh.modify_actions and the Construct menu in mesh.construct_actions;
-all are mixed in here.
+in mesh.modify_actions, the Construct menu in mesh.construct_actions and
+the Inspect menu in mesh.inspect_actions; all are mixed in here.
 
 MeshWindow inherits these, so they share its document, undo and click
 tools. Each tool's geometry lives in a core module (mesh.sketch,
@@ -14,6 +14,7 @@ from PySide6.QtCore import QTimer
 
 from mesh import construct, create, features, sketch, sketch_editor
 from mesh.construct_actions import ConstructActions
+from mesh.inspect_actions import InspectActions
 from mesh.modify_actions import ModifyActions
 from mesh.pattern_actions import PatternActions
 from mesh.panels import run_form
@@ -91,7 +92,7 @@ def ask_loft(parent, sketches) -> dict | None:
     )
 
 
-class ExpertActions(ModifyActions, PatternActions, ConstructActions):
+class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActions):
     """Mixed into MeshWindow (see mesh.expert for the menu items)."""
 
     # The click-on-a-part tools Expert mode adds; turning the mode off

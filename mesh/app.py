@@ -230,6 +230,8 @@ class MeshWindow(ExpertActions, QMainWindow):
         saved = self.settings.save()
         if not on and self.tool in self.EXPERT_CLICK_TOOLS:
             self.stop_tool()
+        if not on:
+            self.viewport.clear_section()
         self._apply_expert_mode()
         if self.settings.path is not None and not saved:
             self.statusBar().showMessage(self.EXPERT_NOT_SAVED)
@@ -937,8 +939,10 @@ class MeshWindow(ExpertActions, QMainWindow):
         # empty document) was open before rather than leaving the window
         # half-switched to a document it couldn't actually display.
         previous_document = self.document
-        # A clicked face or measured point belongs to the old project.
+        # A clicked face or measured point belongs to the old project, and
+        # so does a section view's cut.
         self._clear_tool()
+        self.viewport.clear_section()
         self.document = new_document
         try:
             self.sync()

@@ -228,6 +228,13 @@ reflected. What differs from Fusion is how the pattern is chosen.
   the end of an edge, where an edge meets a face, or where three planes
   meet is not offered. Three selected points make a plane and two make an
   axis; nothing else takes a point yet.
+- **Section view** only changes the view, one plane at a time, and is
+  not saved with the project (Fusion keeps section analyses in the
+  browser). The plane is a selected sketch or construction plane, or a
+  flat or upright plane through the middle of the parts, moved by a typed
+  distance. The orange cut faces can't be clicked as a part's face; a
+  click there counts as a click on nothing. A part with gaps can't be
+  closed, so it is cut along its triangles with no cap.
 
 ## Platform notes
 

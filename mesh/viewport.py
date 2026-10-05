@@ -38,7 +38,7 @@ from vtkmodules.vtkRenderingCore import (
     vtkRenderer,
 )
 
-from mesh import guides
+from mesh import guides, section
 from mesh.scene import Scene
 from mesh.shapes import hole_clearance, is_reference, shape_geometry
 from mesh.sketch import sketch_lines
@@ -154,6 +154,14 @@ class Viewport(QWidget):
         # shape's own parameters and transform have not changed since the
         # last rebuild.
         self._geometry_keys: dict[str, tuple] = {}
+        # Section view (Expert mode): (point, way it faces) of the plane the
+        # parts are drawn cut along, or None. While it is on, each cut
+        # part's actor shows what is left of its own faces, `_face_maps`
+        # says which of the part's triangles each of those came from, and
+        # `_caps` holds the flat faces that close each cut.
+        self.section: tuple[np.ndarray, np.ndarray] | None = None
+        self._face_maps: dict[str, np.ndarray] = {}
+        self._caps: dict[str, vtkActor] = {}
 
         # QVTKRenderWindowInteractor is a "native"/foreign-window widget
         # (WA_PaintOnScreen); Qt's layout engine treats its sizeHint()
@@ -247,7 +255,10 @@ class Viewport(QWidget):
         an equal key are guaranteed to produce the same polydata."""
         transform = np.asarray(shape.transform, dtype=np.float64)
         clearance = hole_clearance(shape, self._clearances())
-        return (shape.kind, repr(shape.params), transform.tobytes(), clearance)
+        cut = None
+        if self.section is not None and not is_reference(shape):
+            cut = tuple(np.concatenate(self.section).tolist())
+        return (shape.kind, repr(shape.params), transform.tobytes(), clearance, cut)
 
     def _clearances(self) -> dict | None:
         return getattr(self._scene, "fit_clearances", None)
@@ -261,6 +272,10 @@ class Viewport(QWidget):
             if shape_id not in wanted:
                 self.renderer.RemoveActor(self._actors.pop(shape_id))
                 self._geometry_keys.pop(shape_id, None)
+                self._face_maps.pop(shape_id, None)
+        for shape_id in list(self._caps):
+            if shape_id not in wanted or self.section is None:
+                self.renderer.RemoveActor(self._caps.pop(shape_id))
         guides = {s.id for s in self._scene.shapes if s.visible and is_reference(s)}
         for shape_id in list(self._outlines):
             if shape_id not in guides:
@@ -280,9 +295,12 @@ class Viewport(QWidget):
             key = self._geometry_key(shape)
             changed = self._geometry_keys.get(shape.id) != key
             if changed:
-                actor.GetMapper().SetInputData(
-                    _to_polydata(shape_geometry(shape, self._clearances()))
-                )
+                tm = shape_geometry(shape, self._clearances())
+                if self.section is not None and not is_reference(shape):
+                    tm = self._cut(shape.id, tm)
+                else:
+                    self._face_maps.pop(shape.id, None)
+                actor.GetMapper().SetInputData(_to_polydata(tm))
                 self._geometry_keys[shape.id] = key
 
             if is_reference(shape):
@@ -295,8 +313,42 @@ class Viewport(QWidget):
             prop.SetEdgeVisibility(shape.id in selected)
             prop.SetEdgeColor(1.0, 0.85, 0.2)
             prop.SetLineWidth(2.0)
+            cap = self._caps.get(shape.id)
+            if cap is not None:
+                cap.GetProperty().SetOpacity(HOLE_OPACITY if shape.is_hole else 1.0)
 
         self._render()
+
+    def _cut(self, shape_id: str, tm):
+        """Section view: what is left of a part, with its cap actor."""
+        kept, face_map, cap_tm = section.cut_away(tm, *self.section)
+        self._face_maps[shape_id] = face_map
+        cap = self._caps.get(shape_id)
+        if cap is None:
+            cap = vtkActor()
+            cap.SetMapper(vtkPolyDataMapper())
+            cap.GetProperty().SetColor(*_hex_to_rgb(section.SECTION_COLOR))
+            self._caps[shape_id] = cap
+            self.renderer.AddActor(cap)
+        cap.GetMapper().SetInputData(_to_polydata(cap_tm))
+        return kept
+
+    def set_section(self, origin, normal) -> None:
+        """Draw every part cut along the plane through `origin`, hiding the
+        side `normal` points to. Only the drawing changes."""
+        self.section = section.where(origin, normal)
+        self.refresh()
+
+    def clear_section(self) -> None:
+        """Draw the parts whole again."""
+        if self.section is None:
+            return
+        self.section = None
+        self.refresh()
+
+    def cap_for(self, shape_id: str):
+        """A cut part's cap actor while the section view is on, or None."""
+        return self._caps.get(shape_id)
 
     def _refresh_guide(self, shape, shading: vtkActor, selected: bool, changed: bool) -> None:
         """A guide is faint shading plus its curves as lines, yellow and
@@ -332,6 +384,9 @@ class Viewport(QWidget):
         for shape_id, candidate in self._outlines.items():
             if candidate is actor:
                 return shape_id
+        for shape_id, candidate in self._caps.items():
+            if candidate is actor:
+                return shape_id
         return None
 
     def end_drag(self) -> None:
@@ -359,9 +414,20 @@ class Viewport(QWidget):
         point = tuple(float(v) for v in self._cell_picker.GetPickPosition())
         for shape_id, actor in self._actors.items():
             if actor is hit:
-                self.surface_picked.emit(shape_id, int(self._cell_picker.GetCellId()), point)
+                self.surface_picked.emit(shape_id, self.face_of_cell(shape_id, self._cell_picker.GetCellId()),
+                                         point)
                 return
+        # Nothing, or a section view's cap: the cut is not one of the
+        # part's own faces.
         self.surface_picked.emit("", -1, point)
+
+    def face_of_cell(self, shape_id: str, cell: int) -> int:
+        """The part's own triangle a drawn triangle is, even while the part
+        is drawn cut open."""
+        face_map = self._face_maps.get(shape_id)
+        if face_map is None:
+            return int(cell)
+        return int(face_map[cell]) if 0 <= cell < len(face_map) else -1
 
     def set_measure_line(self, a, b) -> None:
         """Draw (or move) the Measure tool's line from a to b."""

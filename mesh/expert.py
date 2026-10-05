@@ -242,6 +242,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "the centre of a cylinder's end.",
         "do_point_at_middle",
     ),
+    ExpertTool(
+        "section_view", "inspect", "&Section View...",
+        "See inside the parts: they are shown cut open along a flat or upright plane through "
+        "their middle, or along a selected sketch or construction plane. Only the view "
+        "changes; nothing is cut when you save or print. Choose it again to see them whole.",
+        "do_section_view",
+    ),
 )
 
 
