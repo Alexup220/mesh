@@ -525,3 +525,25 @@ def test_a_menu_has_its_items_before_its_window_opens(window, qapp):
     seen = QMetaObject.invokeMethod(root, "countAtOpen", Q_RETURN_ARG("QVariant"))
     root.deleteLater()
     assert seen > 1
+
+
+def test_running_a_dialog_command_from_the_command_search_does_not_crash(window, qapp):
+    """Choosing "Theme Editor..." in Ctrl+K closes the search from inside its
+    own key handler and opens the editor. Opening a window used to delete
+    the closed search window right there, which Qt aborts on."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    window.show_command_palette()
+    # No reference to the search window is kept here: the window's own
+    # list must be what keeps it alive, as in the app.
+    for ch in "theme editor":
+        QTest.keyClick(window.views[-1], Qt.Key_Space if ch == " " else getattr(Qt, "Key_" + ch.upper()))
+    # Posted, so nothing in this test holds the search window while
+    # Return is handled.
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    qapp.postEvent(window.views[-1], QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier, "\r"))
+    qapp.processEvents()
+    assert window.views[-1].title() == "Theme editor"
+    window.views[-1].close()

@@ -23,6 +23,7 @@ from PySide6.QtQml import QQmlEngine
 from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface
 from PySide6.QtQuickWidgets import QQuickWidget
 from PySide6.QtWidgets import QDockWidget, QSizePolicy, QToolBar, QVBoxLayout, QWidget
+from shiboken6 import isValid
 
 from mesh import themes
 from mesh.app import MeshWindow
@@ -241,7 +242,15 @@ class QmlWindow(MeshWindow):
         if modal:
             view.setModality(Qt.ApplicationModal)
         view.setFlags(Qt.Dialog)
-        self.views = [v for v in self.views if v.isVisible()] + [view]
+        # Closed windows go with deleteLater, never by dropping them here:
+        # this often runs inside a closed window's own key or click handler
+        # (Ctrl+K closes the search, then runs Theme Editor...), and
+        # deleting a window during its own QML handler makes Qt abort.
+        # Their entries stay until Qt has deleted them.
+        for old in self.views:
+            if isValid(old) and not old.isVisible():
+                old.deleteLater()
+        self.views = [v for v in self.views if isValid(v)] + [view]
         view.show()
         view.requestActivate()
         return view
@@ -328,7 +337,8 @@ class QmlWindow(MeshWindow):
         self.settings.layout = self.layout_text()
         self.settings.save()
         for view in self.views:
-            view.close()
+            if isValid(view):
+                view.close()
         super().closeEvent(event)
 
     # --- keeping the front end up to date --------------------------------------
