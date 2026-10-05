@@ -176,14 +176,21 @@ tools do the closest honest version of their Fusion counterparts:
 The copies themselves are exact: each is the same part moved, turned or
 reflected. What differs from Fusion is how the pattern is chosen.
 
-- **Directions are the world's.** Pattern in Rows goes along left/right,
-  forward/back or up/down, and Pattern Around a Line turns round a line
-  along one of those three, through a point typed in millimetres, or round
-  a construction axis selected with the parts (Phase 4). Fusion also lets
-  an edge or a sloping face set the direction; picking one is not offered.
-- **No suppressing single copies**, no "symmetric" (both ways from the
-  part) option, and no spacing by total extent in Rows: spacing is from one
-  copy to the next.
+- **Directions.** Pattern in Rows goes along left/right, forward/back,
+  up/down or a construction axis selected with the parts, and Pattern
+  Around a Line turns round a line along one of those three, through a
+  point typed in millimetres, or round a construction axis selected with
+  the parts (Phase 4). Fusion also lets an edge or a sloping face set the
+  direction; picking one is not offered (make an axis through two points
+  on the edge first).
+- **Copies are left out by number**, typed (the parts are 1), where Fusion
+  ticks them off in the view. Both ways (Fusion's symmetric) and spacing by
+  the whole length are offered in Rows, and both ways in Around a Line; in
+  both, the count and the spacing or angle go each way from the parts (so
+  Around a Line's angle each way is less than 180 degrees). Along a Path
+  goes one way only, and its spacing is from one copy to the next or spread
+  over the whole path. Rows' two directions share one choice of spacing
+  and of both ways.
 - **Pattern Along a Path** needs a sketch as the path; a part's edge can't
   be picked. Curves are followed in their straight pieces (64 per circle),
   so a copy sits on a piece, slightly inside the true curve. With "Turn the

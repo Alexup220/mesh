@@ -353,9 +353,26 @@ def scenario_rectangular(window):
     window.rectangular_pattern_selected(3, 30.0, "x", 2, 25.0, "y")
 
 
+def scenario_rectangular_both_ways(window):
+    add(window)
+    window.rectangular_pattern_selected(3, 60.0, "x", 2, 25.0, "z", extent=True, symmetric=True, skip="2, 7")
+
+
+def scenario_rectangular_along_an_axis(window):
+    box = add(window)
+    window.axis_through_spots([(0.0, 0.0, 0.0), (1.0, 1.0, 0.0)])
+    pick(window, box, window.document.scene.selected()[0])
+    window.rectangular_pattern_selected(3, 30.0, "selected")
+
+
 def scenario_circular(window):
     add(window)
     window.circular_pattern_selected(4, "z", (40.0, 0.0, 0.0), 360.0)
+
+
+def scenario_circular_both_ways(window):
+    add(window)
+    window.circular_pattern_selected(3, "z", (40.0, 0.0, 0.0), 90.0, symmetric=True, skip=[3])
 
 
 def scenario_path(window):
@@ -363,6 +380,13 @@ def scenario_path(window):
     path = add_sketch(window, LINE)
     pick(window, box, path)
     window.path_pattern_selected(3)
+
+
+def scenario_path_leaving_out(window):
+    box = add(window)
+    path = add_sketch(window, LINE)
+    pick(window, box, path)
+    window.path_pattern_selected(4, 15.0, skip="3")
 
 
 def scenario_mirror_copy(window):
@@ -715,7 +739,7 @@ SAMPLE_ARGS = {
     "about": "base", "op": "union", "keep_tools": False, "keep_tool": False, "wall": 2.0, "far_side": False,
     "radius": 2.0, "count": 3, "spacing": 10.0, "count2": 1, "spacing2": 30.0, "axis2": "y",
     "centre": [0.0, 0.0, 0.0], "follow": False, "plane": "x", "open_top": False, "drain": 0.0,
-    "pegs": False, "peg_diameter": 4.0, "join": False,
+    "pegs": False, "peg_diameter": 4.0, "join": False, "extent": False, "symmetric": False, "skip": "",
 }
 
 

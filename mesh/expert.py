@@ -82,22 +82,25 @@ TOOLS: tuple[ExpertTool, ...] = (
     ),
     ExpertTool(
         "rectangular_pattern", "create", "Pattern in Ro&ws (Rectangular)...",
-        "Copy the selected parts in a row, a set distance apart, and in more rows if you "
-        "like: left/right, forward/back or up/down.",
+        "Copy the selected parts in a row, a set distance apart (or spread over a set length), "
+        "and in more rows if you like: left/right, forward/back, up/down or along a construction "
+        "axis selected with them, one way or both ways from the parts. Copies can be left out "
+        "by their number.",
         "do_rectangular_pattern",
     ),
     ExpertTool(
         "circular_pattern", "create", "Pattern Aro&und a Line (Circular)...",
         "Copy the selected parts round a line through a point you type, or round a "
-        "construction axis selected with them, turning each copy with it: all the way round "
-        "or over a set angle. The parts stay where they are.",
+        "construction axis selected with them, turning each copy with it: all the way round, "
+        "over a set angle, or spread evenly either side of the parts. The parts stay where they "
+        "are, and copies can be left out by their number.",
         "do_circular_pattern",
     ),
     ExpertTool(
         "path_pattern", "create", "Pattern Along a &Path...",
         "Select the parts and a sketch of a path: copies go along the path, spread evenly or "
-        "a set distance apart, and can turn as it turns. Curves are followed in short "
-        "straight pieces.",
+        "a set distance apart, and can turn as it turns. Copies can be left out by their "
+        "number. Curves are followed in short straight pieces.",
         "do_path_pattern",
     ),
     ExpertTool(

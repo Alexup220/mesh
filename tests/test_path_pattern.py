@@ -228,6 +228,28 @@ def test_path_patterned_parts_round_trip_through_a_project_file(tmp_path):
     assert [s.transform for s in loaded] == [pytest.approx(s.transform) for s in shapes]
 
 
+def test_copies_along_a_path_are_left_out_by_number():
+    copies = patterns.along_path([box_at()], path(LINE), 4, skip=[2])
+    assert middles(copies) == [(40, 0, 10), (60, 0, 10)]
+    with pytest.raises(BuildError) as err:
+        patterns.along_path([box_at()], path(LINE), 4, skip=[5])
+    assert "no number 5" in str(err.value)
+
+
+def test_the_window_leaves_path_copies_out(window, warnings):
+    window.add_primitive("cube")
+    box = window.document.scene.shapes[0]
+    window.add_sketch(LINE, np.eye(4))
+    guide = window.document.scene.shapes[1]
+    window.document.scene.select([box.id, guide.id])
+    assert window.path_pattern_selected(3, skip="3")
+    assert middles(window.document.scene.shapes[2:]) == [(30, 0, 10)]
+    steps = len(window.document._undo)
+    window.document.scene.select([box.id, guide.id])
+    assert not window.path_pattern_selected(3, skip="1")
+    assert warnings and len(window.document._undo) == steps
+
+
 def test_path_form_is_plain_language(qapp, close_qt_widget):
     from mesh.panels import FormDialog
 
