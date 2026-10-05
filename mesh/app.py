@@ -282,6 +282,7 @@ class MeshWindow(ExpertActions, QMainWindow):
     # --- helpers -------------------------------------------------------
 
     def sync(self, keep_gizmo: bool = False) -> None:
+        self._carry_components()
         self.viewport.set_scene(self.document.scene)
         self.viewport.refresh()
         chosen = self.document.scene.selected()

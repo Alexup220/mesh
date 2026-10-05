@@ -55,9 +55,9 @@ def summary(scene):
     out = []
     for shape in scene.shapes:
         tm = shape_geometry(shape, scene.fit_clearances)
-        out.append((shape.id, shape.name, shape.kind, shape.is_hole,
+        out.append((shape.id, shape.name, shape.kind, shape.is_hole, shape.visible, shape.component,
                     np.round(tm.bounds, 3).tolist(), round(float(tm.area), 2)))
-    return out
+    return out + [scene.components]
 
 
 def add(window, kind="cube", dx=0.0):
@@ -511,6 +511,30 @@ def scenario_sketch_change(window):
     part = window.document.scene.selected()[0]
     window.set_sketch_entities(part, BIG)
     assert source.id not in {s.id for s in window.document.scene.shapes}
+
+
+def scenario_make_component(window):
+    two_boxes(window)
+    window.make_component()
+
+
+def scenario_component_tools(window):
+    two_boxes(window)
+    window.make_component("Pair")
+    made = window.document.scene.components[0]["id"]
+    window.rename_component(made, "Gearbox")
+    window.set_component_shown(made, False)
+    window.set_component_shown(made, True)
+    window.copy_component(made)
+    window.leave_component()
+    window.break_apart_component(made)
+
+
+def scenario_component_keeps_what_a_tool_makes(window):
+    box = add(window)
+    window.make_component()
+    window.round_edge(box.id, face_towards(box, (0, 0, 1)), (10.0, 0.0, 20.0), 3.0)
+    assert window.document.scene.shapes[0].component == window.document.scene.components[0]["id"]
 
 
 SCENARIOS = {name[len("scenario_"):]: fn for name, fn in globals().items() if name.startswith("scenario_")}

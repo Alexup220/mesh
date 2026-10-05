@@ -2,7 +2,8 @@
 
 Create's patterns and Mirror are in mesh.pattern_actions, the Modify menu
 in mesh.modify_actions (its parameters in mesh.parameter_actions, its
-history list in mesh.history_actions), the
+history list in mesh.history_actions), the Assemble menu in
+mesh.component_actions, the
 Construct menu in mesh.construct_actions and the Inspect menu in
 mesh.inspect_actions; all are mixed in here.
 
@@ -15,6 +16,7 @@ on success.
 from PySide6.QtCore import QTimer
 
 from mesh import construct, create, features, sketch, sketch_editor, threads
+from mesh.component_actions import ComponentActions
 from mesh.construct_actions import ConstructActions
 from mesh.history import replayable
 from mesh.history_actions import HistoryActions
@@ -118,7 +120,7 @@ def ask_thread(parent, height: float, standard: str, pitch: float) -> dict | Non
 
 
 class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActions, ParameterActions,
-                    HistoryActions):
+                    HistoryActions, ComponentActions):
     """Mixed into MeshWindow (see mesh.expert for the menu items)."""
 
     # The click-on-a-part tools Expert mode adds; turning the mode off

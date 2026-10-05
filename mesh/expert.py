@@ -30,6 +30,7 @@ MENUS: tuple[tuple[str, str], ...] = (
     ("sketch", "S&ketch"),
     ("create", "&Create"),
     ("modify", "Mo&dify"),
+    ("assemble", "&Assemble"),
     ("construct", "C&onstruct"),
     ("inspect", "&Inspect"),
 )
@@ -205,6 +206,30 @@ TOOLS: tuple[ExpertTool, ...] = (
         "distance, a rounding's radius) or remove a step, and the project is worked out again "
         "so later steps follow.",
         "do_history",
+    ),
+    ExpertTool(
+        "new_component", "assemble", "&New Component from Selection...",
+        "Keep the selected parts (and sketches or guides) together as one named component, "
+        "without joining them. Parts a tool makes from a component's parts stay in it.",
+        "do_make_component",
+    ),
+    ExpertTool(
+        "select_component", "assemble", "&Select Whole Component",
+        "Add the rest of the selected part's component to the selection, to move or copy "
+        "the component as one.",
+        "do_select_component",
+    ),
+    ExpertTool(
+        "leave_component", "assemble", "&Take Out of Component",
+        "Take the selected parts out of their component. They stay where they are.",
+        "leave_component",
+    ),
+    ExpertTool(
+        "components", "assemble", "&Components...",
+        "List the components: rename one, select its parts, show or hide it, copy it, save it "
+        "for printing on its own, or break it apart into loose parts. Copies are separate: "
+        "changing one does not change the other.",
+        "do_components",
     ),
     ExpertTool(
         "plane_distance", "construct", "Plane at a &Distance...",

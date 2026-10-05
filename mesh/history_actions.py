@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from mesh import history, parameters
+from mesh import components, history, parameters
 from mesh.panels import run_form
 from mesh.scene import Document, Scene
 
@@ -230,6 +230,8 @@ class HistoryActions:
         finally:
             self.document.recording = True
         self.document.scene = scene
+        # Worked out already: nothing in it was made by the newest change.
+        self.document.action_before = None
         self._clear_tool()
         self.sync()
 
@@ -320,6 +322,7 @@ class HistoryActions:
         scene = scratch.scene
         history.rename_added(scene, {s.id for s in before.shapes},
                              [d["id"] for d in (step["effect"] or {}).get("added", [])])
+        components.carry_over(before, scene)  # as the window's sync does
         return history.changes(before, scene)
 
     def _rework(self, title: str, label: str, steps, rows=None, numbers=None) -> bool:
