@@ -204,7 +204,7 @@ TOOLS: tuple[ExpertTool, ...] = (
         "history", "modify", "Histor&y...",
         "Keep a list of every change to the project. Change a step's settings (an extrusion's "
         "distance, a rounding's radius) or remove a step, and the project is worked out again "
-        "so later steps follow.",
+        "so later steps follow, construction planes, axes and points included.",
         "do_history",
     ),
     ExpertTool(
@@ -255,7 +255,8 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "plane_points", "construct", "Plane Through &Three Points",
         "Click three points on parts (or select three construction points) for the plane "
-        "through them. A click near a corner of the face lands exactly on the corner.",
+        "through them. A click near a corner of the face lands exactly on the corner. The plane "
+        "stays where the points were, even when the history is worked out again.",
         "do_plane_through_points",
     ),
     ExpertTool(
@@ -285,7 +286,8 @@ TOOLS: tuple[ExpertTool, ...] = (
         "axis_points", "construct", "Axis Through Two &Points",
         "Click two points on parts (or select two construction points) for the axis through "
         "them, pointing from the first to the second. A click near a corner of the face lands "
-        "exactly on the corner.",
+        "exactly on the corner. The axis stays where the points were, even when the history is "
+        "worked out again.",
         "do_axis_two_points",
     ),
     ExpertTool(

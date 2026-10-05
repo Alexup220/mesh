@@ -200,11 +200,17 @@ reflected. What differs from Fusion is how the pattern is chosen.
 
 ## Expert mode, Phase 4 (Construct and Inspect): approximations and limits
 
-- **Guides don't follow what they were made from.** A construction plane,
-  axis or point is placed by the numbers worked out when it is made;
-  moving the part or sketch afterwards leaves the guide where it was
-  (Fusion keeps them linked). Move or turn it in the Details panel, or
-  make it again.
+- **Guides follow what they were made from only through the history.** A
+  construction plane, axis or point is placed by the numbers worked out
+  when it is made, with no live link (Fusion keeps them linked). When the
+  project keeps a history (Modify > History), a guide made by a Construct
+  tool is made again whenever the history is worked out again (a step
+  changed or removed, or new parameter values), so it follows what earlier
+  steps did to the face, part, sketch or guide it came from. A change made
+  after the guide (a later step, a drag, a number typed in the Details
+  panel) does not move it, and a plane or axis through clicked points (or
+  selected points) stays where those points were. Without a history,
+  move or turn a guide in the Details panel, or make it again.
 - **Construction planes** are drawn as a square (60 mm across, or sized
   round the face they came from) but go on without end. Offered: a plane a
   distance from a flat face, a sketch, another plane or the workplane's

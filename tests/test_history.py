@@ -698,6 +698,48 @@ def test_parameters_that_break_a_later_step_are_refused(window, warnings):
     assert window.document.scene.parameters[0]["formula"] == "40"
 
 
+def guide_at(scene, name):
+    return np.asarray(next(s for s in scene.shapes if s.name == name).transform)[:3, 3].round(6).tolist()
+
+
+def test_guides_made_by_construct_tools_follow_their_parts_when_the_history_is_worked_out(window):
+    window.set_parameters([{"name": "x", "formula": "0", "note": ""}, {"name": "w", "formula": "20", "note": ""}])
+    window.start_history()
+    cylinder = add(window, "cylinder")
+    window.set_links(cylinder.id, {"x": "x"})
+    window.axis_of_round_parts()                                             # Axis 1
+    box = add(window, "cube", dx=50.0)
+    window.set_links(box.id, {"width": "w"})
+    window.plane_from_face(box.id, face_towards(box, (1, 0, 0)), 5.0)        # Plane 1, on the box's side
+    window.point_at(box.id, face_towards(box, (1, 0, 0)), (60.0, 2.0, 3.0))  # Point 1, on that side
+    window.plane_through_spots([(50.0, 0.0, 20.0), (60.0, 0.0, 20.0), (50.0, 5.0, 20.0)])  # Plane 2
+    scene = window.document.scene
+    assert guide_at(scene, "Axis 1") == [0, 0, 10] and guide_at(scene, "Plane 1") == [65, 0, 10]
+    assert guide_at(scene, "Point 1") == [60, 2, 3]
+
+    assert window.set_parameters([{"name": "x", "formula": "30", "note": ""},
+                                  {"name": "w", "formula": "40", "note": ""}])
+    scene = window.document.scene
+    assert guide_at(scene, "Axis 1") == [30, 0, 10]  # made again round the moved cylinder
+    assert guide_at(scene, "Plane 1") == [75, 0, 10] and guide_at(scene, "Point 1") == [70, 2, 3]
+    # Through clicked points: those points were numbers, so it stays.
+    assert guide_at(scene, "Plane 2")[2] == 20 and guide_at(scene, "Plane 2")[0] == pytest.approx(160 / 3)
+
+    # A move after the guide is not worked into it: only earlier steps are.
+    window._on_edited(window.document.scene.shapes[0].id, "x", -40.0)
+    assert guide_at(window.document.scene, "Axis 1") == [30, 0, 10]
+
+
+def test_a_guide_follows_a_changed_earlier_step(window):
+    window.start_history()
+    box = add(window)
+    window.move_copy_selected(dx=10.0)
+    window.plane_from_face(box.id, face_towards(box, (1, 0, 0)), 5.0)
+    assert guide_at(window.document.scene, "Plane 1") == [25, 0, 10]
+    assert window.change_history_step(1, {"dx": 30.0})
+    assert guide_at(window.document.scene, "Plane 1") == [45, 0, 10]
+
+
 def test_a_history_is_saved_and_opened_with_the_project(window, tmp_path):
     round_then_pattern(window)
     file = tmp_path / "kept.mesh"
