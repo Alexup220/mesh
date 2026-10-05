@@ -26,7 +26,7 @@ from mesh.scene import Document, Scene
 
 HISTORY_NOTE = (
     "Every change to the project since the history started, in order. Change a step's "
-    "settings, skip it or remove it, and the whole project is worked out again: tools (Extrude, "
+    "settings, skip it, move it or remove it, and the whole project is worked out again: tools (Extrude, "
     "Round an Edge, Combine, the patterns and more) run again on the parts as they are by "
     "then, so later steps follow. Other steps (adding a shape, moving, typing in the Details "
     "panel) do again what they did."
@@ -144,7 +144,7 @@ class HistoryDialog(QDialog):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("History")
-        self.resize(560, 420)
+        self.resize(680, 420)
         layout = QVBoxLayout(self)
         self.note = QLabel(self)
         self.note.setWordWrap(True)
@@ -160,12 +160,16 @@ class HistoryDialog(QDialog):
         self.change_button.clicked.connect(self.change)
         self.skip_button = QPushButton("Skip", self)
         self.skip_button.clicked.connect(self.skip)
+        self.up_button = QPushButton("Move Up", self)
+        self.up_button.clicked.connect(lambda: self.move(-1))
+        self.down_button = QPushButton("Move Down", self)
+        self.down_button.clicked.connect(lambda: self.move(1))
         self.remove_button = QPushButton("Remove", self)
         self.remove_button.clicked.connect(self.remove)
         self.stop_button = QPushButton("Stop Keeping It", self)
         self.stop_button.clicked.connect(self.stop)
-        for button in (self.start_button, self.change_button, self.skip_button, self.remove_button,
-                       self.stop_button):
+        for button in (self.start_button, self.change_button, self.skip_button, self.up_button,
+                       self.down_button, self.remove_button, self.stop_button):
             bar.addWidget(button)
         bar.addStretch(1)
         layout.addLayout(bar)
@@ -187,6 +191,9 @@ class HistoryDialog(QDialog):
         for button in (self.change_button, self.skip_button, self.remove_button):
             button.setVisible(kept)
             button.setEnabled(bool(steps))
+        for button in (self.up_button, self.down_button):
+            button.setVisible(kept)
+            button.setEnabled(len(steps) > 1)
         self.stop_button.setVisible(kept)
         self._name_skip()
 
@@ -221,6 +228,12 @@ class HistoryDialog(QDialog):
             steps = self.window.history_steps()
             self.window.skip_history_step(row, not steps[row].get("off"))
             self.refresh()
+
+    def move(self, by: int) -> None:
+        row = self._row()
+        if row is not None and self.window.move_history_step(row, row + by):
+            self.refresh()
+            self.steps.setCurrentRow(row + by)
 
     def remove(self) -> None:
         row = self._row()
@@ -298,7 +311,7 @@ class HistoryActions:
         self._warn = lambda _title, text: warned.append(text)
         done = []
         try:
-            for number, step in zip(numbers or range(1, len(steps) + 1), steps):
+            for index, (number, step) in enumerate(zip(numbers or range(1, len(steps) + 1), steps)):
                 if step.get("off"):
                     done.append(copy.deepcopy(step))  # kept as it was, ready to be used again
                     continue
@@ -306,8 +319,12 @@ class HistoryActions:
                     effect = self._replay_step(scratch, step, warned)
                     parameters.apply_links(scratch.scene.shapes, known)
                 except (history.HistoryError, parameters.ParameterError) as exc:
+                    reason = exc
+                    faces = getattr(getattr(self, (step["call"] or {}).get("method", ""), None), "replay_faces", ())
+                    if history.made_later(step, steps[index + 1:], {s.id for s in scratch.scene.shapes}, faces):
+                        reason = history.MADE_LATER
                     raise history.HistoryError(
-                        f"Step {number} ({history.describe(step)}) can't be worked out: {exc}"
+                        f"Step {number} ({history.describe(step)}) can't be worked out: {reason}"
                     ) from None
                 done.append({"label": step["label"], "call": copy.deepcopy(step["call"]), "effect": effect})
         finally:
@@ -330,9 +347,12 @@ class HistoryActions:
             return copy.deepcopy(step["effect"])
         method = getattr(self, call["method"], None)
         known = {s.id for s in scene.shapes}
-        if method is None or any(i not in known for i in call["picked"]):
-            raise history.HistoryError("a part it was used on is no longer there.")
-        scene.select(call["picked"])
+        faces = getattr(method, "replay_faces", ())
+        if method is None or (not faces and any(i not in known for i in call["picked"])):
+            raise history.HistoryError(history.USED_GONE)
+        # A tool used on a clicked face is told its part; what else was
+        # selected then doesn't matter, and may not be there yet.
+        scene.select([i for i in call["picked"] if i in known])
         args = history.placed_args(call, getattr(method, "replay_faces", ()), scene, scene.fit_clearances)
         before = copy.deepcopy(scene)
         revision = scratch.revision
@@ -391,6 +411,17 @@ class HistoryActions:
             steps[index].pop("off", None)
         return self._rework("Cannot skip the step" if skip else "Cannot use the step again",
                             "skip a step" if skip else "use a step again", steps)
+
+    def move_history_step(self, index: int, to: int) -> bool:
+        """Move step `index` (from 0) to place `to` and work the project
+        out again."""
+        steps = copy.deepcopy(self.history_steps())
+        if not (0 <= index < len(steps) and 0 <= to < len(steps)) or index == to:
+            return False
+        numbers = list(range(1, len(steps) + 1))
+        steps.insert(to, steps.pop(index))
+        numbers.insert(to, numbers.pop(index))
+        return self._rework("Cannot move the step", "move a step", steps, numbers=numbers)
 
     def step_editor(self, index: int):
         """(form title, fields, settings from values) for step `index`, or

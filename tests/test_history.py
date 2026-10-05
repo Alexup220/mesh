@@ -647,6 +647,53 @@ def test_a_skipped_step_is_saved_with_the_project(window, tmp_path):
     assert window.skip_history_step(2, False) and len(window.document.scene.shapes) == 3
 
 
+def test_moving_a_step(window, warnings):
+    window.start_history()
+    box = add(window)
+    ball = add(window, "sphere")
+    # The sphere is still selected when the box's edge is clicked: that
+    # doesn't tie the rounding to it.
+    window.round_edge(box.id, face_towards(box, (0, 0, 1)), (10.0, 0.0, 20.0), 2.0)
+    assert window.history_steps()[2]["call"]["picked"] == [ball.id]
+    before = summary(window.document.scene)
+    steps = len(window.document._undo)
+    assert window.move_history_step(2, 1)
+    assert [history.describe(s).split(":")[0] for s in window.history_steps()] == ["Add", "Round edge", "Add"]
+    # The same parts, the sphere now made last.
+    assert sorted(map(repr, summary(window.document.scene))) == sorted(map(repr, before)) and not warnings
+    assert window.document.scene.shapes[-1].id == ball.id
+    assert len(window.document._undo) == steps + 1
+    assert not window.move_history_step(1, 1) and not window.move_history_step(1, 3)
+    window.do_undo()
+    assert [s["label"] for s in window.history_steps()] == ["add", "add", "round edge"]
+
+
+def test_a_step_cannot_move_before_the_one_that_makes_its_part(window, warnings):
+    scene = round_then_pattern(window)
+    before = summary(scene)
+    assert not window.move_history_step(2, 1)
+    assert warnings and warnings[0].startswith("Step 3 (Pattern in rows: ")
+    assert warnings[0].endswith("a part it uses is only made by a later step.")
+    assert summary(window.document.scene) == before
+    assert [s["label"] for s in window.history_steps()] == ["add", "round edge", "pattern in rows"]
+    assert_plain(warnings[0])
+    # Moving the step that makes a part after the one that uses it: the
+    # user is told about the step that now comes too early.
+    assert not window.move_history_step(0, 2)
+    assert warnings[-1].startswith("Step 2 (Round edge: ") and warnings[-1].endswith("by a later step.")
+
+
+def test_a_moved_step_is_saved_with_the_project(window, tmp_path):
+    window.start_history()
+    add(window)
+    add(window, "sphere")
+    assert window.move_history_step(1, 0)
+    file = tmp_path / "moved.mesh"
+    window.save_to(file)
+    loaded = load_project(file)
+    assert [s["effect"]["names"] for s in loaded.history["steps"]] == [["Sphere"], ["Box"]]
+
+
 def test_a_change_that_cannot_be_worked_out_changes_nothing(window, warnings):
     scene = round_then_pattern(window)
     before = summary(scene)
@@ -740,6 +787,24 @@ def test_the_history_window(window, monkeypatch):
     assert dialog.steps.count() == 1
     dialog.stop()
     assert window.document.scene.history is None and dialog.steps.count() == 0
+    dialog.deleteLater()
+
+
+def test_moving_steps_in_the_history_window(window):
+    dialog = history_actions.HistoryDialog(window)
+    dialog.start()
+    assert not dialog.up_button.isEnabled()
+    add(window)
+    add(window, "sphere")
+    dialog.refresh()
+    assert dialog.up_button.isEnabled() and dialog.down_button.isEnabled()
+    dialog.steps.setCurrentRow(1)
+    dialog.move(-1)
+    assert [dialog.steps.item(i).text() for i in range(2)] == ["1. Add: Sphere", "2. Add: Box"]
+    assert dialog.steps.currentRow() == 0
+    dialog.move(-1)  # already first: nothing moves
+    dialog.move(1)
+    assert [dialog.steps.item(i).text() for i in range(2)] == ["1. Add: Box", "2. Add: Sphere"]
     dialog.deleteLater()
 
 

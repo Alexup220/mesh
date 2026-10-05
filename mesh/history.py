@@ -127,6 +127,8 @@ def changes(before, after) -> dict:
 
 
 GONE = "a part it changes is no longer there."
+USED_GONE = "a part it was used on is no longer there."
+MADE_LATER = "a part it uses is only made by a later step."
 
 
 def apply_changes(scene, effect: dict) -> None:
@@ -155,6 +157,20 @@ def apply_changes(scene, effect: dict) -> None:
     for key, value in effect.get("settings", {}).items():
         value = copy.deepcopy(value)
         setattr(scene, key, tuple(value) if key == "build_volume" else value)
+
+
+def made_later(step: dict, later_steps, present, faces=()) -> bool:
+    """Whether `step` uses a part that isn't in the project yet (`present`
+    being the ids there now) but that one of `later_steps` makes: a step
+    moved before the one that makes its part. `faces` is its tool's
+    clicked-face specs (see replayable)."""
+    call, effect = step.get("call"), step.get("effect") or {}
+    if call is not None:
+        used = set(call["picked"]) | {_face_args(spec, call["args"])[0] for spec in faces}
+    else:
+        used = set(effect.get("changed", {})) | set(effect.get("removed", []))
+    made = {d["id"] for s in later_steps if not s.get("off") for d in (s.get("effect") or {}).get("added", [])}
+    return bool((used - set(present)) & made)
 
 
 def rename_added(scene, before_ids, recorded: list) -> None:
@@ -242,7 +258,7 @@ def placed_args(call: dict, faces, scene, clearances) -> dict:
         try:
             shape = scene.get(shape_id)
         except KeyError:
-            raise HistoryError(GONE) from None
+            raise HistoryError(USED_GONE) from None
         index, moved = find_face(shape, int(index), hint, clearances)
         if isinstance(spec, str):
             args[spec] = [shape_id, index] + list(args[spec][2:])

@@ -268,9 +268,11 @@ reflected. What differs from Fusion is how the pattern is chosen.
   of that working (the same numbers the Details panel shows).
 - **History** starts when you ask (Modify > History > Start Keeping a
   History) and lists the changes from then on; it can't recover what
-  happened before. Steps can be changed, skipped (and used again) or
-  removed, but not reordered or rolled back to (Fusion's timeline
-  marker); Undo goes back instead.
+  happened before. Steps can be changed, skipped (and used again), moved
+  earlier or later, or removed. There is no timeline marker to roll the
+  project back to a step and add new steps there (Fusion's): skip the
+  later steps, or Undo, instead. A step can't move before the step that
+  makes a part it uses.
   Only the tools' own settings can be changed (an extrusion's distance, a
   rounding's radius, a pattern's count); which parts a tool was used on,
   and a sketch's curves, can't be changed in a step. Steps that are not
