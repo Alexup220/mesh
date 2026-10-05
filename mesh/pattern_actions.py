@@ -119,6 +119,19 @@ def ask_path(parent) -> dict | None:
     return run_form(parent, "Pattern Along a Path", path_fields(), note=PATH_NOTE)
 
 
+PATH_EDGE_NOTE = (
+    "No sketch is selected, so the path is an edge of a part: after this, click a face of a part "
+    "next to the edge. The copies go along that edge and the edges it runs on into smoothly (all "
+    "the way round a cylinder's rim, say), starting from the end nearest the selected parts; "
+    "those edges must lie flat in one plane. Each copy keeps the parts' place beside the path. "
+    "The count includes the parts themselves: they are number 1."
+)
+
+
+def ask_path_edge(parent) -> dict | None:
+    return run_form(parent, "Pattern Along a Path", path_fields(), note=PATH_EDGE_NOTE)
+
+
 MIRROR_PLANES = [
     ("face", "A flat face you click next"),
     ("x", "The upright middle plane between left and right (through 0)"),
@@ -150,11 +163,12 @@ def ask_mirror(parent, selected=None) -> dict | None:
 class PatternActions:
     """Mixed into MeshWindow through ExpertActions."""
 
-    PATTERN_CLICK_TOOLS = ("mirror_face",)
+    PATTERN_CLICK_TOOLS = ("mirror_face", "path_edge")
     PATTERN_TOOL_PROMPTS = {
         "mirror_face": "Click a flat face to mirror the selected parts across. Esc cancels.",
+        "path_edge": "Click a face of a part next to the edge to put the copies along. Esc cancels.",
     }
-    PATTERN_CLICK_HANDLERS = {"mirror_face": "_mirror_face_picked"}
+    PATTERN_CLICK_HANDLERS = {"mirror_face": "_mirror_face_picked", "path_edge": "_path_edge_picked"}
 
     PATTERN_HINT = "Select the parts to copy first."
 
@@ -263,7 +277,8 @@ class PatternActions:
 
     # --- Along a path -------------------------------------------------------------
 
-    PATH_HINT = "Select the parts to copy and one sketch whose curves make the path."
+    PATH_HINT = ("Select the parts to copy, and one sketch whose curves make the path (or no "
+                 "sketch, to click an edge of a part for the path).")
 
     def _path_selection(self):
         chosen = self._picked()
@@ -289,6 +304,15 @@ class PatternActions:
         )
 
     def do_path_pattern(self) -> None:
+        chosen = self._picked()
+        parts = [s for s in chosen if not is_reference(s)]
+        if parts and len(parts) == len(chosen):
+            # No sketch: the path is an edge clicked next.
+            values = ask_path_edge(self)
+            if values is not None:
+                self._path_edge = {"ids": [s.id for s in parts], "values": values}
+                self.start_tool("path_edge")
+            return
         if self._path_selection() is None:
             return
         values = ask_path(self)
@@ -297,6 +321,52 @@ class PatternActions:
                 values["count"], None if values["even"] else values["spacing"], values["follow"],
                 values.get("skip", ""),
             )
+
+    def _path_edge_picked(self, shape_id: str, face_index: int, point=None) -> None:
+        """A click next to an edge that lies flat in one plane: put the
+        copies along it once the click is over. Anything else keeps the
+        tool waiting, saying why."""
+        scene = self.document.scene
+        prompt = self.TOOL_PROMPTS["path_edge"]
+        try:
+            patterns.edge_path(scene.get(shape_id), face_index, point, scene.fit_clearances)
+        except KeyError:
+            self.statusBar().showMessage(prompt)
+            return
+        except BuildError as exc:
+            self.statusBar().showMessage(f"{exc} {prompt}")
+            return
+        self._clear_tool()
+        self.sync()
+        state = getattr(self, "_path_edge", None) or {"ids": [], "values": {}}
+        values = state["values"]
+        spacing = None if values.get("even", True) else values.get("spacing", 10.0)
+        QTimer.singleShot(0, lambda: self.path_pattern_along_edge(
+            shape_id, face_index, point, list(state["ids"]), values.get("count", 5), spacing,
+            values.get("follow", False), values.get("skip", "")))
+
+    @replayable(("shape_id", "face_index"))
+    def path_pattern_along_edge(self, shape_id: str, face_index: int, point, part_ids=None, count: int = 5,
+                                spacing: float | None = None, follow: bool = False, skip="") -> bool:
+        """Copies of the parts `part_ids` (those selected when the tool
+        started) along the run of edges of `shape_id` next to the click
+        (`face_index`, `point`): `spacing` mm apart, or spread evenly for
+        None, leaving out the copies numbered in `skip`. One undo step."""
+        scene = self.document.scene
+        ids = part_ids if part_ids is not None else getattr(self, "_path_edge", {}).get("ids", [])
+        parts = [s for s in scene.shapes if s.id in ids and not is_reference(s)]
+        try:
+            edge_part = scene.get(shape_id)
+        except KeyError:
+            return False
+        if not parts:
+            self.statusBar().showMessage(self.PATTERN_HINT)
+            return False
+        return self._add_pattern(
+            "pattern along a path", parts,
+            lambda: patterns.along_edge(parts, edge_part, face_index, point, count, spacing, follow,
+                                        patterns.copy_numbers(skip), scene.fit_clearances),
+        )
 
     # --- Mirror -------------------------------------------------------------------
 

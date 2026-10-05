@@ -180,9 +180,12 @@ tools do the closest honest version of their Fusion counterparts:
   thinner than the strip is wide.
 - **Push/Pull** moves the clicked flat face straight out or in, square to
   itself: the face's outline is pushed out as a new piece, or pushed in as a
-  Hole. That is exact where the sides next to the face are square to it.
-  Unlike Fusion, sloping sides next to the face are not extended along their
-  slope, and a round surface can't be pushed as a whole: it is narrow flat
+  Hole. Its new sides are square to it, or, if asked, each carries on the
+  slope of the side next to it, as Fusion extends them. Both are exact for
+  flat sides; a round side is narrow flat strips, each carried on along its
+  own slope, not along the curve. Carried-on sides that would meet or cross
+  are refused, as is a side almost level with the face (under about 2
+  degrees). A round surface can't be pushed as a whole: it is narrow flat
   strips, and only the strip clicked moves.
 - **Round an Edge (Fillet)** rounds runs of edges: a run is the edge next
   to a click and the edges it runs on into smoothly (turning less than 30
@@ -239,12 +242,17 @@ reflected. What differs from Fusion is how the pattern is chosen.
   goes one way only, and its spacing is from one copy to the next or spread
   over the whole path. Rows' two directions share one choice of spacing
   and of both ways.
-- **Pattern Along a Path** needs a sketch as the path; a part's edge can't
-  be picked. Curves are followed in their straight pieces (64 per circle),
+- **Pattern Along a Path** takes a sketch as the path, or a part's edge
+  clicked after the form (with no sketch selected): the edge next to the
+  click and the edges it runs on into smoothly, as Round an Edge picks
+  them, so a run stops at a corner. An edge path must lie flat in one
+  plane (a run that goes round a corner and down a side is refused), and
+  Fusion's picking of several separate edges into one path is not offered.
+  Curves are followed in their straight pieces (64 per circle),
   so a copy sits on a piece, slightly inside the true curve. With "Turn the
   copies as the path turns", the turn is blended across pieces that meet
   at less than 10 degrees (a curve) and jumps at sharper corners; copies
-  turn only within the sketch's plane, never tilt out of it.
+  turn only within the path's plane, never tilt out of it.
 - **Copies are separate parts**, as Duplicate makes, not one feature.
   Changing the original later does not change the copies, and patterned
   Holes cut once grouped with the part, like any Hole.

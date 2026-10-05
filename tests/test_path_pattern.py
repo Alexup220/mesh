@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from mesh import create, pattern_actions, patterns, sketch
+from mesh import create, edges, modify, pattern_actions, patterns, sketch
 from mesh.builders import BuildError
 from mesh.io_formats import load_project, save_project
 from mesh.scene import Scene, new_primitive
@@ -197,6 +197,7 @@ def test_the_form_spreads_evenly_or_uses_the_spacing(window, monkeypatch, even, 
 def test_a_path_pattern_needs_parts_and_one_sketch(window, warnings, monkeypatch):
     monkeypatch.setattr(pattern_actions, "ask_path", lambda parent: pytest.fail("no form without a path"))
     window.add_primitive("cube")
+    window.document.scene.select([])  # parts alone take an edge for the path: see below
     window.do_path_pattern()
     assert window.statusBar().currentMessage() == window.PATH_HINT
     window.add_sketch(LINE, np.eye(4))
@@ -256,4 +257,116 @@ def test_path_form_is_plain_language(qapp, close_qt_widget):
     dialog = close_qt_widget(FormDialog(None, "Pattern Along a Path", pattern_actions.path_fields(),
                                         note=pattern_actions.PATH_NOTE))
     for text in dialog.labels():
+        assert_plain(text)
+
+
+# --- Along a part's edge ------------------------------------------------------------------
+
+
+def face_towards(shape, direction, near=None):
+    """A triangle of `shape` facing `direction` (the one nearest `near`)."""
+    tm = shape_geometry(shape)
+    facing = tm.face_normals @ np.asarray(direction, dtype=np.float64) > 1.0 - 1e-9
+    if near is None:
+        return int(np.flatnonzero(facing)[0])
+    distance = np.linalg.norm(tm.triangles_center - np.asarray(near), axis=1)
+    return int(np.flatnonzero(facing)[np.argmin(distance[facing])])
+
+
+def plate_and_peg():
+    """A 60 x 20 x 5 mm plate, and a small peg on it 2 mm in from its front left corner."""
+    plate = new_primitive("cube")
+    plate.params.update(width=60.0, depth=20.0, height=5.0)
+    peg = new_primitive("cylinder")
+    peg.params.update(diameter=4.0, height=5.0)
+    peg.transform[:3, 3] = (-28.0, -8.0, 5.0)
+    return plate, peg
+
+
+def small_cube(x, y, z):
+    """A 2 mm cube whose middle is at (x, y, z)."""
+    cube = new_primitive("cube")
+    cube.params.update(width=2.0, depth=2.0, height=2.0)
+    cube.transform[:3, 3] = (x, y, z - 1.0)
+    return cube
+
+
+def test_copies_go_along_a_parts_straight_edge():
+    plate, peg = plate_and_peg()
+    top = face_towards(plate, (0, 0, 1))
+    assert middles(patterns.along_edge([peg], plate, top, (0, -10, 5), 4)) == [
+        (-8, -8, 7.5), (12, -8, 7.5), (32, -8, 7.5)]
+    assert middles(patterns.along_edge([peg], plate, top, (0, -10, 5), 3, 10.0)) == [
+        (-18, -8, 7.5), (-8, -8, 7.5)]
+
+
+def test_copies_go_round_a_cylinders_rim_and_turn_with_it():
+    rim = new_primitive("cylinder")
+    rim.params.update(diameter=40.0, height=10.0)
+    copies = patterns.along_edge([small_cube(20, 0, 11)], rim, face_towards(rim, (0, 0, 1)), (20, 0, 10), 4,
+                                 follow=True)
+    assert middles(copies) == [(0, 20, 11), (-20, 0, 11), (0, -20, 11)]
+    assert [round(turn_of(c)) % 360 for c in copies] == [90, 180, 270]
+
+
+def test_an_edge_that_turns_within_one_plane_is_followed_round():
+    box = new_primitive("cube")
+    once = edges.fillet(box, face_towards(box, (0, 0, 1)), (10, 0, 20), 2.0)
+    # Along the top, round the rounding and down the side, all at the front.
+    copies = patterns.along_edge([small_cube(-10, -10, 20)], once, face_towards(once, (0, 0, 1)),
+                                 (0, -10, 20), 3)
+    assert middles(copies)[-1] == pytest.approx((10, -10, 0), abs=1e-6)
+
+
+def test_an_edge_that_doesnt_lie_flat_is_refused():
+    upright, across = new_primitive("cylinder"), new_primitive("cylinder")
+    upright.params.update(diameter=20.0, height=40.0)
+    across.params.update(diameter=12.0, height=40.0)
+    [across] = modify.move_copy([across], axis="y", angle=90.0)
+    tee = modify.combine(upright, [across], "union")
+    # A strip of the crossing cylinder's top, beside where it meets the upright one.
+    face = int(np.argmin(np.linalg.norm(shape_geometry(tee).triangles_center - (11.0, 0.0, 25.9), axis=1)))
+    with pytest.raises(BuildError) as err:
+        patterns.along_edge([small_cube(0, 0, 50)], tee, face, (10, 0, 25.9), 3)
+    assert str(err.value) == patterns.EDGE_NOT_FLAT
+    assert_plain(str(err.value))
+
+
+def test_with_no_sketch_the_path_is_an_edge_clicked_next(window, monkeypatch, qapp):
+    plate, peg = plate_and_peg()
+    ball = new_primitive("sphere")
+    ball.transform[:3, 3] = (0.0, 50.0, 0.0)
+    for shape in (plate, peg, ball):
+        window.document.scene.add(shape)
+    window.document.scene.select([peg.id])
+    window.sync()
+    monkeypatch.setattr(pattern_actions, "ask_path", lambda parent: pytest.fail("the sketch's form"))
+    monkeypatch.setattr(pattern_actions, "ask_path_edge", lambda parent: {
+        "count": 3, "even": False, "spacing": 10.0, "follow": False, "skip": ""})
+    steps = len(window.document._undo)
+    window.do_path_pattern()
+    assert window.tool == "path_edge"
+    window._on_surface_picked(ball.id, 0, (0, 50, 10))  # a ball has no edge
+    assert window.tool == "path_edge"
+    assert window.statusBar().currentMessage().endswith(window.TOOL_PROMPTS["path_edge"])
+    window._on_surface_picked(plate.id, face_towards(plate, (0, 0, 1)), (0, -10, 5))
+    assert window.tool is None
+    qapp.processEvents()  # the copies are made once the click is over
+    assert len(window.document._undo) == steps + 1
+    assert middles(window.document.scene.shapes[3:]) == [(-18, -8, 7.5), (-8, -8, 7.5)]
+    window.do_undo()
+    assert len(window.document.scene.shapes) == 3
+
+
+def test_copies_along_an_edge_round_trip_through_a_project_file(tmp_path):
+    plate, peg = plate_and_peg()
+    shapes = [plate, peg] + patterns.along_edge([peg], plate, face_towards(plate, (0, 0, 1)), (0, -10, 5), 4)
+    file = tmp_path / "parts.mesh"
+    save_project(Scene(shapes=shapes), file)
+    assert middles(load_project(file).shapes) == middles(shapes)
+
+
+def test_the_path_from_an_edge_is_plain_language(window):
+    for text in (pattern_actions.PATH_EDGE_NOTE, window.TOOL_PROMPTS["path_edge"], window.PATH_HINT,
+                 patterns.EDGE_NOT_FLAT):
         assert_plain(text)

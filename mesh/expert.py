@@ -102,9 +102,10 @@ TOOLS: tuple[ExpertTool, ...] = (
     ),
     ExpertTool(
         "path_pattern", "create", "Pattern Along a &Path...",
-        "Select the parts and a sketch of a path: copies go along the path, spread evenly or "
-        "a set distance apart, and can turn as it turns. Copies can be left out by their "
-        "number. Curves are followed in short straight pieces.",
+        "Select the parts and a sketch of a path, or just the parts and then click next to "
+        "an edge of a part: copies go along the path, spread evenly or a set distance apart, "
+        "and can turn as it turns. Copies can be left out by their number. Curves are "
+        "followed in short straight pieces, and an edge must lie flat in one plane.",
         "do_path_pattern",
     ),
     ExpertTool(
@@ -169,8 +170,9 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "push_pull", "modify", "&Push/Pull a Face",
         "Click a flat face of a part, then type how far to pull it out or push it in. The "
-        "face moves straight out, square to itself; sloping sides next to it are not "
-        "extended, and on a round surface only the narrow flat strip clicked moves.",
+        "face moves straight out, square to itself; sloping sides next to it can be "
+        "extended along their slope, and on a round surface only the narrow flat strip "
+        "clicked moves.",
         "do_push_pull", "Q",
     ),
     ExpertTool(

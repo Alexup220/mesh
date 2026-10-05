@@ -22,6 +22,7 @@ from mesh import features, sketch
 from mesh.builders import (
     APPROXIMATE_FACE_LIMIT,
     GUIDES_ARE_NOT_PARTS,
+    NOT_CLEAN,
     BuildError,
     _baked_child,
     _group,
@@ -717,15 +718,126 @@ def shell(shape, face_index: int, wall: float, far_side: bool = False,
 
 OVERLAP = 0.01  # mm a pulled piece reaches back into the part, so the two join solidly
 
+SIDES_OFF = "Try it without extending the sloping sides."
+# How nearly level with the face a side next to it may be and still be
+# followed (the sine of the angle between them, squared: about 1.8 degrees).
+LEVEL_SIDE = 1e-3
+SIDE_CLEARANCE = 0.001  # mm a piece pushed in reaches out past the sloping sides it follows
 
-def push_pull(shape, face_index: int, distance: float, clearances: dict | None = None):
+
+def _side_moves(tm, face: FlatFace) -> tuple[np.ndarray, list, dict, dict]:
+    """How each corner of the face moves per mm the face moves out, so
+    that every side next to it keeps its slope (a square side: straight
+    out). Returns (the face's triangles, its outline as edges in the
+    triangles' order, {corner: its move}, {corner: how it moves, staying
+    on the face, per mm the sides at outside edges next to it move out
+    away from the face})."""
+    tris = tm.faces[face.faces]
+    inside = set(int(f) for f in face.faces)
+    used: dict[tuple[int, int], int] = {}
+    for tri in tris:
+        for i in range(3):
+            a, b = int(tri[i]), int(tri[(i + 1) % 3])
+            used[(min(a, b), max(a, b))] = used.get((min(a, b), max(a, b)), 0) + 1
+    beside = {}
+    for (f1, f2), (a, b) in zip(tm.face_adjacency, tm.face_adjacency_edges):
+        if (int(f1) in inside) != (int(f2) in inside):
+            beside[(min(int(a), int(b)), max(int(a), int(b)))] = int(f2) if int(f1) in inside else int(f1)
+    outline, at = [], {}
+    for tri in tris:
+        for i in range(3):
+            a, b = int(tri[i]), int(tri[(i + 1) % 3])
+            key = (min(a, b), max(a, b))
+            if used[key] != 1:
+                continue
+            if key not in beside:
+                raise BuildError("This part has gaps in its surface, so the sides next to the face can't "
+                                 f"be followed. {SIDES_OFF}")
+            outline.append((a, b))
+            side = tm.face_normals[beside[key]]
+            # Whether it is an outside edge: the side faces away from the face.
+            away = np.cross(tm.vertices[b] - tm.vertices[a], face.normal)
+            side = (side, 1.0 if side @ away > 0.0 else 0.0)
+            at.setdefault(a, []).append(side)
+            at.setdefault(b, []).append(side)
+    n = face.normal
+    moves, widen = {}, {}
+    for corner in np.unique(tris):
+        corner = int(corner)
+        sides = at.get(corner, [])
+        if len(sides) > 2:
+            raise BuildError("This face's outline touches itself at a corner, so the sides next to it "
+                             f"can't be followed. {SIDES_OFF}")
+        if any(1.0 - (n @ m) ** 2 < LEVEL_SIDE for m, _ in sides):
+            raise BuildError("A side next to this face is almost level with it, so it can't be "
+                             f"extended along its slope. {SIDES_OFF}")
+        rows = np.array([n] + [m for m, _ in sides])
+        if len(sides) == 2 and abs(np.linalg.det(rows)) > 1e-9:
+            moves[corner] = np.linalg.solve(rows, [1.0, 0.0, 0.0])
+            widen[corner] = np.linalg.solve(rows, [0.0, sides[0][1], sides[1][1]])
+        elif sides:  # one side (or two in one plane): carried on square to the edge
+            m, sign = sides[0]
+            moves[corner] = (n - (n @ m) * m) / (1.0 - (n @ m) ** 2)
+            widen[corner] = sign * (m - (m @ n) * n) / (1.0 - (n @ m) ** 2)
+        else:
+            moves[corner], widen[corner] = n.copy(), np.zeros(3)
+    return tris, outline, moves, widen
+
+
+def _sloped_prism(shape, face: FlatFace, low: float, high: float, clearances, wider: float = 0.0):
+    """Like _prism, but each side of the piece lies in the plane of the
+    side next to the face on the part: sloping sides are carried on along
+    their slope (at outside edges moved `wider` mm out, away from the
+    face, so a piece cut away leaves no skin where its sides meet the
+    part's). Refused where moving that far would make sides cross."""
+    tm = shape_geometry(shape, clearances)
+    tris, outline, moves, widen = _side_moves(tm, face)
+    corners = sorted(moves)
+    number = {c: i for i, c in enumerate(corners)}
+    base = tm.vertices[corners] + wider * np.array([widen[c] for c in corners])
+    move = np.array([moves[c] for c in corners])
+    for h in np.linspace(low, high, 9):
+        flat = sketch.to_sketch(face.frame, base + h * move)
+        rest = sketch.to_sketch(face.frame, base)
+        pieces = []
+        for tri in tris:
+            p = flat[[number[int(c)] for c in tri]]
+            area = 0.5 * ((p[1, 0] - p[0, 0]) * (p[2, 1] - p[0, 1]) - (p[2, 0] - p[0, 0]) * (p[1, 1] - p[0, 1]))
+            if area <= 1e-9:
+                pieces = None
+                break
+            pieces.append(Polygon(p))
+        turned = any((flat[number[b]] - flat[number[a]]) @ (rest[number[b]] - rest[number[a]]) <= 0.0
+                     for a, b in outline)
+        if pieces is None or turned or unary_union(pieces).area < sum(p.area for p in pieces) - 1e-6:
+            raise BuildError("Moving the face that far would make the sloping sides next to it meet or "
+                             "cross. Try a shorter distance.")
+    k = len(corners)
+    vertices = np.vstack([base + low * move, base + high * move])
+    faces = []
+    for a, b, c in ((number[int(x)] for x in tri) for tri in tris):
+        faces += [[a, c, b], [k + a, k + b, k + c]]
+    for a, b in outline:
+        a, b = number[a], number[b]
+        faces += [[a, b, k + b], [a, k + b, k + a]]
+    try:
+        return features._solid_from(vertices, np.array(faces), "piece")
+    except sketch.SketchError as exc:
+        raise BuildError(NOT_CLEAN) from exc
+
+
+def push_pull(shape, face_index: int, distance: float, clearances: dict | None = None,
+              follow_sides: bool = False):
     """The flat face clicked moved `distance` mm straight out of the part
     (more than 0) or into it (less than 0).
 
     Returns a group of the part and the piece added (the face's outline
     pushed out) or taken away (pushed in, as a Hole), so Ungroup gives the
-    part back. Exact where the sides next to the face are square to it; a
-    sloping side is not extended, the new sides are square to the face.
+    part back. Exact where the sides next to the face are square to it.
+    Otherwise the new sides are square to the face, or with `follow_sides`
+    each new side lies in the plane of the side next to it, carrying its
+    slope on: exact for flat sides (a round side is narrow flat strips,
+    each carried on along its own slope).
     """
     if is_reference(shape):
         raise BuildError(GUIDES_ARE_NOT_PARTS.format(tool="Push/Pull"))
@@ -738,11 +850,16 @@ def push_pull(shape, face_index: int, distance: float, clearances: dict | None =
     if abs(distance) > MOVE_LIMIT:
         raise BuildError(f"A face can move at most {MOVE_LIMIT:g} mm.")
     face = flat_face(shape, face_index, clearances)
+    low, high = (-OVERLAP, distance) if distance > 0.0 else (distance, OVERLAP)
+    if not follow_sides:
+        solid = _prism(face, low, high)
+    else:  # a piece cut away reaches a hair past the sides it follows
+        solid = _sloped_prism(shape, face, low, high, clearances, 0.0 if distance > 0.0 else SIDE_CLEARANCE)
     if distance > 0.0:
-        piece = _baked_child(_prism(face, -OVERLAP, distance), "Pulled out", shape.color, False)
+        piece = _baked_child(solid, "Pulled out", shape.color, False)
         name = f"{shape.name} (pulled)"
     else:
-        piece = _baked_child(_prism(face, distance, OVERLAP), "Pushed in", shape.color, True)
+        piece = _baked_child(solid, "Pushed in", shape.color, True)
         name = f"{shape.name} (pushed)"
     try:
         return _group([copy.deepcopy(shape), piece], name, clearances)
