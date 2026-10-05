@@ -366,6 +366,14 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_measure_radius",
     ),
     ExpertTool(
+        "measure_edge", "inspect", "&Length of an Edge",
+        "Click a face of a part next to an edge to see how long the edge is. An edge that goes "
+        "on round curves gives the straight stretch clicked and the whole edge's length (or "
+        "how far it is all the way round). It is measured on the part as drawn: a round edge is "
+        "short straight pieces, so it comes out a little short of the true curve.",
+        "do_measure_edge",
+    ),
+    ExpertTool(
         "measure_volume", "inspect", "&Volume and Area",
         "See how much space the selected parts take up, their surface area all the way round "
         "and their size. Selected Holes are cut out and overlaps counted once, as they would "

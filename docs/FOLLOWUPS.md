@@ -263,8 +263,12 @@ reflected. What differs from Fusion is how the pattern is chosen.
   faces (within 2 mm of a corner, from the corner). A click on a round
   surface lands on one of its narrow flat strips, so the "face area" is
   that strip's and the angle is the strip's. The angle is between the
-  faces' planes (0 to 90 degrees). Fusion's measuring of edges is not
-  offered.
+  faces' planes (0 to 90 degrees).
+- **Length of an Edge** measures the edge next to a click, found as Round
+  an Edge finds it, on the part as drawn: a round edge is short straight
+  pieces, so its length comes out a little short of the true curve, and
+  the straight stretch clicked is one of those pieces. Edges are found
+  only on parts of up to 50,000 triangles.
 - **Radius of a Round Face** reads the radius from the part's own sizes
   (a cylinder, cone, tube, ring, ball, round hardware hole, a thread's
   crest or a revolved part's outline, a Hole at its fit), so it is the

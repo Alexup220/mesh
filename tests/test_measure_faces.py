@@ -333,6 +333,74 @@ def test_measuring_the_radius_of_a_clicked_round_face(window, qapp):
     assert window.tool is None
 
 
+# --- The length of an edge ---------------------------------------------------------------
+
+
+def test_the_length_of_a_straight_edge():
+    box = new_primitive("cube")
+    box.params.update(width=30.0)
+    top = face_towards(box, (0, 0, 1))
+    found = construct.edge_at(box, top, (3, -9.5, 20))  # by the front edge of the top
+    assert measure.describe_edge(box.name, found) == "Box: this edge is 30.00 mm long."
+    side = face_towards(box, (1, 0, 0))
+    upright = construct.edge_at(box, side, (15, 9.5, 4))
+    assert measure.describe_edge("Box", upright) == "Box: this edge is 20.00 mm long."
+
+
+def test_a_round_edge_gives_the_piece_clicked_and_all_the_way_round():
+    cylinder = new_primitive("cylinder")  # 20 across
+    found = construct.edge_at(cylinder, face_towards(cylinder, (0, 0, 1)), (9.9, 0.4, 20.0))
+    text = measure.describe_edge(cylinder.name, found)
+    lines = text.split("\n")
+    assert lines[0] == f"Cylinder: the straight stretch of the edge clicked is {found.length:.2f} mm long."
+    assert found.length < 1.0
+    assert lines[1] == f"The edge goes on all the way round: {found.run_length:.2f} mm round."
+    assert found.run_length == pytest.approx(2 * np.pi * 10, rel=1e-3) and found.run_length < 2 * np.pi * 10
+    assert lines[2] == measure.EDGE_NOTE
+    assert_plain(text)
+
+
+def test_an_edge_that_goes_on_round_a_curve():
+    from mesh import ops
+
+    cut = new_primitive("cube")
+    cut.is_hole = True
+    cut.params.update(width=30.0, height=30.0)
+    cut.transform[:3, 3] = (0.0, 10.0, -5.0)  # takes off the back half, top to bottom
+    half = ops.make_group([new_primitive("cylinder"), cut])  # half a cylinder, 20 across
+    tm = shape_geometry(half)
+    top = int(np.flatnonzero(tm.face_normals[:, 2] > 0.999)[0])
+    straight = construct.edge_at(half, top, (2.0, -0.2, 20.0))  # by the cut edge, straight across
+    assert measure.describe_edge(half.name, straight) == f"{half.name}: this edge is 20.00 mm long."
+    curve = construct.edge_at(half, top, (0.0, -9.8, 20.0))  # by the round edge, at its front
+    assert not curve.closed and not curve.straight
+    lines = measure.describe_edge(half.name, curve).split("\n")
+    assert lines[1] == f"The edge goes on round its curves: {curve.run_length:.2f} mm long in all."
+    assert curve.run_length == pytest.approx(np.pi * 10, rel=1e-3)
+
+
+def test_measuring_the_length_of_a_clicked_edge(window, qapp):
+    box = add(window, "cube")
+    window.add_primitive("sphere")
+    ball = window.document.scene.shapes[-1]
+    steps, revision = len(window.document._undo), window.document.revision
+    window.do_measure_edge()
+    assert window.tool == "measure_edge"
+    assert window.statusBar().currentMessage() == window.TOOL_PROMPTS["measure_edge"]
+    window._on_surface_picked(ball.id, 0, shape_geometry(ball).triangles_center[0])
+    assert window.tool == "measure_edge" and "no sharp edge" in window.statusBar().currentMessage()
+    window._on_surface_picked(box.id, face_towards(box, (0, -1, 0)), (-9.6, -10, 7))
+    qapp.processEvents()
+    assert window.measure_window.text() == "Box: this edge is 20.00 mm long."
+    assert window.measure_window.windowTitle() == "Length of an Edge"
+    assert window.viewport.measure_actor is not None
+    # Still measuring; nothing changed.
+    assert window.tool == "measure_edge" and window.statusBar().currentMessage() == window.EDGE_AGAIN
+    assert len(window.document._undo) == steps and window.document.revision == revision
+    window.stop_tool()
+    assert window.tool is None
+
+
 # --- The shortest distance between two parts ---------------------------------------------
 
 
@@ -408,7 +476,8 @@ def test_measure_text_is_plain_language():
     from mesh.inspect_actions import InspectActions
 
     for text in (*InspectActions.INSPECT_TOOL_PROMPTS.values(), InspectActions.MEASURE_AGAIN,
-                 InspectActions.VOLUME_HINT, InspectActions.GAP_HINT, InspectActions.RADIUS_AGAIN, measure.GAP_NOTE, measure.OPEN_SURFACE,
+                 InspectActions.VOLUME_HINT, InspectActions.GAP_HINT, InspectActions.RADIUS_AGAIN,
+                 InspectActions.EDGE_AGAIN, measure.EDGE_NOTE, measure.GAP_NOTE, measure.OPEN_SURFACE,
                  *(t.tip for t in TOOLS if t.menu == "inspect"),
                  *(t.label for t in TOOLS if t.menu == "inspect")):
         assert_plain(text)

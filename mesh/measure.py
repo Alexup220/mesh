@@ -1,6 +1,6 @@
 """Measuring for Expert mode's Inspect menu: between two clicked faces
 (distance, angle, gap and each face's area), a clicked round face's
-radius, the shortest distance between two parts, and the selected parts'
+radius, a clicked edge's length, the shortest distance between two parts, and the selected parts'
 volume, surface area and size.
 
 Measuring never changes anything. The beginner Measure tool (distance
@@ -130,6 +130,26 @@ def round_face(shape, face_index: int, point, clearances: dict | None = None) ->
                 text += (" A revolved part's outline is made of short straight pieces, so on a curve in "
                          "it this is the one piece clicked.")
     return RoundFace(text, (found.centre, found.point))
+
+
+# --- The length of an edge --------------------------------------------------------------
+
+EDGE_NOTE = ("A round edge is drawn as short straight pieces, so measured along them it is a little "
+             "shorter than the true curve.")
+
+
+def describe_edge(name: str, found: construct.ClickedEdge) -> str:
+    """The plain-language lines Length of an Edge shows for an edge
+    construct.edge_at found."""
+    if found.straight:
+        return f"{name}: this edge is {found.length:.2f} mm long."
+    lines = [f"{name}: the straight stretch of the edge clicked is {found.length:.2f} mm long."]
+    if found.closed:
+        lines.append(f"The edge goes on all the way round: {found.run_length:.2f} mm round.")
+    else:
+        lines.append(f"The edge goes on round its curves: {found.run_length:.2f} mm long in all.")
+    lines.append(EDGE_NOTE)
+    return "\n".join(lines)
 
 
 # --- The shortest distance between two parts -------------------------------------------
