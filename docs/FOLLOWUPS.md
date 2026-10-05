@@ -218,8 +218,13 @@ reflected. What differs from Fusion is how the pattern is chosen.
   surface rather than the flat strip clicked; a revolve's outline is
   itself made of short straight pieces, so on a curve in it the plane
   touches the piece clicked. A part made round another way (an Extrusion
-  of a circle, a group, an imported part) can't be used. Fusion's plane
-  along a path is not offered.
+  of a circle, a group, an imported part) can't be used. A plane along a
+  path is square to the one path a selected sketch draws, a typed distance
+  along it from either end; curves in the path are short straight pieces,
+  and the plane's facing turns smoothly between pieces that meet at less
+  than 10 degrees (at a sharper corner it is square to the piece after
+  the corner). Fusion's distance as a fraction of the path's length is not
+  offered; only millimetres.
 - **Construction axes** are drawn as a line (120 mm, or longer for a long
   part) with an arrow showing the way it points, but go on without end.
   Offered: along the middle of a round part (a cylinder, cone, tube, ring,

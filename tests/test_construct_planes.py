@@ -485,6 +485,89 @@ def test_a_plane_touching_a_clicked_round_part_is_one_undo_step(window, qapp, tm
     assert len(window.document.scene.shapes) == 1
 
 
+# --- A plane along a path -----------------------------------------------------------------
+
+LINE = [{"type": "line", "start": [0, 0], "end": [60, 0]}]
+ELBOW = [{"type": "line", "start": [0, 0], "end": [0, 20]}, {"type": "line", "start": [0, 20], "end": [30, 20]}]
+RING = [{"type": "circle", "centre": [0, 0], "diameter": 20}]
+
+
+def path_sketch(entities, frame=None):
+    from mesh import create
+
+    return create.new_sketch(entities, np.eye(4) if frame is None else frame, "Path")
+
+
+def test_a_plane_square_to_a_path_from_either_end():
+    path = path_sketch(LINE)
+    assert plane(construct.plane_along_path(path, 15.0)) == [[15, 0, 0], [1, 0, 0]]
+    assert plane(construct.plane_along_path(path, 15.0, from_end=True)) == [[45, 0, 0], [-1, 0, 0]]
+    assert plane(construct.plane_along_path(path, 60.0))[0] == [60, 0, 0]
+    upright = path_sketch(ELBOW, sketch.named_plane_frame("xz"))  # drawn facing the front
+    # 25 mm along: 5 mm into the second line, which runs left to right at 20 mm up.
+    assert plane(construct.plane_along_path(upright, 25.0)) == [[5, 0, 20], [1, 0, 0]]
+    assert plane(construct.plane_along_path(upright, 5.0)) == [[0, 0, 5], [0, 0, 1]]
+
+
+def test_a_plane_along_a_curve_turns_with_it():
+    ring = path_sketch(RING)
+    points, closed = construct.path_of(ring)
+    length = construct.path_length(points, closed)
+    assert closed and length == pytest.approx(np.pi * 20, rel=1e-3)
+    origin, normal = construct.plane_of(construct.plane_along_path(ring, length / 4))
+    start = np.append(points[0], 0.0)
+    assert np.linalg.norm(origin) == pytest.approx(10.0, abs=0.02)  # on the circle's short straight pieces
+    assert float(origin @ start) == pytest.approx(0.0, abs=0.05)  # a quarter of the way round
+    tangent = np.cross([0, 0, 1], origin / np.linalg.norm(origin))
+    assert abs(float(normal @ tangent)) == pytest.approx(1.0, abs=1e-4)  # square to the circle there
+    other = construct.plane_of(construct.plane_along_path(ring, length / 4, from_end=True))
+    assert other[0] == pytest.approx(-origin, abs=0.05)  # the other way round
+
+
+@pytest.mark.parametrize("entities, distance, expected", [
+    (LINE, 61.0, "The path is 60.00 mm long, so type a distance from 0 to 60.00 mm."),
+    (LINE + RING, 5.0, "exactly one path"),
+])
+def test_a_plane_along_a_path_is_refused_plainly(entities, distance, expected):
+    with pytest.raises(BuildError) as err:
+        construct.plane_along_path(path_sketch(entities), distance)
+    assert expected in str(err.value)
+    assert_plain(str(err.value))
+    with pytest.raises(BuildError) as err:
+        construct.plane_along_path(new_primitive("cube"), 0.0)
+    assert "is not a sketch" in str(err.value)
+
+
+def test_a_plane_along_a_selected_path_from_the_form(window, monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(construct_actions, "ask_plane_path", lambda parent, ends, length: seen.update(
+        ends=ends, length=length) or {"distance": 20.0, "from": "end"})
+    window.do_plane_along_path()
+    assert window.statusBar().currentMessage() == window.PATH_HINT and not seen
+    window.add_sketch(LINE, np.eye(4))
+    steps = len(window.document._undo)
+    window.do_plane_along_path()
+    assert seen["length"] == pytest.approx(60.0)
+    assert seen["ends"] == [("start", "The end at 0, 0 in the sketch"), ("end", "The end at 60, 0 in the sketch")]
+    made = window.document.scene.shapes[1]
+    assert plane(made) == [[40, 0, 0], [-1, 0, 0]] and len(window.document._undo) == steps + 1
+    file = tmp_path / "path.mesh"
+    save_project(window.document.scene, file)
+    assert load_project(file).shapes[1].transform == pytest.approx(made.transform)
+    window.do_undo()
+    assert len(window.document.scene.shapes) == 1
+
+
+def test_plane_along_a_path_text_is_plain_language(qapp, close_qt_widget):
+    from mesh.panels import FormDialog
+
+    ends = construct_actions.path_ends(np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]), True)
+    dialog = close_qt_widget(FormDialog(None, "Plane Along a Path", construct_actions.plane_path_fields(ends, 50.0),
+                                        note=construct_actions.plane_path_note(50.0)))
+    for text in dialog.labels() + [construct_actions.ConstructActions.PATH_HINT]:
+        assert_plain(text)
+
+
 def test_touching_plane_text_is_plain_language():
     for text in (construct.ROUND_ONLY, construct.FLAT_HERE, construct.OFF_ROUND, construct.STRETCHED,
                  construct_actions.ConstructActions.CONSTRUCT_TOOL_PROMPTS["plane_round"]):

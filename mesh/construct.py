@@ -483,6 +483,71 @@ def plane_through_points(a, b, c, label: str = "Plane") -> Shape:
     return new_plane(middle, n, size, label)
 
 
+SMOOTH_DEGREES = 10.0  # path pieces meeting at less than this are a curve, as in Pattern Along a Path
+
+
+def path_of(guide) -> tuple[np.ndarray, bool]:
+    """The one path a sketch draws (as Sweep and Pattern Along a Path take
+    it), in the sketch's own plane: (points, closed), no point repeated."""
+    if not (is_reference(guide) and guide.params.get("primitive") == "sketch"):
+        raise BuildError(f"{guide.name} is not a sketch. Select a sketch whose curves make a path.")
+    try:
+        points, closed = sketch.single_path(guide.params.get("entities", []))
+    except sketch.SketchError as exc:
+        raise BuildError(str(exc)) from exc
+    points = np.asarray(points, dtype=np.float64)
+    keep = np.concatenate([[True], np.linalg.norm(np.diff(points, axis=0), axis=1) > 1e-9])
+    points = points[keep]
+    if closed and len(points) > 1 and np.linalg.norm(points[0] - points[-1]) < 1e-9:
+        points = points[:-1]
+    if len(points) < (3 if closed else 2):
+        raise BuildError("The path is too short to put a plane on.")
+    return points, closed
+
+
+def path_length(points, closed: bool) -> float:
+    ends = np.roll(points, -1, axis=0) if closed else points[1:]
+    return float(np.linalg.norm(ends - points[: len(ends)], axis=1).sum())
+
+
+def plane_along_path(guide, distance: float, from_end: bool = False, label: str = "Plane") -> Shape:
+    """A plane square to the path a sketch draws, `distance` mm along it
+    from where the path starts (or from its other end; round a closed
+    path, the other way). On a curve, made of short straight pieces, the
+    way it faces turns smoothly from one piece to the next."""
+    points, closed = path_of(guide)
+    if from_end:
+        points = np.vstack([points[:1], points[:0:-1]]) if closed else points[::-1].copy()
+    if closed:
+        points = np.vstack([points, points[:1]])
+    along = np.diff(points, axis=0)
+    lengths = np.linalg.norm(along, axis=1)
+    starts = np.concatenate([[0.0], np.cumsum(lengths)[:-1]])
+    total = float(lengths.sum())
+    distance = float(distance)
+    if not math.isfinite(distance):
+        raise BuildError("Type an ordinary number for the distance.")
+    if distance < -1e-9 or distance > total + 1e-9:
+        raise BuildError(f"The path is {total:.2f} mm long, so type a distance from 0 to {total:.2f} mm.")
+    distance = min(max(distance, 0.0), total)
+    pieces = len(lengths)
+    k = min(max(int(np.searchsorted(starts, distance, side="right")) - 1, 0), pieces - 1)
+    at = points[k] + (distance - starts[k]) / lengths[k] * along[k]
+    headings = np.arctan2(along[:, 1], along[:, 0])
+    heading = float(headings[k])
+    middle = starts[k] + lengths[k] / 2.0
+    other = k - 1 if distance < middle else k + 1
+    if closed or 0 <= other < pieces:
+        other %= pieces
+        turn = math.remainder(float(headings[other] - headings[k]), 2.0 * math.pi)
+        if abs(turn) <= math.radians(SMOOTH_DEGREES):
+            heading += turn * abs(distance - middle) / ((lengths[k] + lengths[other]) / 2.0)
+    frame = np.asarray(guide.transform, dtype=np.float64)
+    origin = sketch.to_world(frame, at[None, :])[0]
+    facing = frame[:3, :2] @ np.array([math.cos(heading), math.sin(heading)])
+    return new_plane(origin, facing, guides.PLANE_SIZE, label)
+
+
 def plane_touching(shape, face_index: int, point, clearances: dict | None = None,
                    label: str = "Plane") -> Shape:
     """The plane touching a round part's true round surface (see

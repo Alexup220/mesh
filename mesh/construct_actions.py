@@ -57,6 +57,40 @@ def ask_plane_angle(parent, lines) -> dict | None:
     return run_form(parent, "Plane at an Angle", plane_angle_fields(lines), note=PLANE_ANGLE_NOTE)
 
 
+PATH_ENDS = [("start", "The end the path starts from"), ("end", "The other end")]
+
+
+def _at(point) -> str:
+    return f"{round(float(point[0]), 2):g}, {round(float(point[1]), 2):g}"
+
+
+def path_ends(points, closed: bool):
+    """The form's choices of where to measure along a path from."""
+    if closed:
+        return [("start", f"Its point at {_at(points[0])} in the sketch, going one way round"),
+                ("end", f"Its point at {_at(points[0])} in the sketch, going the other way round")]
+    return [("start", f"The end at {_at(points[0])} in the sketch"),
+            ("end", f"The end at {_at(points[-1])} in the sketch")]
+
+
+def plane_path_fields(ends=None, length: float = 10000.0):
+    ends = ends or PATH_ENDS
+    return [
+        ("distance", "Distance along the path (mm)", 0.0, {"min": 0.0, "max": max(float(length), 0.01)}),
+        ("from", "Measured from", ends[0][0], {"choices": ends}),
+    ]
+
+
+def plane_path_note(length: float) -> str:
+    return (f"Adds a construction plane square to the sketch's path, the distance you type along it. "
+            f"The path is {length:.2f} mm long. Curves are followed in short straight pieces; on a "
+            "curve the plane turns smoothly from one piece to the next.")
+
+
+def ask_plane_path(parent, ends, length: float) -> dict | None:
+    return run_form(parent, "Plane Along a Path", plane_path_fields(ends, length), note=plane_path_note(length))
+
+
 class ConstructActions:
     """Mixed into MeshWindow through ExpertActions."""
 
@@ -302,6 +336,39 @@ class ConstructActions:
             return
         points = list(self._construct_picks)
         self._finish_construct(lambda: self.plane_through_spots(points))
+
+    # --- Plane along a path -----------------------------------------------------------
+
+    PATH_HINT = "Select one sketch whose curves make a path; the plane goes square to the path."
+
+    def _selected_path(self):
+        chosen = self._picked()
+        if len(chosen) != 1 or not (is_reference(chosen[0]) and chosen[0].params.get("primitive") == "sketch"):
+            self.statusBar().showMessage(self.PATH_HINT)
+            return None
+        return chosen[0]
+
+    @replayable()
+    def plane_along_path_selected(self, distance: float = 0.0, from_end: bool = False) -> bool:
+        """A plane square to the selected sketch's path, `distance` mm along
+        it from where it starts (or from its other end)."""
+        guide = self._selected_path()
+        if guide is None:
+            return False
+        name = self._next_name("Plane")
+        return self._add_guide("add plane", lambda: construct.plane_along_path(guide, distance, from_end, name))
+
+    def do_plane_along_path(self) -> None:
+        guide = self._selected_path()
+        if guide is None:
+            return
+        found = self._attempt("Cannot add the guide", lambda: construct.path_of(guide))
+        if found is None:
+            return
+        points, closed = found
+        values = ask_plane_path(self, path_ends(points, closed), construct.path_length(points, closed))
+        if values is not None:
+            self.plane_along_path_selected(values["distance"], values["from"] == "end")
 
     # --- Plane touching a round part ------------------------------------------------
 

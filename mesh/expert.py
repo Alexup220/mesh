@@ -267,6 +267,14 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_plane_touching",
     ),
     ExpertTool(
+        "plane_path", "construct", "Plane A&long a Path...",
+        "Select a sketch of a path (curves joined end to end, or one closed outline) for a "
+        "construction plane square to the path, the distance you type along it from one end. "
+        "Curves are followed in short straight pieces; on a curve the plane turns smoothly from "
+        "one piece to the next.",
+        "do_plane_along_path",
+    ),
+    ExpertTool(
         "axis_round", "construct", "Axis Through a &Round Part",
         "Add a construction axis along the middle of each selected round part: a cylinder, "
         "cone, tube, ring, ball, round hardware hole or revolved part. Turn a pattern or a "

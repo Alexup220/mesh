@@ -400,6 +400,11 @@ def scenario_plane_touching(window):
     window.plane_touching_round(cylinder.id, *round_side(cylinder, (1, 0, 0)))
 
 
+def scenario_plane_along_path(window):
+    add_sketch(window, ELBOW, sketch.named_plane_frame("xz"))
+    window.plane_along_path_selected(25.0, from_end=True)
+
+
 def scenario_midplane(window):
     box = add(window)
     window.midplane_of_faces((box.id, face_towards(box, (1, 0, 0))), (box.id, face_towards(box, (-1, 0, 0))))
@@ -717,7 +722,7 @@ SAMPLE_ARGS = {
     "about": "base", "op": "union", "keep_tools": False, "keep_tool": False, "wall": 2.0, "far_side": False,
     "radius": 2.0, "count": 3, "spacing": 10.0, "count2": 1, "spacing2": 30.0, "axis2": "y",
     "centre": [0.0, 0.0, 0.0], "follow": False, "plane": "x", "open_top": False, "drain": 0.0,
-    "pegs": False, "peg_diameter": 4.0,
+    "pegs": False, "peg_diameter": 4.0, "from_end": False,
 }
 
 
