@@ -828,6 +828,75 @@ def test_using_parameters_from_the_history_window(window, monkeypatch):
     dialog.deleteLater()
 
 
+WIDE = [{"type": "rectangle", "corner": [0, 0], "width": 50, "height": 10}]
+
+
+def sketch_then_extrude(window):
+    window.start_history()
+    drawn = add_sketch(window, RECT)
+    window.extrude_selected(5.0, keep_sketch=True)
+    part = window.document.scene.selected()[0]
+    assert np.ptp(shape_geometry(part).bounds, axis=0)[0] == pytest.approx(20.0)
+    return drawn, part
+
+
+def test_changing_the_curves_a_step_drew(window, warnings):
+    drawn, part = sketch_then_extrude(window)
+    found = window.step_sketch(0)
+    assert found[0] == drawn.id and found[2][0]["width"] == 20
+    assert window.step_sketch(1) is None and window.step_editor(0) is None
+    assert window.change_sketch_step(0, WIDE)
+    scene = window.document.scene
+    assert np.ptp(shape_geometry(scene.get(part.id)).bounds, axis=0)[0] == pytest.approx(50.0)
+    assert scene.get(drawn.id).params["entities"][0]["width"] == 50.0
+    assert window.history_steps()[0]["effect"]["added"][0]["params"]["entities"][0]["width"] == 50.0
+    assert not warnings
+    window.do_undo()
+    assert np.ptp(shape_geometry(window.document.scene.get(part.id)).bounds, axis=0)[0] == pytest.approx(20.0)
+
+
+def test_changing_a_change_sketch_step(window):
+    drawn, part = sketch_then_extrude(window)
+    window.set_sketch_entities(window.document.scene.get(drawn.id), SQUARE)
+    assert window.step_sketch(2)[2] == window.document.scene.get(drawn.id).params["entities"]
+    # Changing the sketch now leaves the part already made ...
+    assert np.ptp(shape_geometry(window.document.scene.get(part.id)).bounds, axis=0)[0] == pytest.approx(20.0)
+    # ... changing the step that drew it changes the part too.
+    assert window.change_sketch_step(0, WIDE)
+    assert np.ptp(shape_geometry(window.document.scene.get(part.id)).bounds, axis=0)[0] == pytest.approx(50.0)
+    assert window.change_sketch_step(2, BIG)
+    assert window.document.scene.get(drawn.id).params["entities"][0]["corner"] == [-10.0, -10.0]
+
+
+def test_curves_a_later_step_cannot_use_are_refused(window, warnings):
+    _drawn, part = sketch_then_extrude(window)
+    before = summary(window.document.scene)
+    assert not window.change_sketch_step(0, LINE)  # no closed outline to extrude
+    assert warnings and warnings[-1].startswith("Step 2 (")
+    assert not window.change_sketch_step(0, [{"type": "circle", "centre": [0, 0], "diameter": -1}])
+    assert "diameter" in warnings[-1]
+    assert summary(window.document.scene) == before
+    for text in warnings:
+        assert_plain(text)
+
+
+def test_change_in_the_history_window_opens_the_sketch(window, monkeypatch):
+    from mesh import sketch_editor
+
+    _drawn, part = sketch_then_extrude(window)
+    seen = {}
+
+    def fake_sketch(parent, title, entities=(), guides=(), note=None):
+        seen.update(title=title, entities=entities, note=note)
+        return WIDE
+
+    monkeypatch.setattr(sketch_editor, "edit_sketch", fake_sketch)
+    assert window.ask_step_change(0)
+    assert seen["title"] == "Change Sketch 1" and seen["entities"][0]["width"] == 20
+    assert np.ptp(shape_geometry(window.document.scene.get(part.id)).bounds, axis=0)[0] == pytest.approx(50.0)
+    assert_plain(seen["note"])
+
+
 def test_a_change_that_cannot_be_worked_out_changes_nothing(window, warnings):
     scene = round_then_pattern(window)
     before = summary(scene)

@@ -281,9 +281,11 @@ reflected. What differs from Fusion is how the pattern is chosen.
   project back to a step and add new steps there (Fusion's): skip the
   later steps, or Undo, instead. A step can't move before the step that
   makes a part it uses.
-  Only the tools' own settings can be changed (an extrusion's distance, a
-  rounding's radius, a pattern's count); which parts a tool was used on,
-  and a sketch's curves, can't be changed in a step. Steps that are not
+  A step's settings can be changed (an extrusion's distance, a
+  rounding's radius, a pattern's count), and so can the curves of a step
+  that drew a sketch or changed one (Change... opens the sketch window),
+  so parts made from it later follow. Which parts a tool was used on
+  can't be changed in a step. Steps that are not
   tools (adding a shape, moving or dragging, typing in the Details panel,
   drawing a sketch, Lay Flat, Align Face to Face) do again what they did:
   a move moves the part by the same amount from wherever it is by then,

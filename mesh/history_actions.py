@@ -20,9 +20,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from mesh import components, history, parameters
+from mesh import components, history, parameters, sketch
+from mesh.builders import BuildError
 from mesh.panels import run_form
 from mesh.scene import Document, Scene
+from mesh.shapes import shape_geometry
 
 HISTORY_NOTE = (
     "Every change to the project since the history started, in order. Change a step's "
@@ -36,6 +38,10 @@ NOT_KEPT_NOTE = (
     "here, ready to be changed or removed."
 )
 STEP_NOTE = "The project is worked out again from this step on, with these settings."
+SKETCH_STEP_NOTE = (
+    "The curves as this step drew them. Change them and the project is worked out again from "
+    "here: parts later made from this sketch follow."
+)
 FORMULAS_NOTE = (
     "Type a number, or a formula of your parameters (such as width / 2). A setting given by a "
     "formula follows the parameters: change them and the project is worked out again. A count "
@@ -260,7 +266,7 @@ class HistoryActions:
 
     HISTORY_STARTED = "From now on, every change is kept in the history (Modify > History)."
     HISTORY_STOPPED = "The history is no longer kept. The parts stay as they are."
-    STEP_FIXED = "That step has no settings to change. It can be removed."
+    STEP_FIXED = "That step has no settings to change. It can be skipped, moved or removed."
     FORMULA_ENDED = "That setting no longer follows a formula."
     NO_PARAMETERS = "There are no parameters yet: Modify > Change Parameters."
 
@@ -523,6 +529,57 @@ class HistoryActions:
         numbers.insert(to, numbers.pop(index))
         return self._rework("Cannot move the step", "move a step", steps, numbers=numbers)
 
+    def step_sketch(self, index: int):
+        """(shape id, its name, the curves) when step `index` drew one
+        sketch or changed one sketch's curves (or those of a part made from
+        one), else None."""
+        steps = self.history_steps()
+        if not 0 <= index < len(steps) or steps[index]["call"] is not None:
+            return None
+        effect = steps[index]["effect"] or {}
+        drawn = [(d["id"], d.get("name", ""), d["params"]["entities"]) for d in effect.get("added", [])
+                 if isinstance(d.get("params", {}).get("entities"), list)]
+        changed = [(i, d.get("name", ""), d["params"]["entities"]) for i, d in effect.get("changed", {}).items()
+                   if isinstance(d.get("params", {}).get("entities"), list)]
+        if len(drawn) + len(changed) != 1 or (drawn and len(effect.get("added", [])) != 1):
+            return None
+        shape_id, name, entities = (drawn or changed)[0]
+        return shape_id, name or next(iter(effect.get("names", [])), "the sketch"), entities
+
+    def change_sketch_step(self, index: int, entities) -> bool:
+        """Give the sketch step `index` (see step_sketch) new curves and work
+        the project out again. Refused if a part made from them would not
+        come out solid, or a later step no longer works."""
+        found = self.step_sketch(index)
+        if found is None:
+            return False
+        shape_id = found[0]
+        title = "Cannot change the sketch"
+        try:
+            entities = sketch.clean_entities(entities)
+        except sketch.SketchError as exc:
+            self._warn(title, str(exc))
+            return False
+        steps = copy.deepcopy(self.history_steps())
+        effect = steps[index]["effect"]
+        for data in effect.get("added", []):
+            data["params"]["entities"] = entities
+        if shape_id in effect.get("changed", {}):
+            effect["changed"][shape_id]["params"]["entities"] = entities
+        try:
+            scene = self._replayed(steps)
+            # The part (or sketch) itself must still come out.
+            if shape_id in {s.id for s in scene.shapes}:
+                shape_geometry(scene.get(shape_id), scene.fit_clearances)
+        except history.HistoryError as exc:
+            self._warn(title, str(exc))
+            return False
+        except (BuildError, sketch.SketchError) as exc:
+            self._warn(title, f"Step {index + 1} ({history.describe(steps[index])}) can't be worked out: {exc}")
+            return False
+        self._replace_scene("change a sketch step", scene)
+        return True
+
     def step_editor(self, index: int):
         """(form title, fields, settings from values) for step `index`, or
         None if it has no settings to change."""
@@ -538,6 +595,13 @@ class HistoryActions:
 
     def ask_step_change(self, index: int) -> bool:
         editor = self.step_editor(index)
+        drawn = self.step_sketch(index) if editor is None else None
+        if drawn is not None:
+            from mesh import sketch_editor
+
+            _shape_id, name, entities = drawn
+            entities = sketch_editor.edit_sketch(self, f"Change {name}", entities, note=SKETCH_STEP_NOTE)
+            return entities is not None and self.change_sketch_step(index, entities)
         if editor is None:
             self.statusBar().showMessage(self.STEP_FIXED)
             return False
