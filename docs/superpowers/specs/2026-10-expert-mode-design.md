@@ -147,6 +147,43 @@ closest honest version, which its tooltip states and `docs/FOLLOWUPS.md` lists.
   no form), a flat face clicked next (`mirror_face`, a click tool like
   Phase 2's), or a middle plane through 0.
 
+## Phase 4 as built: Construct and Inspect
+
+- **Modules.** `mesh/guides.py` draws the construction guides and
+  `mesh/construct.py` works out where they go; `mesh/section.py` cuts the
+  drawing for the section view, `mesh/measure.py` measures and
+  `mesh/threads.py` builds threads (all core, in the purity list). The
+  window side is `ConstructActions` (`mesh/construct_actions.py`) and
+  `InspectActions` (`mesh/inspect_actions.py`), mixed into
+  `ExpertActions`; Thread's form is with the other Create tools in
+  `mesh/expert_actions.py`.
+- **Guides are references.** `plane`, `axis` and `point` join `sketch` in
+  `shapes.REFERENCES`, so they are shown and saved but never printed,
+  grouped or combined. Each is only its transform (plus a drawn size); it
+  does not follow the face or part it was made from. Other tools take
+  them: New Sketch draws on a selected plane, Mirror and Split Body use a
+  plane, Pattern Around a Line and Plane at an Angle turn round an axis,
+  and three or two selected points make a plane or an axis at once.
+  Multi-click tools show a prompt per click (`_STAGED`, read through the
+  window's `_tool_prompt`).
+- **Section view** is view state on the 3D view (`Viewport.section`), never
+  in the scene: no undo step, not saved, cleared when Expert mode goes off
+  or another project opens. Each part's drawing is trimmed with manifold3d
+  (`trim_by_plane`) keeping a face id per triangle, so a click on a cut
+  part maps back to the part's own face (`Viewport.face_of_cell`); the cap
+  is a separate orange actor that counts as no part for click tools.
+- **Measure Between Faces** is a click tool that stays on, like the
+  beginner Measure, and shows its results in a window that stays open.
+  **Volume and Area** measures `ops.evaluate` of the selection, the parts
+  as they would print together. Neither changes anything.
+- **Thread** turns a selected cylinder into a `thread` primitive (same id,
+  place, colour, Solid/Hole and fit). It is one ISO 68-1 cross-section
+  extruded with a twist of 360 degrees per pitch, 36 steps a turn; a
+  left-hand thread is the right-hand one mirrored. A Hole's fit grows the
+  radius and both ends but keeps the turns where they were, so a bolt of
+  the same sizes fits inside it. Pitch, threaded length, end and hand are
+  Details panel fields, checked through `create.edit_refusal`.
+
 ## Project files
 
 No new top-level fields and no `format_version` change are planned. New shape
