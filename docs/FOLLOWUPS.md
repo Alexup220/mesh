@@ -200,33 +200,57 @@ reflected. What differs from Fusion is how the pattern is chosen.
 
 ## Expert mode, Phase 4 (Construct and Inspect): approximations and limits
 
-- **Guides don't follow what they were made from.** A construction plane,
-  axis or point is placed by the numbers worked out when it is made;
-  moving the part or sketch afterwards leaves the guide where it was
-  (Fusion keeps them linked). Move or turn it in the Details panel, or
-  make it again.
+- **Guides follow what they were made from only through the history.** A
+  construction plane, axis or point is placed by the numbers worked out
+  when it is made, with no live link (Fusion keeps them linked). When the
+  project keeps a history (Modify > History), a guide made by a Construct
+  tool is made again whenever the history is worked out again (a step
+  changed or removed, or new parameter values), so it follows what earlier
+  steps did to the face, part, sketch or guide it came from. A change made
+  after the guide (a later step, a drag, a number typed in the Details
+  panel) does not move it, and a plane or axis through clicked points (or
+  selected points) stays where those points were. Without a history,
+  move or turn a guide in the Details panel, or make it again.
 - **Construction planes** are drawn as a square (60 mm across, or sized
   round the face they came from) but go on without end. Offered: a plane a
   distance from a flat face, a sketch, another plane or the workplane's
   three planes; at an angle around the left/right, forward/back or upright
   line through 0; halfway between two faces (or two planes); and through
   three clicked points, where a click within 2 mm of a corner of the
-  clicked face lands on the corner. Fusion's plane touching a round surface
-  and plane along a path are not offered.
+  clicked face lands on the corner; and touching a round part where it is
+  clicked. The touching plane is worked out from the part's own sizes (a
+  cylinder, cone, tube, ring, ball, round hardware hole or revolved part,
+  and a thread's crest and plain part), so it touches the true round
+  surface rather than the flat strip clicked; a revolve's outline is
+  itself made of short straight pieces, so on a curve in it the plane
+  touches the piece clicked. A part made round another way (an Extrusion
+  of a circle, a group, an imported part) can't be used. A plane along a
+  path is square to the one path a selected sketch draws, a typed distance
+  along it from either end; curves in the path are short straight pieces,
+  and the plane's facing turns smoothly between pieces that meet at less
+  than 10 degrees (at a sharper corner it is square to the piece after
+  the corner). Fusion's distance as a fraction of the path's length is not
+  offered; only millimetres.
 - **Construction axes** are drawn as a line (120 mm, or longer for a long
   part) with an arrow showing the way it points, but go on without end.
   Offered: along the middle of a round part (a cylinder, cone, tube, ring,
   ball, round hardware hole or revolved part, read from its own numbers, so
   an Extrusion of a circle doesn't count); through two clicked points;
-  square to a flat face at a clicked point; and where two planes meet.
-  Fusion's axis along a clicked edge is not offered. Pattern Around a Line
+  square to a flat face at a clicked point; where two planes meet; and
+  along a clicked edge. The edge is found as Round an Edge finds it (the
+  sharp edge of the clicked face nearest the click), and the axis runs
+  along the straight stretch of it clicked; a round edge is short straight
+  pieces, so there it runs along the one piece clicked. Pattern Around a Line
   and Plane at an Angle turn around a selected axis; Revolve still turns
   around a line in its sketch.
 - **Construction points** are drawn as a small cross. Offered: at a click
-  on a part (on the face's corner within 2 mm of it) and at the middle of a
-  flat face's area (a cylinder's end gives its centre). Fusion's point at
-  the end of an edge, where an edge meets a face, or where three planes
-  meet is not offered. Three selected points make a plane and two make an
+  on a part (on the face's corner within 2 mm of it), at the middle of a
+  flat face's area (a cylinder's end gives its centre), and at the end of
+  a clicked edge nearer the click (the end of the straight stretch
+  clicked, so on a round edge an end of the short piece clicked); where
+  three selected sketches or planes meet; and where a selected axis meets
+  a selected sketch or plane. Fusion's point where a part's edge meets a
+  face is not offered. Three selected points make a plane and two make an
   axis; nothing else takes a point yet.
 - **Section view** only changes the view, one plane at a time, and is
   not saved with the project (Fusion keeps section analyses in the
@@ -239,9 +263,27 @@ reflected. What differs from Fusion is how the pattern is chosen.
   faces (within 2 mm of a corner, from the corner). A click on a round
   surface lands on one of its narrow flat strips, so the "face area" is
   that strip's and the angle is the strip's. The angle is between the
-  faces' planes (0 to 90 degrees). Fusion's measuring of edges, of a round
-  face's radius and of the shortest distance between two parts is not
-  offered.
+  faces' planes (0 to 90 degrees).
+- **Length of an Edge** measures the edge next to a click, found as Round
+  an Edge finds it, on the part as drawn: a round edge is short straight
+  pieces, so its length comes out a little short of the true curve, and
+  the straight stretch clicked is one of those pieces. Edges are found
+  only on parts of up to 50,000 triangles.
+- **Radius of a Round Face** reads the radius from the part's own sizes
+  (a cylinder, cone, tube, ring, ball, round hardware hole, a thread's
+  crest or a revolved part's outline, a Hole at its fit), so it is the
+  true radius, not the flat strips'. A cone gives both ends and the
+  radius where clicked; a ring or rounded edge gives both ways it curves.
+  A revolved part's curved outline is short straight pieces, so there it
+  is the one piece clicked. Any other part (a box, an imported part, one
+  a Modify tool has changed) or a part stretched unevenly says its radius
+  can't be told; Fusion measures any round face.
+- **Shortest Distance Between Parts** measures two selected parts as they
+  are drawn (a Hole at its fit), so next to a round surface, made of flat
+  strips, it can be slightly off the true distance. It gives the distance
+  only: the two nearest points are not shown, and parts that touch or
+  overlap are said to (Fusion draws the nearest points). A part with gaps
+  in its surface can't be measured.
 - **Volume and Area** measures the selected parts as they would print
   together (overlaps once, selected Holes cut out). Fusion's mass and
   centre of gravity are not offered.

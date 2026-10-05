@@ -350,3 +350,225 @@ def test_plane_forms_and_prompts_are_plain_language(qapp, close_qt_widget):
     for text in construct_actions.ConstructActions.CONSTRUCT_TOOL_PROMPTS.values():
         assert_plain(text)
     assert_plain(construct_actions.ConstructActions.MIDPLANE_HINT)
+
+
+# --- A plane touching a round part ------------------------------------------------------
+
+
+def strip_towards(shape, direction, clearances=None):
+    """A narrow flat strip of a round part facing `direction` (the furthest
+    that way, of those facing it), and its middle."""
+    tm = shape_geometry(shape, clearances)
+    direction = np.asarray(direction, dtype=np.float64)
+    facing = tm.face_normals @ direction
+    candidates = np.flatnonzero(facing > facing.max() - 1e-6)
+    face = int(candidates[np.argmax(tm.triangles_center[candidates] @ direction)])
+    return face, tm.triangles_center[face]
+
+
+def test_a_plane_touches_a_cylinder_on_its_true_round_side():
+    cylinder = new_primitive("cylinder")
+    cylinder.transform[:3, 3] = (5.0, 6.0, 1.0)
+    face, middle = strip_towards(cylinder, (1, 1, 0))
+    made = construct.plane_touching(cylinder, face, middle)
+    out = np.array([middle[0] - 5.0, middle[1] - 6.0, 0.0])
+    out /= np.linalg.norm(out)
+    origin, normal = construct.plane_of(made)
+    # On the true surface, 10 mm from the part's line, not on the flat strip.
+    assert origin == pytest.approx((5.0 + 10.0 * out[0], 6.0 + 10.0 * out[1], middle[2]))
+    assert normal == pytest.approx(out)
+    assert made.params["size"] == 30.0
+
+
+def test_a_plane_touching_a_cone_a_ball_a_ring_and_inside_a_tube():
+    cone = new_primitive("cone")  # 20 across and 20 high
+    face, middle = strip_towards(cone, (1, 0, 0.5))
+    origin, normal = plane(construct.plane_touching(cone, face, middle))
+    assert normal[2] == pytest.approx(10 / np.hypot(10, 20), abs=1e-6)  # square to the sloping side
+    assert np.hypot(origin[0], origin[1]) == pytest.approx(10.0 * (1 - origin[2] / 20.0), abs=1e-6)
+
+    ball = new_primitive("sphere")
+    centre = shape_geometry(ball).bounds.mean(axis=0)
+    face, middle = strip_towards(ball, (1, -1, 1))
+    origin, normal = construct.plane_of(construct.plane_touching(ball, face, middle))
+    assert np.linalg.norm(origin - centre) == pytest.approx(10.0)
+    assert normal == pytest.approx((origin - centre) / 10.0)
+
+    ring = new_primitive("torus")  # 20 across, 6 thick: the middle of its round is 7 from its line
+    face, middle = strip_towards(ring, (0, 1, 1))
+    origin, normal = construct.plane_of(construct.plane_touching(ring, face, middle))
+    core = np.array([middle[0], middle[1], 0.0]) * 7.0 / np.hypot(middle[0], middle[1]) + (0.0, 0.0, 3.0)
+    assert np.linalg.norm(origin - core) == pytest.approx(3.0)
+    assert normal == pytest.approx((origin - core) / 3.0)
+
+    tube = new_primitive("tube")  # 20 across with 2 mm walls: its inside is 8 from its line
+    tm = shape_geometry(tube)
+    inward = np.column_stack([-tm.triangles_center[:, :2], np.zeros(len(tm.faces))])
+    inside = int(np.argmax(np.einsum("ij,ij->i", tm.face_normals, inward)))
+    origin, normal = construct.plane_of(construct.plane_touching(tube, inside, tm.triangles_center[inside]))
+    assert np.hypot(origin[0], origin[1]) == pytest.approx(8.0)
+    assert normal[:2] == pytest.approx(-origin[:2] / 8.0)  # out of the wall, into the hole
+
+
+def test_a_plane_touching_a_turned_part_and_a_fitted_hole():
+    [lying] = modify.move_copy([new_primitive("cylinder")], axis="x", angle=90.0)
+    face, middle = strip_towards(lying, (0, 0, 1))
+    origin, normal = construct.plane_of(construct.plane_touching(lying, face, middle))
+    point, direction = construct.axis_of(lying)  # now along the forward / back line
+    out = origin - point - float((origin - point) @ direction) * direction
+    assert np.linalg.norm(out) == pytest.approx(10.0) and normal == pytest.approx(out / 10.0)
+    assert normal[2] > 0.99 and origin[1] == pytest.approx(middle[1])
+    hole = new_primitive("cylinder")
+    hole.is_hole, hole.fit = True, "loose"
+    fits = {"press": 0.1, "snug": 0.2, "loose": 0.4}
+    face, middle = strip_towards(hole, (1, 0, 0), fits)
+    origin, _normal = plane(construct.plane_touching(hole, face, middle, fits))
+    assert np.hypot(origin[0], origin[1]) == pytest.approx(10.4)  # as drawn: grown by its fit
+
+
+def test_a_plane_touching_a_revolved_part():
+    from mesh import create
+
+    outline = create.new_sketch([{"type": "rectangle", "corner": [5, 0], "width": 5, "height": 10}],
+                                sketch.plane_frame((0, -1, 0)))
+    turned = create.make_revolve(outline, "y")
+    face, middle = strip_towards(turned, (1, 0, 0))
+    origin, normal = plane(construct.plane_touching(turned, face, middle))
+    assert np.hypot(origin[0], origin[1]) == pytest.approx(10.0) and normal[2] == pytest.approx(0.0)
+
+
+def nut_pocket_side(part):
+    """A side of a nut trap's six-sided pocket: flat, not round."""
+    tm = shape_geometry(part)
+    sides = np.flatnonzero((np.abs(tm.face_normals[:, 2]) < 1e-6) & (tm.triangles_center[:, 2] > 9.0))
+    return int(sides[np.argmax(np.hypot(*tm.triangles_center[sides, :2].T))])
+
+
+@pytest.mark.parametrize("kind, pick, expected", [
+    ("cylinder", lambda part: face_towards(part, (0, 0, 1)), "is flat, not round"),
+    ("cube", lambda part: face_towards(part, (1, 0, 0)), "can't be told from its own sizes"),
+    ("nut_trap", nut_pocket_side, "not on one of its round surfaces"),
+])
+def test_only_a_round_side_takes_a_touching_plane(kind, pick, expected):
+    part = new_primitive(kind)
+    face = pick(part)
+    with pytest.raises(BuildError) as err:
+        construct.plane_touching(part, face, shape_geometry(part).triangles_center[face])
+    assert expected in str(err.value)
+    assert_plain(str(err.value))
+    with pytest.raises(BuildError):
+        construct.plane_touching(construct.new_point((0, 0, 0)), 0, (0, 0, 0))
+
+
+def test_a_plane_touching_a_clicked_round_part_is_one_undo_step(window, qapp, tmp_path):
+    window.add_primitive("cylinder")
+    cylinder = window.document.scene.shapes[0]
+    window.do_plane_touching()
+    assert window.tool == "plane_round"
+    steps = len(window.document._undo)
+    window._on_surface_picked(cylinder.id, face_towards(cylinder, (0, 0, 1)), (0, 0, 20))
+    # The flat end: the tool keeps waiting and says why.
+    assert window.tool == "plane_round" and "is flat, not round" in window.statusBar().currentMessage()
+    face, middle = strip_towards(cylinder, (0, -1, 0))
+    window._on_surface_picked(cylinder.id, face, middle)
+    assert window.tool is None and len(window.document._undo) == steps
+    qapp.processEvents()
+    made = window.document.scene.shapes[1]
+    assert made.name == "Plane 1" and len(window.document._undo) == steps + 1
+    origin, normal = plane(made)
+    assert np.hypot(origin[0], origin[1]) == pytest.approx(10.0) and normal[1] == pytest.approx(-1.0, abs=1e-3)
+    file = tmp_path / "touching.mesh"
+    save_project(window.document.scene, file)
+    loaded = load_project(file).shapes[1]
+    assert loaded.transform == pytest.approx(made.transform) and loaded.params == made.params
+    window.do_undo()
+    assert len(window.document.scene.shapes) == 1
+
+
+# --- A plane along a path -----------------------------------------------------------------
+
+LINE = [{"type": "line", "start": [0, 0], "end": [60, 0]}]
+ELBOW = [{"type": "line", "start": [0, 0], "end": [0, 20]}, {"type": "line", "start": [0, 20], "end": [30, 20]}]
+RING = [{"type": "circle", "centre": [0, 0], "diameter": 20}]
+
+
+def path_sketch(entities, frame=None):
+    from mesh import create
+
+    return create.new_sketch(entities, np.eye(4) if frame is None else frame, "Path")
+
+
+def test_a_plane_square_to_a_path_from_either_end():
+    path = path_sketch(LINE)
+    assert plane(construct.plane_along_path(path, 15.0)) == [[15, 0, 0], [1, 0, 0]]
+    assert plane(construct.plane_along_path(path, 15.0, from_end=True)) == [[45, 0, 0], [-1, 0, 0]]
+    assert plane(construct.plane_along_path(path, 60.0))[0] == [60, 0, 0]
+    upright = path_sketch(ELBOW, sketch.named_plane_frame("xz"))  # drawn facing the front
+    # 25 mm along: 5 mm into the second line, which runs left to right at 20 mm up.
+    assert plane(construct.plane_along_path(upright, 25.0)) == [[5, 0, 20], [1, 0, 0]]
+    assert plane(construct.plane_along_path(upright, 5.0)) == [[0, 0, 5], [0, 0, 1]]
+
+
+def test_a_plane_along_a_curve_turns_with_it():
+    ring = path_sketch(RING)
+    points, closed = construct.path_of(ring)
+    length = construct.path_length(points, closed)
+    assert closed and length == pytest.approx(np.pi * 20, rel=1e-3)
+    origin, normal = construct.plane_of(construct.plane_along_path(ring, length / 4))
+    start = np.append(points[0], 0.0)
+    assert np.linalg.norm(origin) == pytest.approx(10.0, abs=0.02)  # on the circle's short straight pieces
+    assert float(origin @ start) == pytest.approx(0.0, abs=0.05)  # a quarter of the way round
+    tangent = np.cross([0, 0, 1], origin / np.linalg.norm(origin))
+    assert abs(float(normal @ tangent)) == pytest.approx(1.0, abs=1e-4)  # square to the circle there
+    other = construct.plane_of(construct.plane_along_path(ring, length / 4, from_end=True))
+    assert other[0] == pytest.approx(-origin, abs=0.05)  # the other way round
+
+
+@pytest.mark.parametrize("entities, distance, expected", [
+    (LINE, 61.0, "The path is 60.00 mm long, so type a distance from 0 to 60.00 mm."),
+    (LINE + RING, 5.0, "exactly one path"),
+])
+def test_a_plane_along_a_path_is_refused_plainly(entities, distance, expected):
+    with pytest.raises(BuildError) as err:
+        construct.plane_along_path(path_sketch(entities), distance)
+    assert expected in str(err.value)
+    assert_plain(str(err.value))
+    with pytest.raises(BuildError) as err:
+        construct.plane_along_path(new_primitive("cube"), 0.0)
+    assert "is not a sketch" in str(err.value)
+
+
+def test_a_plane_along_a_selected_path_from_the_form(window, monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(construct_actions, "ask_plane_path", lambda parent, ends, length: seen.update(
+        ends=ends, length=length) or {"distance": 20.0, "from": "end"})
+    window.do_plane_along_path()
+    assert window.statusBar().currentMessage() == window.PATH_HINT and not seen
+    window.add_sketch(LINE, np.eye(4))
+    steps = len(window.document._undo)
+    window.do_plane_along_path()
+    assert seen["length"] == pytest.approx(60.0)
+    assert seen["ends"] == [("start", "The end at 0, 0 in the sketch"), ("end", "The end at 60, 0 in the sketch")]
+    made = window.document.scene.shapes[1]
+    assert plane(made) == [[40, 0, 0], [-1, 0, 0]] and len(window.document._undo) == steps + 1
+    file = tmp_path / "path.mesh"
+    save_project(window.document.scene, file)
+    assert load_project(file).shapes[1].transform == pytest.approx(made.transform)
+    window.do_undo()
+    assert len(window.document.scene.shapes) == 1
+
+
+def test_plane_along_a_path_text_is_plain_language(qapp, close_qt_widget):
+    from mesh.panels import FormDialog
+
+    ends = construct_actions.path_ends(np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]), True)
+    dialog = close_qt_widget(FormDialog(None, "Plane Along a Path", construct_actions.plane_path_fields(ends, 50.0),
+                                        note=construct_actions.plane_path_note(50.0)))
+    for text in dialog.labels() + [construct_actions.ConstructActions.PATH_HINT]:
+        assert_plain(text)
+
+
+def test_touching_plane_text_is_plain_language():
+    for text in (construct.ROUND_ONLY, construct.FLAT_HERE, construct.OFF_ROUND, construct.STRETCHED,
+                 construct_actions.ConstructActions.CONSTRUCT_TOOL_PROMPTS["plane_round"]):
+        assert_plain(text)

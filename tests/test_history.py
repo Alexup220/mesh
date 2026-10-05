@@ -388,6 +388,23 @@ def scenario_plane_angle(window):
     window.plane_at_angle_selected("z", 30.0)
 
 
+def round_side(shape, direction):
+    """A narrow strip on a round part's side facing about `direction`, and its middle."""
+    tm = shape_geometry(shape)
+    face = int(np.argmax(tm.face_normals @ np.asarray(direction, dtype=np.float64)))
+    return face, tm.triangles_center[face]
+
+
+def scenario_plane_touching(window):
+    cylinder = add(window, "cylinder")
+    window.plane_touching_round(cylinder.id, *round_side(cylinder, (1, 0, 0)))
+
+
+def scenario_plane_along_path(window):
+    add_sketch(window, ELBOW, sketch.named_plane_frame("xz"))
+    window.plane_along_path_selected(25.0, from_end=True)
+
+
 def scenario_midplane(window):
     box = add(window)
     window.midplane_of_faces((box.id, face_towards(box, (1, 0, 0))), (box.id, face_towards(box, (-1, 0, 0))))
@@ -426,6 +443,32 @@ def scenario_axis_square(window):
 def scenario_point(window):
     box = add(window)
     window.point_at(box.id, face_towards(box, (0, 0, 1)), (1.0, 2.0, 20.0))
+
+
+def scenario_point_of_three_planes(window):
+    for name, distance in (("xy", 5.0), ("xz", 3.0), ("yz", -2.0)):
+        window.plane_at_distance_selected(name, distance)
+    window.do_select_all()
+    window.point_of_three_planes()
+
+
+def scenario_point_of_axis_and_plane(window):
+    two_planes(window, 0.0)
+    window.axis_of_two_planes()
+    made = window.document.scene.selected()[0]  # along the left / right line
+    window.plane_at_distance_selected("yz", 7.0)
+    pick(window, made, window.document.scene.selected()[0])
+    window.point_of_axis_and_plane()
+
+
+def scenario_axis_along_edge(window):
+    box = add(window)
+    window.axis_along_edge(box.id, face_towards(box, (0, 0, 1)), (3.0, -9.5, 20.0))
+
+
+def scenario_point_at_edge_end(window):
+    box = add(window)
+    window.point_at_edge_end(box.id, face_towards(box, (0, 0, 1)), (7.0, -9.5, 20.0))
 
 
 def scenario_delete(window):
@@ -1009,6 +1052,48 @@ def test_parameters_that_break_a_later_step_are_refused(window, warnings):
     assert window.document.scene.parameters[0]["formula"] == "40"
 
 
+def guide_at(scene, name):
+    return np.asarray(next(s for s in scene.shapes if s.name == name).transform)[:3, 3].round(6).tolist()
+
+
+def test_guides_made_by_construct_tools_follow_their_parts_when_the_history_is_worked_out(window):
+    window.set_parameters([{"name": "x", "formula": "0", "note": ""}, {"name": "w", "formula": "20", "note": ""}])
+    window.start_history()
+    cylinder = add(window, "cylinder")
+    window.set_links(cylinder.id, {"x": "x"})
+    window.axis_of_round_parts()                                             # Axis 1
+    box = add(window, "cube", dx=50.0)
+    window.set_links(box.id, {"width": "w"})
+    window.plane_from_face(box.id, face_towards(box, (1, 0, 0)), 5.0)        # Plane 1, on the box's side
+    window.point_at(box.id, face_towards(box, (1, 0, 0)), (60.0, 2.0, 3.0))  # Point 1, on that side
+    window.plane_through_spots([(50.0, 0.0, 20.0), (60.0, 0.0, 20.0), (50.0, 5.0, 20.0)])  # Plane 2
+    scene = window.document.scene
+    assert guide_at(scene, "Axis 1") == [0, 0, 10] and guide_at(scene, "Plane 1") == [65, 0, 10]
+    assert guide_at(scene, "Point 1") == [60, 2, 3]
+
+    assert window.set_parameters([{"name": "x", "formula": "30", "note": ""},
+                                  {"name": "w", "formula": "40", "note": ""}])
+    scene = window.document.scene
+    assert guide_at(scene, "Axis 1") == [30, 0, 10]  # made again round the moved cylinder
+    assert guide_at(scene, "Plane 1") == [75, 0, 10] and guide_at(scene, "Point 1") == [70, 2, 3]
+    # Through clicked points: those points were numbers, so it stays.
+    assert guide_at(scene, "Plane 2")[2] == 20 and guide_at(scene, "Plane 2")[0] == pytest.approx(160 / 3)
+
+    # A move after the guide is not worked into it: only earlier steps are.
+    window._on_edited(window.document.scene.shapes[0].id, "x", -40.0)
+    assert guide_at(window.document.scene, "Axis 1") == [30, 0, 10]
+
+
+def test_a_guide_follows_a_changed_earlier_step(window):
+    window.start_history()
+    box = add(window)
+    window.move_copy_selected(dx=10.0)
+    window.plane_from_face(box.id, face_towards(box, (1, 0, 0)), 5.0)
+    assert guide_at(window.document.scene, "Plane 1") == [25, 0, 10]
+    assert window.change_history_step(1, {"dx": 30.0})
+    assert guide_at(window.document.scene, "Plane 1") == [45, 0, 10]
+
+
 def test_a_history_is_saved_and_opened_with_the_project(window, tmp_path):
     round_then_pattern(window)
     file = tmp_path / "kept.mesh"
@@ -1082,7 +1167,7 @@ SAMPLE_ARGS = {
     "about": "base", "op": "union", "keep_tools": False, "keep_tool": False, "wall": 2.0, "far_side": False,
     "radius": 2.0, "count": 3, "spacing": 10.0, "count2": 1, "spacing2": 30.0, "axis2": "y",
     "centre": [0.0, 0.0, 0.0], "follow": False, "plane": "x", "open_top": False, "drain": 0.0,
-    "pegs": False, "peg_diameter": 4.0,
+    "pegs": False, "peg_diameter": 4.0, "from_end": False,
 }
 
 

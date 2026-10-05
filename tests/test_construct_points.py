@@ -196,7 +196,92 @@ def test_a_point_round_trips_through_a_project_file(tmp_path):
     assert loaded.name == "Point 4"
 
 
+def test_a_point_at_the_end_of_an_edge_nearer_the_click():
+    box = new_primitive("cube")
+    top = face_towards(box, (0, 0, 1))
+    assert where(construct.point_at_edge_end(box, top, (7, -9.5, 20))) == [10, -10, 20]
+    assert where(construct.point_at_edge_end(box, top, (-2, -9.5, 20))) == [-10, -10, 20]
+    side = face_towards(box, (1, 0, 0))
+    assert where(construct.point_at_edge_end(box, side, (10, 9.5, 4))) == [10, 10, 0]
+
+
+def test_on_a_round_edge_a_point_goes_on_an_end_of_the_piece_clicked():
+    cylinder = new_primitive("cylinder")
+    made = where(construct.point_at_edge_end(cylinder, face_towards(cylinder, (0, 0, 1)), (9.9, 0.4, 20)))
+    assert np.hypot(made[0], made[1]) == pytest.approx(10.0) and made[2] == 20
+
+
+def test_a_point_at_the_end_of_a_clicked_edge_is_one_undo_step(window, qapp, tmp_path):
+    box = add(window, "cube")
+    window.do_point_at_edge_end()
+    assert window.tool == "point_edge"
+    steps = len(window.document._undo)
+    window._on_surface_picked(box.id, face_towards(box, (0, -1, 0)), (9.6, -10, 13))
+    assert window.tool is None
+    qapp.processEvents()
+    made = window.document.scene.shapes[1]
+    assert made.name == "Point 1" and where(made) == [10, -10, 20]
+    assert len(window.document._undo) == steps + 1
+    file = tmp_path / "end.mesh"
+    save_project(window.document.scene, file)
+    assert where(load_project(file).shapes[1]) == [10, -10, 20]
+    window.do_undo()
+    assert len(window.document.scene.shapes) == 1
+
+
+def test_a_point_where_three_planes_meet():
+    flat = construct.plane_of(construct.plane_from_named("xy", 5.0))
+    front = construct.plane_of(construct.plane_from_named("xz", 3.0))  # faces the front, 3 mm forward
+    side = construct.plane_of(construct.plane_from_named("yz", -2.0))
+    assert where(construct.point_where_planes_meet(flat, front, side)) == [-2, -3, 5]
+    tilted = construct.plane_of(construct.plane_at_angle((0, 0, 0), (0, 0, 1), 45.0))
+    assert where(construct.point_where_planes_meet(flat, side, tilted)) == pytest.approx([-2, -2, 5])
+    for planes in ((flat, front, construct.plane_of(construct.plane_from_named("xy", 9.0))),
+                   (front, side, construct.plane_of(construct.plane_at_angle((0, 0, 0), (0, 0, 1), 10.0)))):
+        with pytest.raises(BuildError) as err:  # two parallel; all three through one upright line
+            construct.point_where_planes_meet(*planes)
+        assert "don't meet at a single point" in str(err.value)
+        assert_plain(str(err.value))
+
+
+def test_a_point_where_an_axis_meets_a_plane():
+    line = construct.axis_of(construct.axis_through_points((0, 0, 0), (10, 10, 10)))
+    flat = construct.plane_of(construct.plane_from_named("xy", 4.0))
+    assert where(construct.point_where_axis_meets_plane(line, flat)) == pytest.approx([4, 4, 4])
+    upright = construct.axis_of(construct.new_axis((1, 2, 3), (0, 0, 1)))
+    with pytest.raises(BuildError) as err:
+        construct.point_where_axis_meets_plane(upright, construct.plane_of(construct.plane_from_named("yz", 0.0)))
+    assert "runs alongside the plane" in str(err.value)
+    assert_plain(str(err.value))
+
+
+def test_points_where_selected_guides_meet_are_one_undo_step_each(window, tmp_path):
+    window.do_point_three_planes()
+    assert window.statusBar().currentMessage() == window.POINT_PLANES_HINT
+    for name, distance in (("xy", 5.0), ("xz", 3.0), ("yz", -2.0)):
+        window.plane_at_distance_selected(name, distance)
+    scene = window.document.scene
+    scene.select([s.id for s in scene.shapes])
+    steps = len(window.document._undo)
+    window.do_point_three_planes()
+    made = scene.shapes[3]
+    assert made.name == "Point 1" and where(made) == [-2, -3, 5] and len(window.document._undo) == steps + 1
+    scene.add(construct.new_axis((0, 0, 0), (1, 1, 1), name="Axis 1"))
+    window.do_point_axis_plane()
+    assert window.statusBar().currentMessage() == window.POINT_AXIS_HINT
+    scene.select([scene.shapes[4].id, scene.shapes[0].id])
+    window.do_point_axis_plane()
+    assert where(scene.shapes[5]) == pytest.approx([5, 5, 5])
+    file = tmp_path / "meet.mesh"
+    save_project(scene, file)
+    assert where(load_project(file).shapes[5]) == pytest.approx([5, 5, 5])
+    window.do_undo()
+    assert len(window.document.scene.shapes) == 5
+
+
 def test_point_text_is_plain_language():
     prompts = construct_actions.ConstructActions.CONSTRUCT_TOOL_PROMPTS
-    for key in ("point_spot", "point_middle"):
+    for key in ("point_spot", "point_middle", "point_edge", "axis_edge"):
         assert_plain(prompts[key])
+    assert_plain(construct_actions.ConstructActions.POINT_PLANES_HINT)
+    assert_plain(construct_actions.ConstructActions.POINT_AXIS_HINT)

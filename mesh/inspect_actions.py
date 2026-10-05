@@ -45,13 +45,19 @@ def ask_section(parent, selected=None) -> dict | None:
 class InspectActions:
     """Mixed into MeshWindow through ExpertActions."""
 
-    INSPECT_CLICK_TOOLS = ("measure_faces",)
+    INSPECT_CLICK_TOOLS = ("measure_faces", "measure_radius", "measure_edge")
     INSPECT_TOOL_PROMPTS = {
         "measure_faces": "Click a point on a flat face of a part (near a corner, it lands on the "
                          "corner). Esc stops.",
         "measure_faces_second": "Now click a point on the second face.",
+        "measure_radius": "Click the round side of a part to see its radius. Esc stops.",
+        "measure_edge": "Click a face of a part next to an edge to see how long the edge is. Esc stops.",
     }
-    INSPECT_CLICK_HANDLERS = {"measure_faces": "_measure_face_picked"}
+    INSPECT_CLICK_HANDLERS = {
+        "measure_faces": "_measure_face_picked",
+        "measure_radius": "_measure_radius_picked",
+        "measure_edge": "_measure_edge_picked",
+    }
     INSPECT_STAGED = {"measure_faces": ("measure_faces", "measure_faces_second")}
 
     MEASURE_AGAIN = "Click another face to measure again, Esc to stop."
@@ -152,6 +158,39 @@ class InspectActions:
         # mouse button's release.
         QTimer.singleShot(0, lambda: self._show_measurement("Measure Between Faces", text))
 
+    RADIUS_AGAIN = "Click another round side to measure it, Esc to stop."
+
+    def do_measure_radius(self) -> None:
+        self._start_construct_tool("measure_radius")
+
+    def _measure_radius_picked(self, shape_id: str, face_index: int, point=None) -> None:
+        shape = self._clicked_part(shape_id, face_index)
+        if shape is None:
+            return
+        found = measure.round_face(shape, face_index, point, self.document.scene.fit_clearances)
+        if found.line is None:
+            self.viewport.clear_measure_line()
+        else:
+            self.viewport.set_measure_line(*found.line)
+        self.statusBar().showMessage(self.RADIUS_AGAIN)
+        QTimer.singleShot(0, lambda: self._show_measurement("Radius of a Round Face", found.text))
+
+    EDGE_AGAIN = "Click next to another edge to measure it, Esc to stop."
+
+    def do_measure_edge(self) -> None:
+        self._start_construct_tool("measure_edge")
+
+    def _measure_edge_picked(self, shape_id: str, face_index: int, point=None) -> None:
+        shape = self._clicked_edge(shape_id, face_index, point)
+        if shape is None:
+            self.viewport.clear_measure_line()
+            return
+        found = construct.edge_at(shape, face_index, point, self.document.scene.fit_clearances)
+        self.viewport.set_measure_line(found.start, found.end)
+        self.statusBar().showMessage(self.EDGE_AGAIN)
+        text = measure.describe_edge(shape.name, found)
+        QTimer.singleShot(0, lambda: self._show_measurement("Length of an Edge", text))
+
     def measure_selected(self) -> bool:
         parts = [s for s in self._picked() if not is_reference(s)]
         if not parts:
@@ -166,3 +205,21 @@ class InspectActions:
 
     def do_measure_volume(self) -> None:
         self.measure_selected()
+
+    GAP_HINT = "Select two parts to measure the shortest distance between them."
+
+    def measure_gap_selected(self) -> bool:
+        """The shortest distance between the two selected parts."""
+        parts = [s for s in self._picked() if not is_reference(s)]
+        if len(parts) != 2:
+            self.statusBar().showMessage(self.GAP_HINT)
+            return False
+        first, second = parts
+        found = self._attempt("Cannot measure", lambda: measure.gap(first, second, self.document.scene.fit_clearances))
+        if found is None:
+            return False
+        self._show_measurement("Shortest Distance", measure.describe_gap(first.name, second.name, found))
+        return True
+
+    def do_measure_gap(self) -> None:
+        self.measure_gap_selected()

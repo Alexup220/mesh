@@ -135,6 +135,10 @@ def editors() -> dict:
         "plane_at_angle_selected": (
             "Plane at an Angle", lambda a: _filled(_without(ca.plane_angle_fields([("z", "")]), "line"), a),
             _same),
+        "plane_along_path_selected": (
+            "Plane Along a Path",
+            lambda a: _filled(ca.plane_path_fields(), {**a, "from": "end" if a["from_end"] else "start"}),
+            lambda v, _a: {"distance": v["distance"], "from_end": v["from"] == "end"}),
         "hollow_selected": ("Hollow out", lambda a: _filled(panels.hollow_fields(True), a), _same),
         "split_selected": ("Split part", lambda a: _filled(panels.split_fields((0.0, 0.0, 0.0)), a), _same),
         "repeat_row_selected": ("Repeat in a row", lambda a: _filled(panels.repeat_row_fields(), a), _same),

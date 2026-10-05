@@ -205,7 +205,7 @@ TOOLS: tuple[ExpertTool, ...] = (
         "Keep a list of every change to the project. Change a step's settings (an extrusion's "
         "distance, a rounding's radius) or let them follow your parameters, change the parts "
         "it was used on, or skip, move or remove a step. The project is worked out again so "
-        "later steps follow.",
+        "later steps follow, construction planes, axes and points included.",
         "do_history",
     ),
     ExpertTool(
@@ -259,8 +259,25 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "plane_points", "construct", "Plane Through &Three Points",
         "Click three points on parts (or select three construction points) for the plane "
-        "through them. A click near a corner of the face lands exactly on the corner.",
+        "through them. A click near a corner of the face lands exactly on the corner. The plane "
+        "stays where the points were, even when the history is worked out again.",
         "do_plane_through_points",
+    ),
+    ExpertTool(
+        "plane_round", "construct", "Plane Touching a R&ound Part",
+        "Click the round side of a cylinder, cone, tube, ring, ball, thread, round hardware hole or "
+        "revolved part for the plane touching it there, facing out. It touches the true round "
+        "surface worked out from the part's own sizes, not the narrow flat strips it is drawn "
+        "with. Parts made round another way (an Extrusion of a circle, a group) can't be used.",
+        "do_plane_touching",
+    ),
+    ExpertTool(
+        "plane_path", "construct", "Plane A&long a Path...",
+        "Select a sketch of a path (curves joined end to end, or one closed outline) for a "
+        "construction plane square to the path, the distance you type along it from one end. "
+        "Curves are followed in short straight pieces; on a curve the plane turns smoothly from "
+        "one piece to the next.",
+        "do_plane_along_path",
     ),
     ExpertTool(
         "axis_round", "construct", "Axis Through a &Round Part",
@@ -273,7 +290,8 @@ TOOLS: tuple[ExpertTool, ...] = (
         "axis_points", "construct", "Axis Through Two &Points",
         "Click two points on parts (or select two construction points) for the axis through "
         "them, pointing from the first to the second. A click near a corner of the face lands "
-        "exactly on the corner.",
+        "exactly on the corner. The axis stays where the points were, even when the history is "
+        "worked out again.",
         "do_axis_two_points",
     ),
     ExpertTool(
@@ -281,6 +299,14 @@ TOOLS: tuple[ExpertTool, ...] = (
         "Click a point on a flat face for the axis through it, square to the face and "
         "pointing out of it.",
         "do_axis_square_to_face",
+    ),
+    ExpertTool(
+        "axis_edge", "construct", "Axis Along an &Edge",
+        "Click a face of a part next to a straight edge for the axis along that edge (the edge "
+        "nearest the click, as Round an Edge picks it). A round edge is made of short straight "
+        "pieces, so there the axis runs along the piece clicked; for a round part's middle, use "
+        "Axis Through a Round Part.",
+        "do_axis_along_edge",
     ),
     ExpertTool(
         "axis_planes", "construct", "Axis Where Two Planes &Meet",
@@ -301,6 +327,25 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_point_at_middle",
     ),
     ExpertTool(
+        "point_edge", "construct", "Point at the End of an Ed&ge",
+        "Click a face of a part next to an edge, nearer the end you want: the point goes on that "
+        "end of the straight edge. A round edge is made of short straight pieces, so there it "
+        "goes on an end of the piece clicked.",
+        "do_point_at_edge_end",
+    ),
+    ExpertTool(
+        "point_planes", "construct", "Point Where Three Planes Mee&t",
+        "Select three sketches or construction planes at angles to each other for the point where "
+        "they all meet.",
+        "do_point_three_planes",
+    ),
+    ExpertTool(
+        "point_axis_plane", "construct", "Point Where an A&xis Meets a Plane",
+        "Select a construction axis and a sketch or construction plane for the point where the axis "
+        "passes through the plane.",
+        "do_point_axis_plane",
+    ),
+    ExpertTool(
         "section_view", "inspect", "&Section View...",
         "See inside the parts: they are shown cut open along a flat or upright plane through "
         "their middle, or along a selected sketch or construction plane. Only the view "
@@ -316,11 +361,35 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_measure_faces",
     ),
     ExpertTool(
+        "measure_radius", "inspect", "&Radius of a Round Face",
+        "Click the round side of a cylinder, cone, tube, ring, ball, thread, round hardware hole "
+        "or revolved part to see its radius, read from the part's own sizes rather than from "
+        "the narrow flat strips it is drawn with. A cone's radius changes along it: you see both "
+        "ends and the radius where you clicked. Where it can't be told (a box, an imported part, "
+        "a part stretched unevenly) it says so.",
+        "do_measure_radius",
+    ),
+    ExpertTool(
+        "measure_edge", "inspect", "&Length of an Edge",
+        "Click a face of a part next to an edge to see how long the edge is. An edge that goes "
+        "on round curves gives the straight stretch clicked and the whole edge's length (or "
+        "how far it is all the way round). It is measured on the part as drawn: a round edge is "
+        "short straight pieces, so it comes out a little short of the true curve.",
+        "do_measure_edge",
+    ),
+    ExpertTool(
         "measure_volume", "inspect", "&Volume and Area",
         "See how much space the selected parts take up, their surface area all the way round "
         "and their size. Selected Holes are cut out and overlaps counted once, as they would "
         "print together.",
         "do_measure_volume",
+    ),
+    ExpertTool(
+        "measure_gap", "inspect", "Shortest &Distance Between Parts",
+        "Select two parts to see the shortest distance between them, or whether they touch or "
+        "overlap. It is measured on the parts as drawn, so near round surfaces, made of narrow "
+        "flat strips, it can be slightly off.",
+        "do_measure_gap",
     ),
 )
 
