@@ -161,9 +161,9 @@ tools do the closest honest version of their Fusion counterparts:
   same amount in every direction is exact for every kind. Different amounts
   are exact only along a part's own sizes: a part turned by anything but
   quarter turns, a round part stretched unevenly across, a sphere, ring,
-  revolve, sweep or loft stretched at all, and a sketch stretched unevenly
-  are refused (Group first: a group stretches any way, in its transform, as
-  its drag handles do). A rounding radius or bottom chamfer keeps its size
+  coil, revolve, sweep, pipe or loft stretched unevenly in any direction,
+  and a sketch stretched unevenly are refused (Group first: a group
+  stretches any way, in its transform, as its drag handles do). A rounding radius or bottom chamfer keeps its size
   when the directions differ. Hardware holes keep their standard sizes and
   move with the parts, their openings to where they were scaled to.
   Pre-existing: a stretched group's parts, once ungrouped, carry the stretch
@@ -368,9 +368,10 @@ reflected. What differs from Fusion is how the pattern is chosen.
 - **Thread** goes on a plain cylinder only (Fusion threads any round
   face): a threaded hole is a cylinder Hole with a thread, grouped with
   the part, and a threaded tube is a threaded cylinder grouped with a
-  cylinder Hole through it (selecting a tube says so). Metric (ISO), inch (UNC, which has the same 60 degree shape)
-  and straight British pipe threads (G, ISO 228-1, the 55 degree shape
-  with round tips) are offered, always modeled, never just drawn on.
+  cylinder Hole through it (selecting a tube says so). Metric (ISO), inch
+  (UNC, which has the same 60 degree shape) and straight British pipe
+  threads (G, ISO 228-1, the 55 degree shape with round tips) are
+  offered, always modeled, never just drawn on.
   Tapered pipe threads (NPT, R) are not, and only the coarse inch sizes
   are listed (a fine pitch, or any threads per inch, can be typed). The
   cylinder keeps its own diameter: the standard sizes only fill in the
