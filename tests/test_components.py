@@ -117,7 +117,7 @@ def test_a_copy_is_a_new_component_beside_the_old():
     box = new_primitive("cube")
     box.component = "c"
     listed = [{"id": "c", "name": "Kit"}]
-    made, copies = components.copied([box], listed, "c")
+    (made,), copies = components.copied([box], listed, "c")
     assert made["name"] == "Kit copy 1" and made["id"] != "c"
     assert [s.component for s in copies] == [made["id"]] and copies[0].id != box.id
     assert np.allclose(copies[0].transform[:3, 3], [10.0, 10.0, 0.0])
@@ -125,6 +125,76 @@ def test_a_copy_is_a_new_component_beside_the_old():
         components.copied([], listed, "c")
     with pytest.raises(ComponentError):
         components.copied([box], listed, "gone")
+
+
+def nest():
+    """Kit holds Wheel, which holds Hub; a part in each, and one loose."""
+    listed = [{"id": "kit", "name": "Kit"}, {"id": "wheel", "name": "Wheel", "parent": "kit"},
+              {"id": "hub", "name": "Hub", "parent": "wheel"}]
+    shapes = [new_primitive("cube"), new_primitive("sphere"), new_primitive("cone"), new_primitive("cube")]
+    for shape, component in zip(shapes, ("kit", "wheel", "hub", "")):
+        shape.component = component
+    return listed, shapes
+
+
+def test_components_inside_components():
+    listed, shapes = nest()
+    assert components.inside(listed, "kit") == ["kit", "wheel", "hub"]
+    assert components.inside(listed, "hub") == ["hub"]
+    assert [components.depth(listed, i) for i in ("kit", "wheel", "hub")] == [0, 1, 2]
+    assert [len(components.members(shapes, i, listed)) for i in ("kit", "wheel", "hub")] == [3, 2, 1]
+    assert len(components.members(shapes, "kit")) == 1  # its own parts only
+    assert components.describe(listed[0], shapes, listed) == "Kit: 3 parts"
+    shapes[2].visible = False
+    assert components.describe(listed[2], shapes, listed) == "Hub: 1 part (hidden)"
+    assert components.shown(shapes, "kit", listed)
+    reordered = [listed[2], listed[0], {"id": "other", "name": "Other"}, listed[1]]
+    assert [c["id"] for c in components.in_tree_order(reordered)] == ["kit", "wheel", "hub", "other"]
+
+
+def test_moving_a_component_inside_another():
+    listed, _shapes = nest()
+    moved = components.put_inside(listed, "hub", "kit")
+    assert components.get(moved, "hub")["parent"] == "kit" and listed[2]["parent"] == "wheel"
+    assert "parent" not in components.get(components.put_inside(listed, "wheel", None), "wheel")
+    for component_id, parent_id, words in (("kit", "hub", "can't go inside itself"),
+                                           ("kit", "kit", "can't go inside itself"),
+                                           ("hub", "wheel", "already inside Wheel"),
+                                           ("kit", None, "not inside another component")):
+        with pytest.raises(ComponentError) as err:
+            components.can_go_inside(listed, component_id, parent_id)
+        assert words in str(err.value)
+        assert_plain(str(err.value))
+    broken = components.broken_apart(listed, "wheel")
+    assert [c["id"] for c in broken] == ["kit", "hub"] and components.get(broken, "hub")["parent"] == "kit"
+
+
+def test_what_a_new_component_holds():
+    listed, shapes = nest()
+    # Wheel's parts (with Hub's) all selected: Wheel goes in whole, into Kit as before.
+    whole = components.wholly_selected(shapes[1:3], shapes, listed)
+    assert whole == ["wheel"]
+    assert components.common_parent(shapes[1:3], listed, whole) == "kit"
+    # Wheel's part and Kit's part: from two places, so the new one stands on its own.
+    assert components.wholly_selected(shapes[:2], shapes, listed) == []
+    assert components.common_parent(shapes[:2], listed, []) is None
+    assert components.wholly_selected(shapes, shapes, listed) == ["kit"]
+
+
+def test_a_copy_holds_copies_of_the_components_inside():
+    listed, shapes = nest()
+    made, copies = components.copied(shapes, listed, "wheel")
+    assert [c["name"] for c in made] == ["Wheel copy 1", "Hub copy 1"]
+    assert made[0]["parent"] == "kit" and made[1]["parent"] == made[0]["id"]
+    assert [s.component for s in copies] == [made[0]["id"], made[1]["id"]]
+
+
+def test_inside_from_a_file_is_checked():
+    raw = [{"id": "a", "name": "A", "parent": "b"}, {"id": "b", "name": "B", "parent": "a"},
+           {"id": "c", "name": "C", "parent": "gone"}, {"id": "d", "name": "D", "parent": "c"}]
+    read = components.read(raw)
+    assert "parent" not in read[2] and read[3]["parent"] == "c"
+    assert sum("parent" in c for c in read[:2]) <= 1  # the loop is broken
 
 
 # --- In the window -----------------------------------------------------------------------
@@ -261,8 +331,97 @@ def test_the_components_window(window, monkeypatch, tmp_path):
     dialog.deleteLater()
 
 
+def test_a_new_component_holds_components_whole(window):
+    first, second, made = pair(window)
+    third = add(window, dx=-40.0)
+    window.document.scene.select([first.id, second.id, third.id])
+    assert window.make_component("Kit")
+    scene = window.document.scene
+    kit = components.get(scene.components, scene.components[-1]["id"])
+    assert components.get(scene.components, made["id"])["parent"] == kit["id"]
+    assert first.component == made["id"] and third.component == kit["id"]
+    assert window.statusBar().currentMessage() == "Made Kit from 3 selected parts."
+    window.document.scene.select([third.id])
+    window.do_select_component()
+    assert set(scene.selection) == {first.id, second.id, third.id}
+    # Some of Component 1's parts: a new component inside it.
+    window.document.scene.select([second.id])
+    assert window.make_component("Wheel")
+    wheel = scene.components[-1]
+    assert wheel["parent"] == made["id"] and second.component == wheel["id"]
+    window.do_undo()
+    window.do_undo()
+    assert window.document.scene.components == [made]
+
+
+def test_whole_components_are_shown_copied_saved_and_broken_apart(window, tmp_path):
+    first, second, made = pair(window)
+    window.document.scene.select([second.id])
+    window.make_component("Wheel")
+    scene = window.document.scene
+    wheel = scene.components[-1]
+    assert window.set_component_shown(made["id"], False) and not second.visible
+    window.set_component_shown(made["id"], True)
+    file = tmp_path / "kit.stl"
+    window.export_component(made["id"], file)
+    assert trimesh.load(file).bounds[1][0] == pytest.approx(50.0, abs=0.01)
+    assert window.copy_component(made["id"])
+    assert [c["name"] for c in scene.components[2:]] == ["Component 1 copy 1", "Wheel copy 1"]
+    assert len(scene.shapes) == 4
+    window.document.scene.select([second.id])
+    assert window.leave_component() and second.component == made["id"]  # one level out
+    assert window.break_apart_component(made["id"])
+    assert first.component == "" and "parent" not in components.get(scene.components, wheel["id"])
+
+
+def test_putting_a_component_inside_another(window, warnings):
+    first, _second, made = pair(window)
+    loose = add(window, dx=-40.0)
+    window.document.scene.select([loose.id])
+    window.make_component("Lid")
+    lid = window.document.scene.components[-1]
+    assert window.put_component_inside(lid["id"], made["id"])
+    assert components.get(window.document.scene.components, lid["id"])["parent"] == made["id"]
+    assert not window.put_component_inside(made["id"], lid["id"])
+    assert warnings and "can't go inside itself" in warnings[-1]
+    assert window.put_component_inside(lid["id"])
+    assert "parent" not in components.get(window.document.scene.components, lid["id"])
+    window.do_undo()
+    assert components.get(window.document.scene.components, lid["id"])["parent"] == made["id"]
+
+
+def test_components_inside_are_saved_with_the_project(tmp_path):
+    listed, shapes = nest()
+    file = tmp_path / "nested.mesh"
+    save_project(Scene(shapes=shapes, components=listed), file)
+    loaded = load_project(file)
+    assert loaded.components == listed
+
+
+def test_the_components_window_shows_what_is_inside(window, monkeypatch):
+    _first, second, made = pair(window)
+    window.document.scene.select([second.id])
+    window.make_component("Wheel")
+    dialog = component_actions.ComponentsDialog(window)
+    assert [dialog.items.item(i).text() for i in range(2)] == ["Component 1: 2 parts", "    Wheel: 1 part"]
+    seen = {}
+
+    def fake_form(parent, title, fields, note=None):
+        seen.update(title=title, fields=fields)
+        return {"parent": ""}
+
+    monkeypatch.setattr(component_actions, "run_form", fake_form)
+    dialog.items.setCurrentRow(1)
+    dialog.act("inside")
+    assert seen["title"] == "Put Wheel Inside"
+    assert [c[1] for c in seen["fields"][0][3]["choices"]] == ["Nothing: on its own", "Component 1"]
+    assert [dialog.items.item(i).text() for i in range(2)] == ["Component 1: 1 part", "Wheel: 1 part"]
+    dialog.deleteLater()
+
+
 def test_component_text_is_plain_language(window):
     for text in (component_actions.COMPONENTS_NOTE, component_actions.NEW_COMPONENT_NOTE,
+                 *component_actions.TOP_LEVEL[1:],
                  window.COMPONENT_NEEDS_PARTS, window.NOT_IN_A_COMPONENT, window.NO_COMPONENTS,
                  *(t.tip for t in TOOLS if t.menu == "assemble"), *(t.label for t in TOOLS if t.menu == "assemble")):
         assert_plain(text)

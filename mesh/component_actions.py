@@ -28,12 +28,16 @@ from mesh.scene import Scene
 COMPONENTS_NOTE = (
     "A component keeps separate parts together under a name, without joining them: select "
     "its parts to move them together, hide it, save it for printing on its own, or copy it. "
-    "A part made from a component's parts by a tool (rounding an edge, combining) stays in it."
+    "A component can hold other components (shown set in under it); what is done to it is "
+    "done to them too. A part made from a component's parts by a tool (rounding an edge, "
+    "combining) stays in it."
 )
 NEW_COMPONENT_NOTE = (
-    "The selected parts, sketches and guides become one component. A part already in another "
-    "component moves to this one."
+    "The selected parts, sketches and guides become one component. A component whose parts "
+    "are all selected goes inside it whole; any other part already in a component moves to "
+    "this one. If everything selected was in one component, the new one goes inside that."
 )
+TOP_LEVEL = ("", "Nothing: on its own")
 
 
 class ComponentsDialog(QDialog):
@@ -55,7 +59,8 @@ class ComponentsDialog(QDialog):
         bar = QHBoxLayout()
         self.buttons = {}
         for key, text in (("rename", "Rename..."), ("select", "Select"), ("show", "Show or Hide"),
-                          ("copy", "Copy"), ("save", "Save for Printing..."), ("break", "Break Apart")):
+                          ("copy", "Copy"), ("inside", "Put Inside..."), ("save", "Save for Printing..."),
+                          ("break", "Break Apart")):
             button = QPushButton(text, self)
             button.clicked.connect(lambda _checked=False, k=key: self.act(k))
             bar.addWidget(button)
@@ -66,19 +71,25 @@ class ComponentsDialog(QDialog):
         layout.addWidget(close)
         self.refresh()
 
+    def listed(self) -> list:
+        """The components as the list shows them: each followed by those inside it."""
+        return components.in_tree_order(self.window.document.scene.components)
+
     def refresh(self) -> None:
         scene = self.window.document.scene
         row = self.items.currentRow()
         self.items.clear()
-        self.items.addItems([components.describe(c, scene.shapes) for c in scene.components])
-        if scene.components:
-            self.items.setCurrentRow(min(max(row, 0), len(scene.components) - 1))
+        listed = self.listed()
+        self.items.addItems(["    " * components.depth(scene.components, c["id"])
+                             + components.describe(c, scene.shapes, scene.components) for c in listed])
+        if listed:
+            self.items.setCurrentRow(min(max(row, 0), len(listed) - 1))
         for button in self.buttons.values():
-            button.setEnabled(bool(scene.components))
+            button.setEnabled(bool(listed))
 
     def chosen(self) -> str | None:
         row = self.items.currentRow()
-        listed = self.window.document.scene.components
+        listed = self.listed()
         return listed[row]["id"] if 0 <= row < len(listed) else None
 
     def act(self, key: str) -> None:
@@ -91,10 +102,13 @@ class ComponentsDialog(QDialog):
         elif key == "select":
             window.select_component(component_id)
         elif key == "show":
-            window.set_component_shown(component_id, not components.shown(window.document.scene.shapes,
-                                                                          component_id))
+            scene = window.document.scene
+            window.set_component_shown(component_id, not components.shown(scene.shapes, component_id,
+                                                                          scene.components))
         elif key == "copy":
             window.copy_component(component_id)
+        elif key == "inside":
+            window.ask_put_inside(component_id)
         elif key == "save":
             window.ask_export_component(component_id)
         elif key == "break":
@@ -125,7 +139,8 @@ class ComponentActions:
 
     @replayable()
     def make_component(self, name: str | None = None) -> bool:
-        """The selected shapes become a new component. One undo step."""
+        """The selected shapes become a new component (see
+        NEW_COMPONENT_NOTE). One undo step."""
         chosen = self._picked()
         scene = self.document.scene
         if not chosen:
@@ -135,12 +150,18 @@ class ComponentActions:
             components.next_name(scene.components) if name is None else name, scene.components))
         if name is None:
             return False
+        whole = components.wholly_selected(chosen, scene.shapes, scene.components)
+        held = {i for component_id in whole for i in components.inside(scene.components, component_id)}
+        parent = components.common_parent(chosen, scene.components, whole)
         self.document.snapshot("new component")
         made = {"id": components.new_id(",".join(s.id for s in chosen), {c["id"] for c in scene.components}),
                 "name": name}
-        scene.components = [*scene.components, made]
+        if parent is not None:
+            made["parent"] = parent
+        scene.components = components.put_all_inside([*scene.components, made], whole, made["id"])
         for shape in chosen:
-            shape.component = made["id"]
+            if shape.component not in held:
+                shape.component = made["id"]
         self.sync()
         self.statusBar().showMessage(f"Made {name} from {len(chosen)} selected "
                                      f"{'part' if len(chosen) == 1 else 'parts'}.")
@@ -157,15 +178,18 @@ class ComponentActions:
             self.make_component(values["name"])
 
     def select_component(self, component_id: str) -> None:
-        """Select the component's parts (no undo step)."""
+        """Select the component's parts, and those of the components inside
+        it (no undo step)."""
         scene = self.document.scene
-        scene.select([s.id for s in components.members(scene.shapes, component_id)])
+        scene.select([s.id for s in components.members(scene.shapes, component_id, scene.components)])
         self.sync()
 
     def do_select_component(self) -> None:
-        """Add the rest of each selected part's component to the selection."""
+        """Add the rest of each selected part's component (and the
+        components inside it) to the selection."""
         scene = self.document.scene
-        held = {s.component for s in scene.selected() if s.component}
+        held = {i for s in scene.selected() if s.component
+                for i in components.inside(scene.components, s.component)}
         if not held:
             self.statusBar().showMessage(self.NOT_IN_A_COMPONENT)
             return
@@ -175,14 +199,17 @@ class ComponentActions:
 
     @replayable()
     def leave_component(self) -> bool:
-        """Take the selected parts out of their components. One undo step."""
-        chosen = [s for s in self.document.scene.selected() if s.component]
+        """Take the selected parts out of their components, into the
+        component that holds it, if any. One undo step."""
+        scene = self.document.scene
+        chosen = [s for s in scene.selected() if s.component]
         if not chosen:
             self.statusBar().showMessage(self.NOT_IN_A_COMPONENT)
             return False
+        outer = {c["id"]: c.get("parent", "") for c in scene.components}
         self.document.snapshot("take out of component")
         for shape in chosen:
-            shape.component = ""
+            shape.component = outer.get(shape.component, "")
         self.sync()
         return True
 
@@ -213,8 +240,10 @@ class ComponentActions:
 
     @replayable()
     def set_component_shown(self, component_id: str, shown: bool) -> bool:
-        """Show or hide all of a component's parts. One undo step."""
-        parts = components.members(self.document.scene.shapes, component_id)
+        """Show or hide all of a component's parts, with those of the
+        components inside it. One undo step."""
+        scene = self.document.scene
+        parts = components.members(scene.shapes, component_id, scene.components)
         if not parts or all(s.visible == bool(shown) for s in parts):
             return False
         self.document.snapshot("show component" if shown else "hide component")
@@ -231,9 +260,9 @@ class ComponentActions:
             scene.shapes, scene.components, component_id))
         if made is None:
             return False
-        component, copies = made
+        listed, copies = made
         self.document.snapshot("copy component")
-        scene.components = [*scene.components, component]
+        scene.components = [*scene.components, *listed]
         for shape in copies:
             scene.add(shape)
         scene.select([s.id for s in copies])
@@ -242,22 +271,51 @@ class ComponentActions:
 
     @replayable()
     def break_apart_component(self, component_id: str) -> bool:
-        """End a component; its parts stay, in no component. One undo step."""
+        """End a component; its parts, and the components inside it, stay
+        where it was: in the component that held it, or in none. One undo
+        step."""
         scene = self.document.scene
         if component_id not in {c["id"] for c in scene.components}:
             return False
+        outer = components.get(scene.components, component_id).get("parent", "")
         self.document.snapshot("break apart component")
-        scene.components = [c for c in scene.components if c["id"] != component_id]
+        scene.components = components.broken_apart(scene.components, component_id)
         for shape in components.members(scene.shapes, component_id):
-            shape.component = ""
+            shape.component = outer
         self.sync()
         return True
+
+    @replayable()
+    def put_component_inside(self, component_id: str, parent_id: str | None = None) -> bool:
+        """Move a component (with what it holds) inside another, or out on
+        its own (None). One undo step."""
+        scene = self.document.scene
+        if self._component_problem("Cannot move the component", lambda: components.can_go_inside(
+                scene.components, component_id, parent_id) or True) is None:
+            return False
+        self.document.snapshot("put component inside")
+        scene.components = components.put_inside(scene.components, component_id, parent_id)
+        self.sync()
+        return True
+
+    def ask_put_inside(self, component_id: str) -> bool:
+        listed = self.document.scene.components
+        try:
+            source = components.get(listed, component_id)
+        except components.ComponentError:
+            return False
+        own = set(components.inside(listed, component_id))
+        choices = [TOP_LEVEL] + [(c["id"], c["name"]) for c in components.in_tree_order(listed) if c["id"] not in own]
+        values = run_form(self, f"Put {source['name']} Inside", [
+            ("parent", "Inside", source.get("parent", ""), {"choices": choices}),
+        ])
+        return values is not None and self.put_component_inside(component_id, values["parent"] or None)
 
     def export_component(self, component_id: str, path) -> None:
         """Save one component's parts for printing (hidden ones too).
         Raises ProjectError, as saving the whole project for printing does."""
         scene = self.document.scene
-        parts = [copy.deepcopy(s) for s in components.members(scene.shapes, component_id)]
+        parts = [copy.deepcopy(s) for s in components.members(scene.shapes, component_id, scene.components)]
         for part in parts:
             part.visible = True
         export_scene(Scene(shapes=parts, fit_clearances=dict(scene.fit_clearances)), path)

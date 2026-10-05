@@ -211,25 +211,28 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "new_component", "assemble", "&New Component from Selection...",
         "Keep the selected parts (and sketches or guides) together as one named component, "
-        "without joining them. Parts a tool makes from a component's parts stay in it.",
+        "without joining them. A component whose parts are all selected goes inside the new "
+        "one. Parts a tool makes from a component's parts stay in it.",
         "do_make_component",
     ),
     ExpertTool(
         "select_component", "assemble", "&Select Whole Component",
-        "Add the rest of the selected part's component to the selection, to move or copy "
-        "the component as one.",
+        "Add the rest of the selected part's component (and of the components inside it) to "
+        "the selection, to move or copy the component as one.",
         "do_select_component",
     ),
     ExpertTool(
         "leave_component", "assemble", "&Take Out of Component",
-        "Take the selected parts out of their component. They stay where they are.",
+        "Take the selected parts out of their component, into the component that holds it, "
+        "if any. They stay where they are.",
         "leave_component",
     ),
     ExpertTool(
         "components", "assemble", "&Components...",
-        "List the components: rename one, select its parts, show or hide it, copy it, save it "
-        "for printing on its own, or break it apart into loose parts. Copies are separate: "
-        "changing one does not change the other.",
+        "List the components, with those inside others set in under them: rename one, select "
+        "its parts, show or hide it, copy it, put it inside another, save it for printing on "
+        "its own, or break it apart. Copies are separate: changing one does not change the "
+        "other.",
         "do_components",
     ),
     ExpertTool(

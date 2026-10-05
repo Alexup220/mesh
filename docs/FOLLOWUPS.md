@@ -296,11 +296,11 @@ reflected. What differs from Fusion is how the pattern is chosen.
   reshapes a part a lot can make a later tool land on a different face,
   or refuse. The whole project is worked out again after every change,
   which can take a while on a long history.
-- **Components** keep separate parts together under a name. They don't
-  hold other components (Fusion's components nest), have no origin or
-  joints of their own (Fusion's Assemble joints and motion are not
-  offered), and a copy is independent: changing one copy does not change
-  the others (Fusion's linked copies do). A part made by a tool from parts
+- **Components** keep separate parts together under a name, and can hold
+  other components, as Fusion's do. They have no origin or joints of
+  their own (Fusion's Assemble joints and motion are not offered), and a
+  copy is independent: changing one copy does not change the others
+  (Fusion's linked copies do). A part made by a tool from parts
   of one component joins it; from parts of two different components, it
   joins neither. A hidden component stays hidden with Expert mode off,
   until Expert mode is turned on again to show it.

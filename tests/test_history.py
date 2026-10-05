@@ -530,6 +530,19 @@ def scenario_component_tools(window):
     window.break_apart_component(made)
 
 
+def scenario_components_inside_components(window):
+    two_boxes(window)
+    window.make_component("Pair")
+    pair = window.document.scene.components[0]["id"]
+    window.document.scene.select([window.document.scene.shapes[0].id])
+    window.make_component("Half")
+    half = window.document.scene.components[1]["id"]
+    window.put_component_inside(half)
+    window.put_component_inside(half, pair)
+    window.copy_component(pair)
+    window.break_apart_component(pair)
+
+
 def scenario_component_keeps_what_a_tool_makes(window):
     box = add(window)
     window.make_component()
