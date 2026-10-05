@@ -11,21 +11,21 @@ import uuid
 
 import numpy as np
 
-from mesh import construct, features, sketch, threads
+from mesh import coils, construct, features, sketch, threads
 from mesh.builders import BuildError
 from mesh.ops import face_direction
-from mesh.scene import Shape
+from mesh.scene import Shape, new_primitive
 from mesh.shapes import shape_geometry
 
 SKETCH_COLOR = "#e8a33d"
 
 
 def _checked(build):
-    """Run `build`, turning a sketch's or thread's complaint into a
+    """Run `build`, turning a sketch's, thread's or coil's complaint into a
     BuildError."""
     try:
         return build()
-    except (sketch.SketchError, threads.ThreadError) as exc:
+    except (sketch.SketchError, threads.ThreadError, coils.CoilError) as exc:
         raise BuildError(str(exc)) from exc
 
 
@@ -113,32 +113,33 @@ def _follow_axis_line(old: Shape, changed: Shape) -> None:
 
 
 def fit_refusal(shapes, clearances: dict | None) -> str | None:
-    """Why one of `shapes`, a Hole made from a sketch, can't be made at its
-    fit with these fit clearances; None if they all can. (A sweep or loft
-    grown by a fit's clearance can bend too tightly or close a gap.)"""
+    """Why one of `shapes`, a Hole made from a sketch or a coil Hole, can't
+    be made at its fit with these fit clearances; None if they all can. (A
+    sweep or loft grown by a fit's clearance can bend too tightly or close a
+    gap, and a coil's turns can run into each other.)"""
     for shape in shapes:
         if (shape.kind == "primitive" and shape.is_hole
-                and shape.params.get("primitive") in features.SOLIDS):
+                and shape.params.get("primitive") in features.SOLIDS + ("coil",)):
             try:
                 shape_geometry(shape, clearances)
-            except sketch.SketchError as exc:
+            except (sketch.SketchError, coils.CoilError) as exc:
                 return f"{shape.name} can't be made at that fit. {exc}"
     return None
 
 
 def edit_refusal(shape, field: str, value, clearances: dict | None) -> str | None:
-    """Why `shape`, a part made from a sketch or a thread, can't take
-    `value` for its number or choice `field` (typed in the Details panel,
-    say: sloped sides can meet, or a pitch too deep for the diameter); None
-    if it can, or if `shape` is neither."""
+    """Why `shape`, a part made from a sketch, a thread or a coil, can't
+    take `value` for its number or choice `field` (typed in the Details
+    panel, say: sloped sides can meet, or a pitch too deep for the
+    diameter); None if it can, or if `shape` is none of those."""
     kind = shape.params.get("primitive") if shape.kind == "primitive" else None
-    if kind not in features.SOLIDS and kind != "thread":
+    if kind not in features.SOLIDS and kind not in ("thread", "coil"):
         return None
     trial = copy.deepcopy(shape)
     trial.params[field] = value if isinstance(value, str) else float(value)
     try:
         shape_geometry(trial, clearances)
-    except (sketch.SketchError, threads.ThreadError) as exc:
+    except (sketch.SketchError, threads.ThreadError, coils.CoilError) as exc:
         return str(exc)
     return None
 
@@ -452,3 +453,22 @@ def threaded(shape: Shape, pitch: float, length: float, end: str = "top", hand: 
         changed.params["lead_in"] = lead_in
     _checked(lambda: shape_geometry(changed, clearances))
     return changed
+
+
+# --- Coils --------------------------------------------------------------------------
+
+
+def make_coil(diameter: float, pitch: float, turns: float, wire: float, wire_shape: str = "round",
+              winding: str = "right", hole: bool = False) -> Shape:
+    """A new coil (see mesh.coils) standing on the workplane, its middle
+    line upright through the middle of the workplane: `turns` turns of a
+    `wire` mm wire, `diameter` mm across the outside, rising `pitch` mm a
+    turn."""
+    shape = new_primitive("coil")
+    shape.params.update({
+        "diameter": float(diameter), "pitch": float(pitch), "turns": float(turns), "wire": float(wire),
+        "wire_shape": str(wire_shape), "winding": str(winding),
+    })
+    shape.is_hole = bool(hole)
+    _checked(lambda: shape_geometry(shape))
+    return shape

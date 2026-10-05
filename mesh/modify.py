@@ -189,6 +189,7 @@ _FOLLOWS = {
     "text": {"letter_height": "across", "depth": "z"},
     "extrude": {"distance": "z"},
     "thread": {"diameter": "across", "height": "z", "thread_length": "z", "pitch": "detail"},
+    "coil": {"diameter": "all", "pitch": "all", "wire": "all"},
 }
 
 

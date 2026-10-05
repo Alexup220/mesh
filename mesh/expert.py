@@ -121,6 +121,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_thread",
     ),
     ExpertTool(
+        "coil", "create", "C&oil...",
+        "Make a coil spring: a round or square wire wound round an upright line, with its "
+        "outside diameter, pitch, number of turns and wire thickness. Its ends are cut square "
+        "across the wire, and it is made of short straight pieces.",
+        "do_coil",
+    ),
+    ExpertTool(
         "move_copy", "modify", "&Move or Copy...",
         "Move or turn the selected parts by exact amounts, or make moved copies of them. "
         "A turn goes around a line through their middle.",

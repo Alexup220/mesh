@@ -15,7 +15,7 @@ on success.
 
 from PySide6.QtCore import QTimer
 
-from mesh import construct, create, features, modify, sketch, sketch_editor, threads
+from mesh import coils, construct, create, features, modify, sketch, sketch_editor, threads
 from mesh.component_actions import ComponentActions
 from mesh.construct_actions import ConstructActions
 from mesh.history import replayable
@@ -192,6 +192,32 @@ def thread_note(standard: str, pitch: float, inch: tuple | None = None, pipe: tu
             "nearest the cylinder's diameter (which stays as it is). A bevelled end slopes at 45 "
             "degrees: a thread down to its root, a threaded hole out to its full size, so they "
             "start into each other easily.")
+
+
+def coil_fields():
+    d = coils.DEFAULTS
+    return [
+        ("diameter", "Diameter across the outside (mm)", d["diameter"], {"min": 0.5, "max": 10000.0}),
+        ("pitch", "Pitch (mm per turn)", d["pitch"], {"min": 0.1, "max": 10000.0, "step": 0.5}),
+        ("turns", "Turns", d["turns"], {"min": 0.05, "max": float(coils.MAX_TURNS), "step": 0.5}),
+        ("wire", "Wire thickness (mm)", d["wire"], {"min": 0.1, "max": 1000.0, "step": 0.5}),
+        ("wire_shape", "Wire shape", d["wire_shape"], {"choices": coils.WIRE_SHAPES}),
+        ("winding", "Coil winds", d["winding"], {"choices": coils.WINDINGS}),
+        ("result", "Make", "part", {"choices": RESULTS}),
+    ]
+
+
+COIL_NOTE = (
+    "Makes a coil spring standing on the workplane: a round or square wire wound round an "
+    "upright line. The pitch is how far it rises in each turn, and must be more than the wire's "
+    "thickness so the turns don't touch. The wire's outline is drawn through the middle line and "
+    "carried round, so the ends are cut square across the wire there. Each turn is made of 48 "
+    "short straight pieces, and a round wire's outline has 24 sides."
+)
+
+
+def ask_coil(parent) -> dict | None:
+    return run_form(parent, "Coil", coil_fields(), note=COIL_NOTE)
 
 
 def ask_thread(parent, height: float, standard: str, pitch: float, inch: tuple | None = None,
@@ -567,6 +593,29 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         shape.params = changed.params
         self.sync()
         return True
+
+    # --- Coil ------------------------------------------------------------------------
+
+    @replayable()
+    def add_coil(self, diameter: float = 20.0, pitch: float = 5.0, turns: float = 5.0, wire: float = 2.0,
+                 wire_shape: str = "round", winding: str = "right", hole: bool = False) -> bool:
+        """Add a coil (see mesh.coils) and select it. One undo step on
+        success."""
+        shape = self._attempt("Cannot make the coil", lambda: create.make_coil(
+            diameter, pitch, turns, wire, wire_shape, winding, hole))
+        if shape is None:
+            return False
+        self.document.snapshot("coil")
+        self.document.scene.add(shape)
+        self.document.scene.select([shape.id])
+        self.sync()
+        return True
+
+    def do_coil(self) -> None:
+        values = ask_coil(self)
+        if values is not None:
+            self.add_coil(values["diameter"], values["pitch"], values["turns"], values["wire"],
+                          values["wire_shape"], values["winding"], values["result"] == "hole")
 
     def do_thread(self) -> None:
         shape = self._thread_target()

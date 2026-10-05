@@ -297,6 +297,17 @@ reflected. What differs from Fusion is how the pattern is chosen.
   a threaded hole out to its full size), as a cone of flat strips; the
   bevel's angle and size can't be chosen, and the far end is always cut
   square. A thread makes at most 150 turns, counting each start.
+- **Coil** (Create menu) makes a spring of round or square wire, set by
+  its outside diameter, pitch, number of turns and wire thickness. The
+  wire's outline is drawn in the upright plane through the middle line,
+  as Fusion draws a coil's section, and carried round it, so the ends are
+  cut square across the wire there. Fusion's flat spiral, its triangle
+  wire, a tapering coil and placing the wire inside or outside the
+  diameter are not offered. Each turn is 48 straight pieces and a round
+  wire has 24 sides, so the coil is about 0.3% thinner than a true one.
+  The turns can't touch (the pitch must be more than the wire, and more
+  than the wire plus twice the fit for a fitted Hole), and a coil scales
+  only alike in every direction.
 
 ## Expert mode, Phase 5 (Parameters, History, Components): approximations and limits
 

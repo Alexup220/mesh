@@ -89,13 +89,17 @@ FIELD_LABELS = {
     "twist": "Twist along the path (degrees)",
     "end_scale": "Size at the far end (%)",
     "sides": "Sides between the outlines",
-    "pitch": "Thread pitch (mm per turn)",
+    "pitch": "Pitch (mm per turn)",
     "thread_length": "Threaded length (mm)",
     "end": "Thread starts",
     "hand": "Thread turns",
     "starts": "Starts (threads side by side)",
     "thread_shape": "Thread shape",
     "lead_in": "Starting end of the thread",
+    "turns": "Turns",
+    "wire": "Wire thickness (mm)",
+    "wire_shape": "Wire shape",
+    "winding": "Coil winds",
 }
 
 
