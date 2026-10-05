@@ -255,6 +255,10 @@ class SketchPreview(QWidget):
     finished = Signal()              # right click: end the line being drawn
 
     SNAP_PIXELS = 10
+    # Dragging with these buttons moves the drawing; a right press that
+    # moves less than CLICK_PIXELS is a right click.
+    PAN_BUTTONS = (Qt.MiddleButton, Qt.RightButton)
+    CLICK_PIXELS = 4
     # The drawing first shows at least this many mm across; the mouse wheel
     # zooms by ZOOM_STEP a notch, between SPANS.
     FIRST_SPAN = 100.0
@@ -281,28 +285,64 @@ class SketchPreview(QWidget):
         self._centre = np.zeros(2)
         self._span = self.FIRST_SPAN
         self._fitted = False
+        self._pan = None  # while a pan button is down: [button, where pressed, last place, moved]
 
     def set_content(self, entities, guides=None, chain=None, chosen=None) -> None:
+        old = (self.entities, self.guides, self.chain)
         self.entities = list(entities)
         if guides is not None:
             self.guides = [np.asarray(g, dtype=np.float64) for g in guides]
         self.chain = list(chain or [])
         self.chosen = chosen
-        # Fitted once; after that the view only grows when something is
-        # out of sight, so a click never moves the drawing under the mouse.
-        self._fit(grow_only=self._fitted)
+        # Fitted once; after that the view only grows when something new
+        # is out of sight, so a click never moves the drawing under the
+        # mouse, and the view moved or zoomed by hand stays where it is.
+        if self._fitted:
+            new = self._new_points(*old)
+            if new is not None:
+                self._fit(grow_only=True, points=new)
+        else:
+            self._fit()
         self._fitted = True
         self.update()
 
+    def show_everything(self) -> None:
+        """Move and zoom the drawing so every curve fits in view again."""
+        self._fit()
+        self.update()
+
+    def _new_points(self, entities, guides, chain) -> np.ndarray | None:
+        """The points of what was not shown before: curves added or
+        changed, a new face outline and new points of the line being
+        drawn. None if there is nothing new."""
+        before = list(entities)
+        added = []
+        for entity in self.entities:
+            if entity in before:
+                before.remove(entity)
+            else:
+                added.append(entity)
+        points = list(sketch.sketch_lines(added))
+        points += [g for g in self.guides if not any(g.shape == o.shape and np.array_equal(g, o) for o in guides)]
+        seen = {tuple(float(v) for v in p) for p in chain}
+        points += [np.asarray([p], dtype=np.float64) for p in self.chain
+                   if tuple(float(v) for v in p) not in seen]
+        points = [p for p in points if len(p)]
+        return np.vstack(points) if points else None
+
     # --- Where things are on screen ---------------------------------------------
 
-    def _fit(self, grow_only: bool = False) -> None:
-        points = [np.zeros((1, 2))]
-        points += [line for line in sketch.sketch_lines(self.entities)]
-        points += list(self.guides)
-        if self.chain:
-            points.append(np.asarray(self.chain))
-        everything = np.vstack(points)
+    def _fit(self, grow_only: bool = False, points=None) -> None:
+        """Show every curve (from the sketch's 0 point out), or with
+        `grow_only` grow the view just enough to show `points` too."""
+        if points is None:
+            parts = [np.zeros((1, 2))]
+            parts += [line for line in sketch.sketch_lines(self.entities)]
+            parts += list(self.guides)
+            if self.chain:
+                parts.append(np.asarray(self.chain))
+            points = np.vstack(parts)
+        everything = np.asarray(points, dtype=np.float64)
         low, high = everything.min(axis=0), everything.max(axis=0)
         if grow_only:
             view_low, view_high = self._centre - self._span / 2.0, self._centre + self._span / 2.0
@@ -319,6 +359,14 @@ class SketchPreview(QWidget):
         low, high = self.SPANS
         self._span = min(max(self._span / self.ZOOM_STEP ** notches, low), high)
         self._centre = self._centre + (before - self.to_sketch(x, y))
+        self.update()
+
+    def pan(self, dx: float, dy: float) -> None:
+        """Move the drawing by (dx, dy) pixels, as a drag does (never
+        further out than a sketch can reach)."""
+        s = self._scale()
+        moved = self._centre - np.array([dx / s, -dy / s])
+        self._centre = np.clip(moved, -sketch.LIMIT, sketch.LIMIT)
         self.update()
 
     def wheelEvent(self, event) -> None:
@@ -366,19 +414,39 @@ class SketchPreview(QWidget):
     # --- Mouse ---------------------------------------------------------------------
 
     def mousePressEvent(self, event) -> None:
-        if not self.drawing:
+        if event.button() in self.PAN_BUTTONS:
+            if self._pan is None:
+                at = event.position()
+                self._pan = [event.button(), at, at, False]
             return
-        if event.button() == Qt.RightButton:
-            self.finished.emit()
-            return
-        if event.button() == Qt.LeftButton:
+        if self.drawing and event.button() == Qt.LeftButton:
             x, y = self.snap(event.position().x(), event.position().y())
             self.clicked.emit(x, y)
 
     def mouseMoveEvent(self, event) -> None:
+        at = event.position()
+        if self._pan is not None:
+            _button, start, last, moved = self._pan
+            if not moved and abs(at.x() - start.x()) + abs(at.y() - start.y()) < self.CLICK_PIXELS:
+                return
+            if not moved:
+                self.setCursor(Qt.ClosedHandCursor)
+            self.pan(at.x() - last.x(), at.y() - last.y())
+            self._pan[2:] = [at, True]
+            return
         if self.drawing:
-            self._hover = self.snap(event.position().x(), event.position().y())
+            self._hover = self.snap(at.x(), at.y())
             self.update()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._pan is None or event.button() != self._pan[0]:
+            return
+        moved = self._pan[3]
+        self._pan = None
+        self.unsetCursor()
+        # A right click that did not drag ends the line being drawn.
+        if not moved and event.button() == Qt.RightButton and self.drawing:
+            self.finished.emit()
 
     def leaveEvent(self, _event) -> None:
         self._hover = None
@@ -464,7 +532,8 @@ class SketchDialog(QDialog):
         "Sizes are in millimetres. X runs to the right and Y runs up, seen from "
         "the side the plane faces. Closed curves make the outline a part is made "
         "from; a closed curve inside another cuts a hole in it. Turn the mouse "
-        "wheel over the drawing to zoom."
+        "wheel over the drawing to zoom, and drag with the right or middle mouse "
+        "button to move it."
     )
     DRAW_PROMPT = (
         "Click to place points: each click draws a line from the last point. Click the "
@@ -520,6 +589,10 @@ class SketchDialog(QDialog):
         self.copy_button.clicked.connect(self.copy_guides)
         self.copy_button.setVisible(bool(self.guides))
         buttons.addWidget(self.copy_button, row + 1, 0, 1, 2)
+        self.fit_button = QPushButton("Show the Whole Drawing", self)
+        self.fit_button.setToolTip("Zoom and move the drawing so every curve fits in view again.")
+        self.fit_button.clicked.connect(self.preview.show_everything)
+        buttons.addWidget(self.fit_button, row + 2, 0, 1, 2)
 
         self.status = QLabel(self)
         self.status.setWordWrap(True)

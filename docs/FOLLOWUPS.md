@@ -72,10 +72,13 @@ tools do the closest honest version of their Fusion counterparts:
   between one outline and the next.
 - **No constraints or driving dimensions** between curves (the binding spec
   leaves them out): every curve is placed by its own typed numbers.
-- **The sketch window** zooms with the mouse wheel, around the pointer, but
-  does not pan; the drawing grows to show curves added out of sight and never
-  shrinks back. Its number boxes take 3 decimals; a number left as it was in
-  a curve's form keeps its exact value.
+- **The sketch window** zooms with the mouse wheel, around the pointer, and
+  moves by dragging with the right or middle mouse button (a right click
+  that does not drag still ends the line being drawn). The view grows by
+  itself only to show curves added or changed out of sight, and Show the
+  Whole Drawing fits every curve in view again; there is no keyboard
+  shortcut for it. Its number boxes take 3 decimals; a number left as it
+  was in a curve's form keeps its exact value.
 - **Sketches are not dragged.** A flat sketch's handle box would have no
   thickness, so the drag handles are hidden for sketches; they are moved and
   turned with the Details panel.
@@ -339,8 +342,12 @@ reflected. What differs from Fusion is how the pattern is chosen.
   overlap are said to (Fusion draws the nearest points). A part with gaps
   in its surface can't be measured.
 - **Volume and Area** measures the selected parts as they would print
-  together (overlaps once, selected Holes cut out). Fusion's mass and
-  centre of gravity are not offered.
+  together (overlaps once, selected Holes cut out). The centre of gravity
+  and the weight take the same material all through, solid: the weight
+  is the volume times the density of PLA, PETG, ABS, ASA, TPU, Nylon or a
+  typed density, chosen in its form each time (the last choice comes up
+  again until the app closes; it is not saved with the project). Fusion's
+  material per part and its moments of inertia are not offered.
 - **Thread** goes on a plain cylinder only (Fusion threads any round
   face): a threaded hole is a cylinder Hole with a thread, grouped with
   the part. Only the ISO metric shape is offered (no inch, pipe, tapered
