@@ -726,7 +726,7 @@ class MeshWindow(ExpertActions, QMainWindow):
             return self.TOOL_PROMPTS["place_ready"]
         if self.tool == "measure" and len(self._measure_points) == 1:
             return self.TOOL_PROMPTS["measure_second"]
-        return self.TOOL_PROMPTS[self.tool]
+        return self._construct_prompt() or self.TOOL_PROMPTS[self.tool]
 
     def stop_tool(self) -> None:
         if self.tool is None:

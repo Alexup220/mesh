@@ -101,8 +101,8 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "mirror", "create", "&Mirror...",
         "Add a mirror image of the selected parts across a flat face you click, a middle "
-        "plane, or the plane of a sketch selected with them. The images are separate parts; "
-        "Combine joins one to its part.",
+        "plane, or a sketch or construction plane selected with them. The images are "
+        "separate parts; Combine joins one to its part.",
         "do_mirror_copy",
     ),
     ExpertTool(
@@ -134,9 +134,9 @@ TOOLS: tuple[ExpertTool, ...] = (
     ),
     ExpertTool(
         "split_body", "modify", "Split &Body...",
-        "Split a part where it stands: select it and a sketch to cut it along the sketch's "
-        "plane, or another part to cut it into the piece inside that part and the piece "
-        "outside. Ungroup on a piece gives the part back.",
+        "Split a part where it stands: select it and a sketch or construction plane to cut it "
+        "along that plane, or another part to cut it into the piece inside that part and the "
+        "piece outside. Ungroup on a piece gives the part back.",
         "do_split_body",
     ),
     ExpertTool(
@@ -175,6 +175,32 @@ TOOLS: tuple[ExpertTool, ...] = (
         "(or out) by it, going away from its sketch or base. A box, cylinder or tube becomes "
         "an Extrusion. Single faces can't be sloped on their own.",
         "do_draft",
+    ),
+    ExpertTool(
+        "plane_distance", "construct", "Plane at a &Distance...",
+        "Add a construction plane parallel to a flat face you click, a selected sketch or "
+        "plane, or one of the workplane's planes, the distance you type away from it. Sketch "
+        "on it, mirror across it or split a part with it. It is never printed.",
+        "do_plane_at_distance",
+    ),
+    ExpertTool(
+        "plane_angle", "construct", "Plane at an &Angle...",
+        "Add a construction plane through one of the left/right, forward/back or upright "
+        "lines through 0, turned around it by the angle you type.",
+        "do_plane_at_angle",
+    ),
+    ExpertTool(
+        "midplane", "construct", "Plane &Halfway Between (Midplane)",
+        "Click two flat faces (or select two sketches or planes) for the plane halfway "
+        "between them: halfway across if they are parallel, otherwise splitting the angle "
+        "where they meet.",
+        "do_midplane",
+    ),
+    ExpertTool(
+        "plane_points", "construct", "Plane Through &Three Points",
+        "Click three points on parts for the plane through them. A click near a corner of "
+        "the face lands exactly on the corner.",
+        "do_plane_through_points",
     ),
 )
 

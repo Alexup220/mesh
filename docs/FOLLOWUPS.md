@@ -195,8 +195,23 @@ reflected. What differs from Fusion is how the pattern is chosen.
   Holes cut once grouped with the part, like any Hole.
 - **Mirror makes copies only.** Fusion can also mirror a part into one
   joined body; here Combine (Join) joins a copy to its part. The plane is a
-  selected sketch's plane, a clicked flat face, or one of the three middle
-  planes through 0; a construction plane comes in Phase 4.
+  selected sketch's plane or construction plane, a clicked flat face, or one
+  of the three middle planes through 0.
+
+## Expert mode, Phase 4 (Construct and Inspect): approximations and limits
+
+- **Guides don't follow what they were made from.** A construction plane
+  is placed by the numbers worked out when it is made; moving the part or
+  sketch afterwards leaves the plane where it was (Fusion keeps them
+  linked). Move or turn it in the Details panel, or make it again.
+- **Construction planes** are drawn as a square (60 mm across, or sized
+  round the face they came from) but go on without end. Offered: a plane a
+  distance from a flat face, a sketch, another plane or the workplane's
+  three planes; at an angle around the left/right, forward/back or upright
+  line through 0; halfway between two faces (or two planes); and through
+  three clicked points, where a click within 2 mm of a corner of the
+  clicked face lands on the corner. Fusion's plane touching a round surface
+  and plane along a path are not offered.
 
 ## Platform notes
 

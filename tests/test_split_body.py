@@ -110,7 +110,7 @@ def test_a_part_that_misses_or_covers_it_is_refused(tool_x, words):
 
 @pytest.mark.parametrize("make, words", [
     (lambda: (sketch_on((0, 0, 1), (0, 0, 5)), box()), "flat drawing"),
-    (lambda: (box(), None), "the sketch or part to split it with"),
+    (lambda: (box(), None), "the sketch, plane or part to split it with"),
 ])
 def test_split_body_needs_a_solid_part_and_something_else(make, words):
     part, tool = make()

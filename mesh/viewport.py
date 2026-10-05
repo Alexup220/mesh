@@ -38,6 +38,7 @@ from vtkmodules.vtkRenderingCore import (
     vtkRenderer,
 )
 
+from mesh import guides
 from mesh.scene import Scene
 from mesh.shapes import hole_clearance, is_reference, shape_geometry
 from mesh.sketch import sketch_lines
@@ -95,13 +96,16 @@ def _lines_polydata(lines) -> vtkPolyData:
 
 
 def _guide_lines(shape) -> list:
-    """A guide's curves as world-space polylines."""
+    """A guide's curves (a sketch's) or lines (a construction guide's) as
+    world-space polylines."""
     transform = np.asarray(shape.transform, dtype=np.float64)
-    out = []
-    for line in sketch_lines(shape.params.get("entities", [])):
-        flat = np.column_stack([line, np.zeros(len(line)), np.ones(len(line))])
-        out.append((flat @ transform.T)[:, :3])
-    return out
+    kind = shape.params.get("primitive")
+    if kind == "sketch":
+        local = [np.column_stack([line, np.zeros(len(line))])
+                 for line in sketch_lines(shape.params.get("entities", []))]
+    else:
+        local = guides.guide_lines(kind, shape.params)
+    return [(np.column_stack([line, np.ones(len(line))]) @ transform.T)[:, :3] for line in local]
 
 
 def _hex_to_rgb(value: str) -> tuple[float, float, float]:

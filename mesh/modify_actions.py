@@ -382,7 +382,7 @@ class ModifyActions:
 
     # --- Split body --------------------------------------------------------------------
 
-    SPLIT_BODY_HINT = "Select the part to split and a sketch or another part to split it with."
+    SPLIT_BODY_HINT = "Select the part to split and a sketch, a plane or another part to split it with."
 
     def _split_pair(self):
         """(the parts the selection could split, the sketch to split by or

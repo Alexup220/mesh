@@ -7,7 +7,7 @@ copies on success, as one undo step.
 
 from PySide6.QtCore import QTimer
 
-from mesh import create, patterns
+from mesh import construct, create, patterns
 from mesh.builders import MAX_COPIES, BuildError
 from mesh.modify import MOVE_LIMIT, _bounds
 from mesh.modify_actions import TURN_AXES
@@ -96,7 +96,8 @@ def mirror_fields():
 
 MIRROR_NOTE = (
     "Adds a mirror image of each selected part on the other side of the plane. To mirror "
-    "across a sketch's plane, select the sketch with the parts. Combine joins a copy to its part."
+    "across a sketch's plane or a construction plane, select it with the parts. Combine joins "
+    "a copy to its part."
 )
 
 
@@ -218,13 +219,13 @@ class PatternActions:
 
     # --- Mirror -------------------------------------------------------------------
 
-    MIRROR_HINT = "Select the parts to mirror (and a sketch, to mirror across its plane)."
+    MIRROR_HINT = "Select the parts to mirror (and a sketch or plane, to mirror across it)."
 
     def _mirror_selection(self):
         chosen = self._picked()
         guides = [s for s in chosen if is_reference(s)]
         parts = [s for s in chosen if not is_reference(s)]
-        if not parts or len(guides) > 1 or (guides and not create.is_sketch(guides[0])):
+        if not parts or len(guides) > 1 or (guides and not construct.is_flat_guide(guides[0])):
             self.statusBar().showMessage(self.MIRROR_HINT)
             return None
         return parts, (guides[0] if guides else None)
@@ -235,13 +236,14 @@ class PatternActions:
 
     def mirror_copy_selected(self, plane: str = "x") -> bool:
         """Mirrored copies of the selected parts across the selected
-        sketch's plane, or else the middle plane `plane` ("x", "y", "z")."""
+        sketch's plane or construction plane, or else the middle plane
+        `plane` ("x", "y", "z")."""
         chosen = self._mirror_selection()
         if chosen is None:
             return False
         parts, guide = chosen
         return self._add_mirrored(
-            parts, patterns.plane_of_sketch(guide) if guide else patterns.middle_plane(plane)
+            parts, construct.plane_of(guide) if guide else patterns.middle_plane(plane)
         )
 
     def do_mirror_copy(self) -> None:

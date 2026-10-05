@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 from shapely.geometry import Polygon
 
-from mesh import features, hardware, sketch, solids, text
+from mesh import features, guides, hardware, sketch, solids, text
 from mesh.blobs import decode_mesh
 
 PRIMITIVES: dict[str, dict] = {
@@ -131,17 +131,20 @@ def shelf_primitives() -> list[str]:
 
 
 # Guides drawn in the scene but never printed (Expert mode): a sketch is a
-# flat drawing on a plane. They are stored like primitives (kind
-# "primitive", params["primitive"] one of these) but are not in PRIMITIVES,
-# which lists solids only. Combining, the status bar check and Save for
-# Printing leave them out; see is_reference.
+# flat drawing on a plane, and the others are construction guides (see
+# mesh.guides). They are stored like primitives (kind "primitive",
+# params["primitive"] one of these) but are not in PRIMITIVES, which lists
+# solids only. Combining, the status bar check and Save for Printing leave
+# them out; see is_reference.
 REFERENCES: dict[str, dict] = {
     "sketch": {"label": "Sketch"},
+    "plane": {"label": "Plane"},
 }
 
 
 def is_reference(shape) -> bool:
-    """True for a guide that is shown but never printed (a sketch)."""
+    """True for a guide that is shown but never printed (a sketch or a
+    construction guide)."""
     return shape.kind == "primitive" and shape.params.get("primitive") in REFERENCES
 
 SEGMENTS = 64
@@ -337,8 +340,12 @@ def shape_geometry(shape, clearances: dict | None = None) -> trimesh.Trimesh:
     """
     clearance = hole_clearance(shape, clearances)
     if is_reference(shape):
-        # Flat, in the guide's own plane; a fit means nothing for it.
-        tm = sketch.sketch_geometry(shape.params.get("entities", []))
+        # In the guide's own coordinates; a fit means nothing for it.
+        kind = shape.params["primitive"]
+        if kind == "sketch":
+            tm = sketch.sketch_geometry(shape.params.get("entities", []))
+        else:
+            tm = guides.guide_geometry(kind, shape.params)
         clearance = 0.0
     elif shape.kind == "primitive":
         tm = primitive_mesh(shape.params["primitive"], shape.params, clearance)

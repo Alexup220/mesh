@@ -406,13 +406,13 @@ def _half_space(origin, normal, size: float, color: str):
 
 
 def split_body(part, tool, clearances: dict | None = None) -> list:
-    """`part` cut in two where it stands: by the plane of the sketch `tool`
-    (the side the sketch faces first), or by the part `tool` into the piece
+    """`part` cut in two where it stands: by the plane of the sketch or
+    construction plane `tool` (the side it faces first), or by the part `tool` into the piece
     inside it and the piece outside. Each piece is a group of a copy of the
     part and what was cut away from it, so Ungroup gives the part back.
     Exact."""
     if part.id == tool.id:
-        raise BuildError("Select the part to split and the sketch or part to split it with.")
+        raise BuildError("Select the part to split and the sketch, plane or part to split it with.")
     if is_reference(part):
         raise BuildError(GUIDES_ARE_NOT_PARTS.format(tool="Split Body"))
     if part.is_hole:
@@ -429,8 +429,8 @@ def split_body(part, tool, clearances: dict | None = None) -> list:
         sides = to_manifold(tm).split_by_plane(tuple(normal), offset)
         if min(side.volume() for side in sides) < 1e-3:
             raise BuildError(
-                f"The plane of {tool.name} misses {part.name}. Move the sketch so its plane "
-                "goes through the part."
+                f"The plane of {tool.name} misses {part.name}. Move it so its plane goes "
+                "through the part."
             )
         centre = tm.bounds.mean(axis=0)
         origin = centre - (normal @ centre - offset) * normal
