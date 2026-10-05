@@ -35,6 +35,14 @@
   by stylesheet), and so are message boxes and the file and colour
   choosers.
 
+## Drawing
+
+Qt Quick draws in software (`QQuickWindow.setGraphicsApi(Software)` at
+the top of mesh/qml_app.py). VTK makes its own OpenGL context current
+behind Qt's back, so with OpenGL Qt Quick's drawing landed in the 3D view
+and the panels stayed empty. Only visible on a real screen; offscreen runs
+never showed it.
+
 ## Core vs GUI
 
 - Pure: `mesh/themes.py` (the six built-in themes, custom theme files in

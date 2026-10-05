@@ -20,7 +20,7 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QObject, QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtQml import QQmlEngine
-from PySide6.QtQuick import QQuickView
+from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface
 from PySide6.QtQuickWidgets import QQuickWidget
 from PySide6.QtWidgets import QDockWidget, QSizePolicy, QToolBar, QVBoxLayout, QWidget
 
@@ -28,6 +28,13 @@ from mesh import themes
 from mesh.app import MeshWindow
 from mesh.bridge import INSERT_MIME, Bridge, IconProvider, run_form_in
 from mesh.theme import stylesheet_for
+
+# Draw Qt Quick in software, not OpenGL. VTK makes its own OpenGL context
+# current behind Qt's back each time it renders, so on a real screen Qt
+# Quick's OpenGL drawing landed in the 3D view (a solid panel colour there)
+# and the panels themselves stayed empty. The panels are flat 2D, which
+# the software renderer draws fine. Must run before any Qt Quick window.
+QQuickWindow.setGraphicsApi(QSGRendererInterface.GraphicsApi.Software)
 
 QML_DIR = Path(__file__).resolve().parent / "qml"
 MODULE_DIR = QML_DIR / "Mesh"

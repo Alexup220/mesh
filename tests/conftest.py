@@ -14,6 +14,13 @@ import pytest
 # The suite only exercises scene/selection logic, never pixels, so it
 # must run under a platform with no real window at all.
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+# Each viewport's VTK render window opens its own X connection even when
+# nothing is drawn, and never closes it. Over the suite that held ~240
+# connections on the real display, which hit XWayland's client limit: no
+# other program (mesh itself included) could open a window until the run
+# ended. Without DISPLAY, VTK logs "bad X server connection" and carries
+# on, which is all the suite needs.
+os.environ.pop("DISPLAY", None)
 
 
 @pytest.fixture(scope="session")
