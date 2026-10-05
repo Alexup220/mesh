@@ -343,6 +343,16 @@ def scenario_thread_two_starts(window):
     window.thread_selected(2.0, 12.0, "bottom", starts=2)
 
 
+def scenario_thread_inch_bevelled(window):
+    add(window, "cylinder")
+    window.thread_selected(1.5, 10.0, standard="inch", lead_in="bevel")
+
+
+def scenario_thread_pipe(window):
+    add(window, "cylinder")
+    window.thread_selected(1.5, 12.0, "bottom", standard="pipe", per_inch=19.0)
+
+
 def scenario_move_copy(window):
     add(window)
     window.move_copy_selected(5.0, 0.0, 0.0, "z", 30.0, make_copy=True)
@@ -749,7 +759,8 @@ SAMPLE_ARGS = {
     "distance": 5.0, "side": "one", "hole": False, "keep_sketch": False, "taper": 0.0, "to_plane": False,
     "combine": None, "twist": 0.0, "end_scale": 100.0, "sides": "straight", "axis": "z",
     "angle": 30.0,
-    "pitch": 1.5, "length": 10.0, "end": "top", "hand": "right", "starts": 1, "dx": 1.0, "dy": 0.0, "dz": 0.0,
+    "pitch": 1.5, "length": 10.0, "end": "top", "hand": "right", "starts": 1, "standard": "metric",
+    "per_inch": 0.0, "lead_in": "none", "dx": 1.0, "dy": 0.0, "dz": 0.0,
     "make_copy": False, "size": 100.0, "stretch_x": 100.0, "stretch_y": 100.0, "stretch_z": 100.0,
     "about": "base", "op": "union", "keep_tools": False, "keep_tool": False, "wall": 2.0, "far_side": False,
     "radius": 2.0, "count": 3, "spacing": 10.0, "count2": 1, "spacing2": 30.0, "axis2": "y",

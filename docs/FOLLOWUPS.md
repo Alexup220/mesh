@@ -279,15 +279,24 @@ reflected. What differs from Fusion is how the pattern is chosen.
   centre of gravity are not offered.
 - **Thread** goes on a plain cylinder only (Fusion threads any round
   face): a threaded hole is a cylinder Hole with a thread, grouped with
-  the part. Only the ISO metric shape is offered (no inch, pipe or
-  tapered threads), always modeled, never just drawn on. One to four
-  threads can run side by side (several starts); the pitch stays the
-  distance from one ridge to the next. The sloped sides are narrow flat
-  strips, 36 to a turn for each start, so the thread is about 0.5% thinner
-  than the true shape. A fitted thread Hole grows by
-  its fit straight out from the middle, which leaves about half the fit
-  as room on the sloped sides. The ends are cut square, with no lead-in
-  bevel, and a thread makes at most 150 turns.
+  the part, and a threaded tube is a threaded cylinder grouped with a
+  cylinder Hole through it (selecting a tube says so). Metric (ISO), inch (UNC, which has the same 60 degree shape)
+  and straight British pipe threads (G, ISO 228-1, the 55 degree shape
+  with round tips) are offered, always modeled, never just drawn on.
+  Tapered pipe threads (NPT, R) are not, and only the coarse inch sizes
+  are listed (a fine pitch, or any threads per inch, can be typed). The
+  cylinder keeps its own diameter: the standard sizes only fill in the
+  pitch for the size nearest it. One to four threads can run side by
+  side (several starts); the pitch stays the distance from one ridge to
+  the next. The sloped sides are narrow flat strips, 36 to a turn for
+  each start, and a pipe thread's round tips are short flat pieces (6 to
+  each half), so the thread is about 0.5% thinner than the true shape. A
+  fitted thread Hole grows by its fit straight out from the middle, which
+  leaves about half the fit as room on the sloped sides. The end where the
+  thread starts can be bevelled at 45 degrees (a thread down to its root,
+  a threaded hole out to its full size), as a cone of flat strips; the
+  bevel's angle and size can't be chosen, and the far end is always cut
+  square. A thread makes at most 150 turns, counting each start.
 
 ## Expert mode, Phase 5 (Parameters, History, Components): approximations and limits
 

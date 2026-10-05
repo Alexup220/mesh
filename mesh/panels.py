@@ -94,6 +94,8 @@ FIELD_LABELS = {
     "end": "Thread starts",
     "hand": "Thread turns",
     "starts": "Starts (threads side by side)",
+    "thread_shape": "Thread shape",
+    "lead_in": "Starting end of the thread",
 }
 
 

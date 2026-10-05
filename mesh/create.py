@@ -402,6 +402,9 @@ def outline_entities(outlines) -> list[dict]:
 
 
 NOT_A_CYLINDER = "Select one cylinder (a part, or a Hole for a threaded hole) to put a thread on."
+TUBE_THREAD = ("A thread goes on a cylinder, not a tube. For a thread on the outside, thread a cylinder "
+               "and group a cylinder Hole through it; for one inside, group a threaded cylinder Hole "
+               "inside a cylinder.")
 
 
 def thread_choice(shape) -> tuple[str, float]:
@@ -410,21 +413,30 @@ def thread_choice(shape) -> tuple[str, float]:
 
 
 def threaded(shape: Shape, pitch: float, length: float, end: str = "top", hand: str = "right",
-             clearances: dict | None = None, starts: int = 1) -> Shape:
+             clearances: dict | None = None, starts: int = 1, standard: str = "metric",
+             per_inch: float = 0.0, lead_in: str = "none") -> Shape:
     """A copy of the cylinder `shape` with a thread along `length` mm of
     it, starting at `end`, with `starts` threads side by side. Its diameter
     is the thread's full diameter; everything else about it (where it is,
     its colour, Solid or Hole) is kept. As a Hole it cuts a threaded hole a
-    bolt of the same sizes fits."""
+    bolt of the same sizes fits. A metric thread has the `pitch` given; an
+    inch or pipe one has `per_inch` threads to an inch (0: the standard
+    count for the nearest size), and a pipe one the pipe thread's shape.
+    With `lead_in` "bevel", the end where the thread starts is bevelled."""
     if shape.kind != "primitive" or shape.params.get("primitive") != "cylinder":
         raise BuildError(NOT_A_CYLINDER)
     if float(shape.params.get("chamfer", 0.0)) > 0.0:
         raise BuildError(f"{shape.name} has a bottom chamfer, which a thread can't keep. Set its "
                          "bottom chamfer to 0 in the Details panel first.")
+    diameter = float(shape.params.get("diameter", 20.0))
+    try:
+        pitch = threads.standard_pitch(standard, diameter, pitch, per_inch)
+    except threads.ThreadError as exc:
+        raise BuildError(str(exc)) from exc
     changed = copy.deepcopy(shape)
     changed.params = {
         "primitive": "thread",
-        "diameter": float(shape.params.get("diameter", 20.0)),
+        "diameter": diameter,
         "height": float(shape.params.get("height", 20.0)),
         "pitch": float(pitch),
         "thread_length": float(min(length, float(shape.params.get("height", 20.0)))),
@@ -434,5 +446,9 @@ def threaded(shape: Shape, pitch: float, length: float, end: str = "top", hand: 
     # Kept only when used, so a one-start thread's settings are as before.
     if float(starts) != 1.0:
         changed.params["starts"] = int(starts) if float(starts) == int(starts) else float(starts)
+    if standard == "pipe":
+        changed.params["thread_shape"] = "round"
+    if lead_in != "none":
+        changed.params["lead_in"] = lead_in
     _checked(lambda: shape_geometry(changed, clearances))
     return changed

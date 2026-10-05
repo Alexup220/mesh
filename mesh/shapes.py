@@ -126,7 +126,8 @@ PRIMITIVES: dict[str, dict] = {
     "thread": {
         "label": "Thread",
         "defaults": dict(threads.DEFAULTS),
-        "choices": {"end": threads.ENDS, "hand": threads.HANDS},
+        "choices": {"end": threads.ENDS, "hand": threads.HANDS, "thread_shape": threads.THREAD_SHAPES,
+                    "lead_in": threads.LEAD_INS},
         "shelf": False,
     },
 }
@@ -203,11 +204,12 @@ def hole_clearance(shape, clearances: dict | None) -> float:
     return value if np.isfinite(value) and value > 0.0 else 0.0
 
 
-def primitive_mesh(kind: str, params: dict, clearance: float = 0.0) -> trimesh.Trimesh:
+def primitive_mesh(kind: str, params: dict, clearance: float = 0.0, hole: bool = False) -> trimesh.Trimesh:
     """Build a primitive resting on the workplane.
 
     `clearance` > 0 grows it by that much on every side (see hole_clearance);
     the grown shape is lowered by the same amount so it grows evenly in Z too.
+    `hole` says the shape is a Hole (only a thread's lead-in differs).
     """
     if kind not in PRIMITIVES:
         raise KeyError(f"unknown primitive: {kind}")
@@ -222,7 +224,7 @@ def primitive_mesh(kind: str, params: dict, clearance: float = 0.0) -> trimesh.T
     if kind == "thread":
         # Grows across and at the ends, but keeps its pitch and its turns
         # where they are, so a bolt fits the threaded Hole.
-        return threads.thread_mesh(p, clearance)
+        return threads.thread_mesh(p, clearance, hole)
     if kind == "text":
         # Letters grow outward along their own outline, not by scaling.
         return text.text_mesh(str(p["text"]), float(p["letter_height"]), float(p["depth"]), clearance)
@@ -363,7 +365,8 @@ def shape_geometry(shape, clearances: dict | None = None) -> trimesh.Trimesh:
             tm = guides.guide_geometry(kind, shape.params)
         clearance = 0.0
     elif shape.kind == "primitive":
-        tm = primitive_mesh(shape.params["primitive"], shape.params, clearance)
+        tm = primitive_mesh(shape.params["primitive"], shape.params, clearance,
+                            bool(getattr(shape, "is_hole", False)))
     elif shape.kind in ("imported", "group"):
         tm = decode_mesh(shape.params["blob"])
     else:

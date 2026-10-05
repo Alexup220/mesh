@@ -113,10 +113,11 @@ TOOLS: tuple[ExpertTool, ...] = (
     ),
     ExpertTool(
         "thread", "create", "&Thread...",
-        "Put a screw thread on the selected cylinder, along all or part of its height, with "
-        "the standard pitch for its size filled in, and one or more threads side by side. On "
-        "a cylinder Hole it makes a threaded hole that a thread of the same size screws into. "
-        "The thread's sloped sides are made of narrow flat strips.",
+        "Put a screw thread on the selected cylinder, along all or part of its height: metric "
+        "with the standard pitch for its size filled in, inch, or straight British pipe, with "
+        "one or more threads side by side. On a cylinder Hole it makes a threaded hole that a "
+        "thread of the same size screws into. The thread's sloped sides are made of narrow "
+        "flat strips, and tapered pipe threads are not offered.",
         "do_thread",
     ),
     ExpertTool(
