@@ -267,6 +267,90 @@ def test_the_mouse_wheel_zooms_around_the_pointer(dialog):
     preview.grab()
 
 
+def drag(preview, button, start, end):
+    """Press `button` at `start` pixels, move to `end` and let go there."""
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    def event(kind, at, pressed, buttons):
+        point = QPointF(*at)
+        return QMouseEvent(kind, point, point, pressed, buttons, Qt.NoModifier)
+
+    preview.mousePressEvent(event(QEvent.MouseButtonPress, start, button, button))
+    if end != start:
+        middle = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2)
+        preview.mouseMoveEvent(event(QEvent.MouseMove, middle, Qt.NoButton, button))
+        preview.mouseMoveEvent(event(QEvent.MouseMove, end, Qt.NoButton, button))
+    preview.mouseReleaseEvent(event(QEvent.MouseButtonRelease, end, button, Qt.NoButton))
+
+
+def test_dragging_with_the_right_or_middle_button_moves_the_drawing(dialog):
+    from PySide6.QtCore import Qt
+
+    d = dialog([CIRCLE])
+    preview = d.preview
+    preview.resize(400, 400)
+    for button in (Qt.RightButton, Qt.MiddleButton):
+        under = preview.to_sketch(200, 200)
+        span = preview._span
+        drag(preview, button, (200, 200), (250, 180))
+        assert np.allclose(preview.to_sketch(250, 180), under) and preview._span == span
+    preview.pan(1e9, -1e9)  # never further out than a sketch reaches
+    assert np.all(np.abs(preview._centre) <= sketch.LIMIT)
+
+
+def test_a_right_click_still_ends_the_line_but_a_right_drag_does_not(dialog):
+    from PySide6.QtCore import Qt
+
+    d = dialog()
+    d.preview.resize(400, 400)
+    d.set_drawing(True)
+    d.click_point((0, 0))
+    d.click_point((10, 0))
+    drag(d.preview, Qt.RightButton, (200, 200), (260, 200))
+    assert d.drawer.points == [[0.0, 0.0], [10.0, 0.0]]  # still drawing on from the last point
+    drag(d.preview, Qt.RightButton, (200, 200), (201, 200))  # a click: hardly moved
+    assert d.drawer.points == [] and d.drawing() and len(d.entities()) == 1
+    drag(d.preview, Qt.MiddleButton, (200, 200), (200, 200))  # a middle click does nothing
+    assert d.drawing()
+
+
+def test_a_moved_or_zoomed_view_stays_as_curves_change(dialog):
+    d = dialog([CIRCLE] + SQUARE)
+    preview = d.preview
+    preview.resize(400, 400)
+    preview.zoom(3, 200, 200)
+    preview.pan(300, -40)
+    centre, span = preview._centre.copy(), preview._span
+    assert preview.to_sketch(400, 200)[0] < -5  # the curves are now out of sight, to the right
+    d.list.setCurrentRow(2)  # choosing a curve, part of the drawing now out of sight
+    d.remove_chosen()
+    d.set_drawing(True)
+    d.click_point(preview.to_sketch(200, 200))  # a click in view
+    assert np.allclose(preview._centre, centre) and preview._span == span
+    d.set_drawing(False)
+    d.add_entity({"type": "circle", "centre": [300, 0], "diameter": 10})  # added out of sight
+    assert preview._centre[0] + preview._span / 2 >= 305 and preview._span > span
+
+
+def test_show_the_whole_drawing_brings_the_view_back(dialog):
+    d = dialog([CIRCLE])
+    preview = d.preview
+    preview.resize(400, 400)
+    d.add_entity({"type": "circle", "centre": [300, 0], "diameter": 10})
+    d.remove_chosen()  # the far circle: the view stays grown ...
+    assert preview._span > 300
+    d.fit_button.click()  # ... until the whole drawing is shown again
+    assert preview._span == preview.FIRST_SPAN and np.allclose(preview._centre, (0.0, 0.0))
+    preview.zoom(5, 300, 120)
+    preview.pan(150, 150)
+    d.fit_button.click()
+    assert preview._span == preview.FIRST_SPAN and np.allclose(preview._centre, (0.0, 0.0))
+    assert "drag with the right or middle mouse button" in d.note.text()
+    for text in (d.fit_button.text(), d.fit_button.toolTip(), d.note.text()):
+        assert_plain(text)
+
+
 def test_esc_ends_the_line_then_stops_drawing_and_only_then_closes(dialog):
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest

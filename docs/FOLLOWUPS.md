@@ -72,10 +72,13 @@ tools do the closest honest version of their Fusion counterparts:
   the next (no smoothing through three or more outlines).
 - **No constraints or driving dimensions** between curves (the binding spec
   leaves them out): every curve is placed by its own typed numbers.
-- **The sketch window** zooms with the mouse wheel, around the pointer, but
-  does not pan; the drawing grows to show curves added out of sight and never
-  shrinks back. Its number boxes take 3 decimals; a number left as it was in
-  a curve's form keeps its exact value.
+- **The sketch window** zooms with the mouse wheel, around the pointer, and
+  moves by dragging with the right or middle mouse button (a right click
+  that does not drag still ends the line being drawn). The view grows by
+  itself only to show curves added or changed out of sight, and Show the
+  Whole Drawing fits every curve in view again; there is no keyboard
+  shortcut for it. Its number boxes take 3 decimals; a number left as it
+  was in a curve's form keeps its exact value.
 - **Sketches are not dragged.** A flat sketch's handle box would have no
   thickness, so the drag handles are hidden for sketches; they are moved and
   turned with the Details panel.
