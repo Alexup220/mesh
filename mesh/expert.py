@@ -200,8 +200,8 @@ TOOLS: tuple[ExpertTool, ...] = (
     ),
     ExpertTool(
         "plane_points", "construct", "Plane Through &Three Points",
-        "Click three points on parts for the plane through them. A click near a corner of "
-        "the face lands exactly on the corner.",
+        "Click three points on parts (or select three construction points) for the plane "
+        "through them. A click near a corner of the face lands exactly on the corner.",
         "do_plane_through_points",
     ),
     ExpertTool(
@@ -213,8 +213,9 @@ TOOLS: tuple[ExpertTool, ...] = (
     ),
     ExpertTool(
         "axis_points", "construct", "Axis Through Two &Points",
-        "Click two points on parts for the axis through them, pointing from the first to the "
-        "second. A click near a corner of the face lands exactly on the corner.",
+        "Click two points on parts (or select two construction points) for the axis through "
+        "them, pointing from the first to the second. A click near a corner of the face lands "
+        "exactly on the corner.",
         "do_axis_two_points",
     ),
     ExpertTool(
@@ -228,6 +229,18 @@ TOOLS: tuple[ExpertTool, ...] = (
         "Select two sketches or construction planes at an angle for the axis along the line "
         "where they meet.",
         "do_axis_two_planes",
+    ),
+    ExpertTool(
+        "point_spot", "construct", "Point at a &Click",
+        "Click a part to add a construction point there; a click near a corner of the face "
+        "lands exactly on the corner. Type its exact position in the Details panel.",
+        "do_point_at_spot",
+    ),
+    ExpertTool(
+        "point_middle", "construct", "Point at the Middle of a Fa&ce",
+        "Click a flat face to add a construction point at the middle of its area, such as "
+        "the centre of a cylinder's end.",
+        "do_point_at_middle",
     ),
 )
 

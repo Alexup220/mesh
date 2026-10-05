@@ -140,6 +140,7 @@ REFERENCES: dict[str, dict] = {
     "sketch": {"label": "Sketch"},
     "plane": {"label": "Plane"},
     "axis": {"label": "Axis"},
+    "point": {"label": "Point"},
 }
 
 

@@ -1,4 +1,5 @@
-"""The window's Expert mode Construct menu: construction planes and axes.
+"""The window's Expert mode Construct menu: construction planes, axes and
+points.
 
 Mixed into MeshWindow through ExpertActions. The geometry is in
 mesh.construct; this is only the wiring: ask, collect the clicks, then add
@@ -58,7 +59,8 @@ def ask_plane_angle(parent, lines) -> dict | None:
 class ConstructActions:
     """Mixed into MeshWindow through ExpertActions."""
 
-    CONSTRUCT_CLICK_TOOLS = ("plane_face", "midplane", "plane_points", "axis_points", "axis_face")
+    CONSTRUCT_CLICK_TOOLS = ("plane_face", "midplane", "plane_points", "axis_points", "axis_face",
+                             "point_spot", "point_middle")
     CONSTRUCT_TOOL_PROMPTS = {
         "plane_face": "Click a flat face of a part for the new plane. Esc cancels.",
         "midplane": "Click the first of two flat faces; the plane goes halfway between them. Esc cancels.",
@@ -69,6 +71,8 @@ class ConstructActions:
         "axis_points": "Click the first of two points on parts (near a corner, it lands on the corner). Esc cancels.",
         "axis_points_second": "Now click the second point; the axis points towards it.",
         "axis_face": "Click a point on a flat face of a part for the axis square to it. Esc cancels.",
+        "point_spot": "Click a part where the point goes (near a corner, it lands on the corner). Esc cancels.",
+        "point_middle": "Click a flat face of a part; the point goes at its middle. Esc cancels.",
     }
     CONSTRUCT_CLICK_HANDLERS = {
         "plane_face": "_plane_face_picked",
@@ -76,6 +80,8 @@ class ConstructActions:
         "plane_points": "_plane_point_picked",
         "axis_points": "_axis_point_picked",
         "axis_face": "_axis_face_picked",
+        "point_spot": "_point_spot_picked",
+        "point_middle": "_point_middle_picked",
     }
 
     # Which later prompt each click tool shows after each click so far.
@@ -113,6 +119,10 @@ class ConstructActions:
 
     def _next_name(self, label: str) -> str:
         return construct.next_name(self.document.scene.shapes, label)
+
+    def _selected_points(self):
+        """The selected construction points, in the order they were picked."""
+        return [s for s in self._picked() if construct.is_guide(s, "point")]
 
     def _selected_flat_guides(self):
         return [s for s in self._picked() if construct.is_flat_guide(s)]
@@ -262,6 +272,10 @@ class ConstructActions:
         return self._add_guide("add plane", lambda: construct.plane_through_points(a, b, c, name))
 
     def do_plane_through_points(self) -> None:
+        chosen = self._selected_points()
+        if len(chosen) == 3:
+            self.plane_through_spots([construct.point_of(p) for p in chosen])
+            return
         self._start_construct_tool("plane_points")
 
     def _plane_point_picked(self, shape_id: str, face_index: int, point=None) -> None:
@@ -311,6 +325,10 @@ class ConstructActions:
         return self._add_guide("add axis", lambda: construct.axis_through_points(a, b, name))
 
     def do_axis_two_points(self) -> None:
+        chosen = self._selected_points()
+        if len(chosen) == 2:
+            self.axis_through_spots([construct.point_of(p) for p in chosen])
+            return
         self._start_construct_tool("axis_points")
 
     def _axis_point_picked(self, shape_id: str, face_index: int, point=None) -> None:
@@ -360,3 +378,35 @@ class ConstructActions:
 
     def do_axis_two_planes(self) -> None:
         self.axis_of_two_planes()
+
+    # --- Points ----------------------------------------------------------------------
+
+    def point_at(self, shape_id: str, face_index: int, point, middle: bool = False) -> bool:
+        """A point where a click on a face landed, or at the face's middle."""
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+        except KeyError:
+            return False
+        name = self._next_name("Point")
+        if middle:
+            return self._add_guide("add point", lambda: construct.point_at_middle(
+                shape, face_index, scene.fit_clearances, name))
+        return self._add_guide("add point", lambda: construct.point_at_spot(
+            shape, face_index, point, scene.fit_clearances, name))
+
+    def do_point_at_spot(self) -> None:
+        self._start_construct_tool("point_spot")
+
+    def do_point_at_middle(self) -> None:
+        self._start_construct_tool("point_middle")
+
+    def _point_spot_picked(self, shape_id: str, face_index: int, point=None) -> None:
+        if self._clicked_part(shape_id, face_index) is None:
+            return
+        self._finish_construct(lambda: self.point_at(shape_id, face_index, point))
+
+    def _point_middle_picked(self, shape_id: str, face_index: int, _point=None) -> None:
+        if self._clicked_part(shape_id, face_index) is None:
+            return
+        self._finish_construct(lambda: self.point_at(shape_id, face_index, None, middle=True))

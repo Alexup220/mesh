@@ -1,5 +1,6 @@
 """Construction guides (Expert mode's Construct menu): planes to draw on,
-mirror across, split by and cut the view with, and axes to turn around.
+mirror across, split by and cut the view with, axes to turn around, and
+points to make planes and axes through.
 
 Every function returns a new guide shape (or, for the helpers, plain
 numbers) and changes nothing passed in; the window adds the guide in one
@@ -8,8 +9,9 @@ undo step. A guide is drawn as mesh.guides describes and is never printed
 with a plain message.
 
 A guide is its transform: a plane's Z is the way it faces and an axis's Z
-the way it points, and the origin is the middle of what is drawn, so
-moving or turning it in the Details panel moves the guide.
+the way it points, and the origin is the middle of what is drawn (a
+point's is the point), so moving or turning it in the Details panel moves
+the guide.
 
 All exact: a guide is placed by numbers worked out from the faces and
 points clicked, not drawn by eye.
@@ -114,6 +116,13 @@ def axis_of(shape) -> tuple[np.ndarray, np.ndarray]:
     if not (is_guide(shape, "axis") or (shape.kind == "primitive" and shape.params.get("primitive") in ROUND_KINDS)):
         raise BuildError(NOT_ROUND.format(name=shape.name))
     return frame[:3, 3].copy(), _unit(frame[:3, 2], shape.name)
+
+
+def point_of(shape) -> np.ndarray:
+    """Where a construction point is."""
+    if not is_guide(shape, "point"):
+        raise BuildError(f"{shape.name} is not a point.")
+    return np.asarray(shape.transform, dtype=np.float64)[:3, 3].copy()
 
 
 def spot(shape, face_index: int, point, clearances: dict | None = None) -> np.ndarray:
@@ -311,3 +320,26 @@ def axis_where_planes_meet(a, b, label: str = "Axis") -> Shape:
     matrix = np.array([na, nb, direction])
     point = np.linalg.solve(matrix, [na @ pa, nb @ pb, direction @ middle])
     return new_axis(point, direction, guides.AXIS_LENGTH, label)
+
+
+# --- Points -----------------------------------------------------------------------
+
+
+def new_point(position, name: str = "Point") -> Shape:
+    frame = np.eye(4)
+    frame[:3, 3] = _point(position)
+    return _guide("point", frame, {}, name)
+
+
+def point_at_spot(shape, face_index: int, point, clearances: dict | None = None,
+                  label: str = "Point") -> Shape:
+    """A point where a click on a part's face lands (on the face's corner
+    if the click is within SNAP mm of it)."""
+    return new_point(spot(shape, face_index, point, clearances), label)
+
+
+def point_at_middle(shape, face_index: int, clearances: dict | None = None, label: str = "Point") -> Shape:
+    """A point at the middle of a flat face's area: the centre of a
+    cylinder's end, or of a box's side."""
+    centre, _normal, _size = face_of(shape, face_index, clearances)
+    return new_point(centre, label)

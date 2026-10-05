@@ -169,7 +169,7 @@ def test_a_construction_plane_splits_a_part():
 def test_a_construction_plane_is_never_a_part():
     with pytest.raises(BuildError) as err:
         modify.split_body(construct.plane_from_named("xy"), new_primitive("cube"))
-    assert "construction plane or axis is a guide" in str(err.value)
+    assert "construction plane, axis or point is a guide" in str(err.value)
     assert_plain(str(err.value))
 
 

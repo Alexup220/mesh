@@ -200,10 +200,11 @@ reflected. What differs from Fusion is how the pattern is chosen.
 
 ## Expert mode, Phase 4 (Construct and Inspect): approximations and limits
 
-- **Guides don't follow what they were made from.** A construction plane
-  or axis is placed by the numbers worked out when it is made; moving the
-  part or sketch afterwards leaves the guide where it was (Fusion keeps
-  them linked). Move or turn it in the Details panel, or make it again.
+- **Guides don't follow what they were made from.** A construction plane,
+  axis or point is placed by the numbers worked out when it is made;
+  moving the part or sketch afterwards leaves the guide where it was
+  (Fusion keeps them linked). Move or turn it in the Details panel, or
+  make it again.
 - **Construction planes** are drawn as a square (60 mm across, or sized
   round the face they came from) but go on without end. Offered: a plane a
   distance from a flat face, a sketch, another plane or the workplane's
@@ -221,6 +222,12 @@ reflected. What differs from Fusion is how the pattern is chosen.
   Fusion's axis along a clicked edge is not offered. Pattern Around a Line
   and Plane at an Angle turn around a selected axis; Revolve still turns
   around a line in its sketch.
+- **Construction points** are drawn as a small cross. Offered: at a click
+  on a part (on the face's corner within 2 mm of it) and at the middle of a
+  flat face's area (a cylinder's end gives its centre). Fusion's point at
+  the end of an edge, where an edge meets a face, or where three planes
+  meet is not offered. Three selected points make a plane and two make an
+  axis; nothing else takes a point yet.
 
 ## Platform notes
 
