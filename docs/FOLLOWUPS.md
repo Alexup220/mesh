@@ -241,10 +241,11 @@ reflected. What differs from Fusion is how the pattern is chosen.
   on a part (on the face's corner within 2 mm of it), at the middle of a
   flat face's area (a cylinder's end gives its centre), and at the end of
   a clicked edge nearer the click (the end of the straight stretch
-  clicked, so on a round edge an end of the short piece clicked). Fusion's
-  point where an edge meets a face, or where three planes meet, is not
-  offered. Three selected points make a plane and two make an axis;
-  nothing else takes a point yet.
+  clicked, so on a round edge an end of the short piece clicked); where
+  three selected sketches or planes meet; and where a selected axis meets
+  a selected sketch or plane. Fusion's point where a part's edge meets a
+  face is not offered. Three selected points make a plane and two make an
+  axis; nothing else takes a point yet.
 - **Section view** only changes the view, one plane at a time, and is
   not saved with the project (Fusion keeps section analyses in the
   browser). The plane is a selected sketch or construction plane, or a

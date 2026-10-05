@@ -727,6 +727,29 @@ def point_at_middle(shape, face_index: int, clearances: dict | None = None, labe
     return new_point(centre, label)
 
 
+def point_where_planes_meet(a, b, c, label: str = "Point") -> Shape:
+    """The point where three planes, each (a point on it, the way it
+    faces), meet."""
+    planes = [(_point(p), _unit(n, "A plane")) for p, n in (a, b, c)]
+    matrix = np.array([n for _p, n in planes])
+    if abs(float(np.linalg.det(matrix))) < 1e-6:
+        raise BuildError("Two of the planes are parallel, or all three run through one line, so they "
+                         "don't meet at a single point. Pick three planes at angles to each other.")
+    return new_point(np.linalg.solve(matrix, [float(n @ p) for p, n in planes]), label)
+
+
+def point_where_axis_meets_plane(axis, plane, label: str = "Point") -> Shape:
+    """The point where an axis, (a point on it, the way it points), passes
+    through a plane, (a point on it, the way it faces)."""
+    p, d = _point(axis[0]), _unit(axis[1], "The axis")
+    q, n = _point(plane[0]), _unit(plane[1], "The plane")
+    across = float(d @ n)
+    if abs(across) < 1e-6:
+        raise BuildError("The axis runs alongside the plane, so they never meet at one point. Pick an "
+                         "axis that crosses the plane.")
+    return new_point(p + float(n @ (q - p)) / across * d, label)
+
+
 def point_at_edge_end(shape, face_index: int, point, clearances: dict | None = None,
                       label: str = "Point") -> Shape:
     """A point on the end of the straight stretch of edge next to a click

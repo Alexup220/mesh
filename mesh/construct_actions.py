@@ -560,6 +560,38 @@ class ConstructActions:
             return
         self._finish_construct(lambda: self.point_at(shape_id, face_index, None, middle=True))
 
+    POINT_PLANES_HINT = ("Select three sketches or planes at angles to each other; the point goes where "
+                         "they meet.")
+    POINT_AXIS_HINT = "Select an axis and a sketch or plane; the point goes where the axis meets the plane."
+
+    @replayable()
+    def point_of_three_planes(self) -> bool:
+        """The point where the three selected sketches or planes meet."""
+        chosen = self._selected_flat_guides()
+        if len(chosen) != 3:
+            self.statusBar().showMessage(self.POINT_PLANES_HINT)
+            return False
+        a, b, c = (construct.plane_of(g) for g in chosen)
+        name = self._next_name("Point")
+        return self._add_guide("add point", lambda: construct.point_where_planes_meet(a, b, c, name))
+
+    def do_point_three_planes(self) -> None:
+        self.point_of_three_planes()
+
+    @replayable()
+    def point_of_axis_and_plane(self) -> bool:
+        """The point where the selected axis meets the selected sketch or plane."""
+        axes, flat = self._selected_axes(), self._selected_flat_guides()
+        if len(axes) != 1 or len(flat) != 1:
+            self.statusBar().showMessage(self.POINT_AXIS_HINT)
+            return False
+        line, plane = construct.axis_of(axes[0]), construct.plane_of(flat[0])
+        name = self._next_name("Point")
+        return self._add_guide("add point", lambda: construct.point_where_axis_meets_plane(line, plane, name))
+
+    def do_point_axis_plane(self) -> None:
+        self.point_of_axis_and_plane()
+
     @replayable(("shape_id", "face_index"))
     def point_at_edge_end(self, shape_id: str, face_index: int, point) -> bool:
         """A point on the end of the edge next to a click that is nearer it."""

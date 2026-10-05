@@ -328,6 +328,18 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_point_at_edge_end",
     ),
     ExpertTool(
+        "point_planes", "construct", "Point Where Three Planes Mee&t",
+        "Select three sketches or construction planes at angles to each other for the point where "
+        "they all meet.",
+        "do_point_three_planes",
+    ),
+    ExpertTool(
+        "point_axis_plane", "construct", "Point Where an A&xis Meets a Plane",
+        "Select a construction axis and a sketch or construction plane for the point where the axis "
+        "passes through the plane.",
+        "do_point_axis_plane",
+    ),
+    ExpertTool(
         "section_view", "inspect", "&Section View...",
         "See inside the parts: they are shown cut open along a flat or upright plane through "
         "their middle, or along a selected sketch or construction plane. Only the view "

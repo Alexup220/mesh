@@ -445,6 +445,22 @@ def scenario_point(window):
     window.point_at(box.id, face_towards(box, (0, 0, 1)), (1.0, 2.0, 20.0))
 
 
+def scenario_point_of_three_planes(window):
+    for name, distance in (("xy", 5.0), ("xz", 3.0), ("yz", -2.0)):
+        window.plane_at_distance_selected(name, distance)
+    window.do_select_all()
+    window.point_of_three_planes()
+
+
+def scenario_point_of_axis_and_plane(window):
+    two_planes(window, 0.0)
+    window.axis_of_two_planes()
+    made = window.document.scene.selected()[0]  # along the left / right line
+    window.plane_at_distance_selected("yz", 7.0)
+    pick(window, made, window.document.scene.selected()[0])
+    window.point_of_axis_and_plane()
+
+
 def scenario_axis_along_edge(window):
     box = add(window)
     window.axis_along_edge(box.id, face_towards(box, (0, 0, 1)), (3.0, -9.5, 20.0))
