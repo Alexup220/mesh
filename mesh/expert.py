@@ -58,7 +58,8 @@ TOOLS: tuple[ExpertTool, ...] = (
         "extrude", "create", "&Extrude...",
         "Push the selected sketch's closed outlines straight out of its plane, into a "
         "new part or a hole, with the sides sloping in by an angle if you like. Select a "
-        "construction plane parallel to the sketch as well to go up to it. The distance "
+        "construction plane parallel to the sketch as well to go up to it, or a part to join "
+        "the extrusion to or cut it out of (a group: Ungroup gives them back). The distance "
         "and slope stay editable in the Details panel.",
         "do_extrude", "E",
     ),

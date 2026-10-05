@@ -85,10 +85,12 @@ tools do the closest honest version of their Fusion counterparts:
   kept as a number: moving the plane later leaves the end where it was,
   until the History is worked out again. Its sides slope by one angle (typed
   in the form, or later with Slope the Sides), which "Both ways" uses on
-  both halves; Fusion can slope the two halves differently. Joining or cutting
-  other parts goes through Make Hole + Group (or Join / Cut Out), not inside
-  Extrude. Its direction starts at "The way the sketch faces" for a hole too;
-  the form says to choose "The other way" for a hole into a face sketched on.
+  both halves; Fusion can slope the two halves differently. Joined to, cut
+  out of or kept where it overlaps a part works with one part selected with
+  the sketch (Fusion takes several), and the result is a group, as Combine
+  makes: Ungroup gives the part and the extrusion back. Its direction starts
+  at "The way the sketch faces" for a cut or a hole too; the form says to
+  choose "The other way" for a hole into a face sketched on.
 - **Sweep** has no twist, scale or guide rails. An outline drawn across
   either end of an open path, or anywhere round a closed one, is used where it
   is. Any other outline is moved to the nearer end (its middle onto the path),

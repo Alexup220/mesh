@@ -15,7 +15,7 @@ on success.
 
 from PySide6.QtCore import QTimer
 
-from mesh import construct, create, features, sketch, sketch_editor, threads
+from mesh import construct, create, features, modify, sketch, sketch_editor, threads
 from mesh.component_actions import ComponentActions
 from mesh.construct_actions import ConstructActions
 from mesh.history import replayable
@@ -40,9 +40,20 @@ def _result_fields(sketches: int = 1):
     ]
 
 
-def extrude_fields(plane: str | None = None):
+def extrude_results(part: str) -> list:
+    """What Extrude can do with a part selected with the sketch, as Fusion's
+    Join, Cut and Intersect do (by mesh.modify.combine's ways)."""
+    return [
+        ("union", f"Joined to {part}"),
+        ("difference", f"Cut out of {part}"),
+        ("intersection", f"Only where it overlaps {part}"),
+    ]
+
+
+def extrude_fields(plane: str | None = None, part: str | None = None):
     """The Extrude form's fields; with the name of a construction plane
-    selected with the sketch, a choice to extrude up to it."""
+    selected with the sketch, a choice to extrude up to it, and with the
+    name of a part, choices to join to it, cut from it or keep the overlap."""
     slope = {"min": -features.TAPER_LIMIT, "max": features.TAPER_LIMIT}
     extent = []
     if plane is not None:
@@ -50,11 +61,14 @@ def extrude_fields(plane: str | None = None):
             ("distance", "The distance typed below"),
             ("plane", f"Up to {plane} (parallel to the sketch)"),
         ]})]
+    result = _result_fields()
+    if part is not None:
+        result[0] = ("result", "Make", "union", {"choices": extrude_results(part) + RESULTS})
     return extent + [
         ("distance", "Distance (mm)", 20.0, {"min": 0.1, "max": 10000.0}),
         ("side", "Direction", "one", {"choices": features.SIDES}),
         ("taper", "Sides slope in (degrees)", 0.0, slope),
-    ] + _result_fields()
+    ] + result
 
 
 EXTRUDE_NOTE = (
@@ -70,10 +84,17 @@ EXTRUDE_TO_PLANE_NOTE = (
     "plane later does not move the end."
 )
 
+EXTRUDE_WITH_PART_NOTE = (
+    " With a part: the extrusion can be joined to it, cut out of it, or kept only where they "
+    "overlap, as Modify > Combine does. The result is a group, and Ungroup gives the part and "
+    "the extrusion back."
+)
 
-def ask_extrude(parent, plane: str | None = None) -> dict | None:
-    note = EXTRUDE_NOTE + (EXTRUDE_TO_PLANE_NOTE if plane is not None else "")
-    return run_form(parent, "Extrude", extrude_fields(plane), note=note)
+
+def ask_extrude(parent, plane: str | None = None, part: str | None = None) -> dict | None:
+    note = (EXTRUDE_NOTE + (EXTRUDE_TO_PLANE_NOTE if plane is not None else "")
+            + (EXTRUDE_WITH_PART_NOTE if part is not None else ""))
+    return run_form(parent, "Extrude", extrude_fields(plane, part), note=note)
 
 
 def revolve_fields(axes):
@@ -307,44 +328,64 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
 
     EXTRUDE_HINT = "Select one sketch to extrude."
     EXTRUDE_EXTRAS = ("Select one sketch to extrude, and if you like one construction plane to "
-                      "extrude up to.")
+                      "extrude up to and one part to join it to or cut it from.")
     NO_PLANE = "Select a construction plane with the sketch to extrude up to it."
+    NO_PART = "Select a part with the sketch to join the extrusion to it or cut it from it."
 
     def _extrude_selection(self):
         """(the selected sketch, the construction plane selected with it or
-        None), or None and a message."""
+        None, the part selected with it or None), or None and a message."""
         chosen = self._picked()
         sketches = [s for s in chosen if create.is_sketch(s)]
         planes = [s for s in chosen if construct.is_guide(s, "plane")]
+        parts = [s for s in chosen if not is_reference(s)]
         if len(sketches) != 1:
             self.statusBar().showMessage(self.EXTRUDE_HINT)
             return None
-        if len(planes) > 1 or len(chosen) > 1 + len(planes):
+        if len(planes) > 1 or len(parts) > 1 or len(chosen) > 1 + len(planes) + len(parts):
             self.statusBar().showMessage(self.EXTRUDE_EXTRAS)
             return None
-        return sketches[0], (planes[0] if planes else None)
+        return sketches[0], (planes[0] if planes else None), (parts[0] if parts else None)
 
     @replayable()
     def extrude_selected(self, distance: float, side: str = "one", hole: bool = False,
-                         keep_sketch: bool = False, taper: float = 0.0, to_plane: bool = False) -> bool:
+                         keep_sketch: bool = False, taper: float = 0.0, to_plane: bool = False,
+                         combine: str | None = None) -> bool:
         """Extrude the selected sketch `distance` mm (or, with `to_plane`, up
-        to the construction plane selected with it). One undo step."""
+        to the construction plane selected with it). With `combine` (a way
+        of mesh.modify.combine), the extrusion is joined to the part
+        selected with it, cut out of it, or kept where they overlap. One
+        undo step."""
         chosen = self._extrude_selection()
         if chosen is None:
             return False
-        source, plane = chosen
+        source, plane, part = chosen
         if to_plane and plane is None:
             self.statusBar().showMessage(self.NO_PLANE)
             return False
+        if combine is not None and part is None:
+            self.statusBar().showMessage(self.NO_PART)
+            return False
+        scene = self.document.scene
 
         def build():
             far, way = create.distance_to_plane(source, plane) if to_plane else (distance, side)
-            return create.make_extrude(source, far, way, hole, taper)
+            made = create.make_extrude(source, far, way, hole and combine is None, taper)
+            if combine is None:
+                return made
+            return modify.combine(part, [made], combine, False, scene.fit_clearances)
 
         shape = self._attempt("Cannot extrude", build)
         if shape is None:
             return False
-        self._add_from_sketches("extrude", [source], shape, keep_sketch)
+        if combine is None:
+            self._add_from_sketches("extrude", [source], shape, keep_sketch)
+            return True
+        self.document.snapshot("extrude")
+        scene.remove([part.id] + ([] if keep_sketch else [source.id]))
+        scene.add(shape)
+        scene.select([shape.id])
+        self.sync()
         return True
 
     @replayable()
@@ -440,12 +481,15 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         chosen = self._extrude_selection()
         if chosen is None:
             return
-        _source, plane = chosen
-        values = ask_extrude(self, plane.name) if plane is not None else ask_extrude(self)
+        _source, plane, part = chosen
+        extra = {key: shape.name for key, shape in (("plane", plane), ("part", part)) if shape is not None}
+        values = ask_extrude(self, **extra)
         if values is not None:
-            self.extrude_selected(values["distance"], values["side"], values["result"] == "hole",
+            result = values["result"]
+            self.extrude_selected(values["distance"], values["side"], result == "hole",
                                   values["keep_sketch"], values.get("taper", 0.0),
-                                  values.get("extent") == "plane")
+                                  values.get("extent") == "plane",
+                                  result if result in modify.COMBINE_OPS else None)
 
     # --- Thread ----------------------------------------------------------------------
 

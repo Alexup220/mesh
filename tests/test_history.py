@@ -284,6 +284,13 @@ def scenario_extrude_up_to_plane(window):
     window.extrude_selected(1.0, to_plane=True)
 
 
+def scenario_extrude_cut(window):
+    box = add(window)
+    top = sketch.plane_frame((0.0, 0.0, 1.0), (0.0, 0.0, 20.0))
+    pick(window, add_sketch(window, SQUARE, top), box)
+    window.extrude_selected(5.0, "other", combine="difference")
+
+
 def scenario_revolve(window):
     add_sketch(window, BAND)
     window.revolve_selected("y", 270.0)
@@ -712,7 +719,7 @@ def test_the_history_window(window, monkeypatch):
 
 SAMPLE_ARGS = {
     "distance": 5.0, "side": "one", "hole": False, "keep_sketch": False, "taper": 0.0, "to_plane": False,
-    "axis": "z",
+    "combine": None, "axis": "z",
     "angle": 30.0,
     "pitch": 1.5, "length": 10.0, "end": "top", "hand": "right", "dx": 1.0, "dy": 0.0, "dz": 0.0,
     "make_copy": False, "size": 100.0, "stretch_x": 100.0, "stretch_y": 100.0, "stretch_z": 100.0,
@@ -759,3 +766,14 @@ def test_an_extrusion_up_to_a_plane_follows_the_plane_when_the_history_is_worked
     _title, fields, back = window.step_editor(2)
     assert fields[0][0] == "extent" and fields[0][2] == "plane"
     assert back({f[0]: f[2] for f in fields})["to_plane"] is True
+
+
+def test_an_extrusion_cut_from_a_part_can_be_changed_to_a_join(window):
+    window.start_history()
+    scenario_extrude_cut(window)
+    _title, fields, back = window.step_editor(2)
+    values = {f[0]: f[2] for f in fields}
+    assert values["result"] == "difference" and back(values)["combine"] == "difference"
+    cut = shape_geometry(window.document.scene.shapes[0]).volume
+    assert window.change_history_step(2, back({**values, "result": "union", "side": "one"}))
+    assert shape_geometry(window.document.scene.shapes[0]).volume == pytest.approx(cut + 2 * 16 * 5)

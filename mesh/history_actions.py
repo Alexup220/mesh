@@ -83,10 +83,14 @@ def editors() -> dict:
     return {
         "extrude_selected": (
             "Extrude",
-            lambda a: _filled(ea.extrude_fields("the selected plane" if a.get("to_plane") else None),
-                              {**a, **_results(a), "extent": "plane" if a.get("to_plane") else "distance"}),
+            lambda a: _filled(ea.extrude_fields("the selected plane" if a.get("to_plane") else None,
+                                                "the selected part" if a.get("combine") else None),
+                              {**a, **_results(a), "extent": "plane" if a.get("to_plane") else "distance",
+                               **({"result": a["combine"]} if a.get("combine") else {})}),
             lambda v, _a: {"distance": v["distance"], "side": v["side"], "taper": v["taper"],
-                           "to_plane": v.get("extent") == "plane", **_from_results(v)}),
+                           "to_plane": v.get("extent") == "plane",
+                           "combine": v["result"] if v["result"] in ea.modify.COMBINE_OPS else None,
+                           **_from_results(v)}),
         "revolve_selected": ("Revolve",
                              lambda a: _filled(_without(ea.revolve_fields([(a["axis"], "")]), "axis"),
                                                {**a, **_results(a)}),

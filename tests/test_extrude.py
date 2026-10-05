@@ -420,8 +420,8 @@ def test_the_extrude_form_offers_the_selected_plane(window, monkeypatch):
     window.document.scene.select([source.id, plane.id])
     seen = {}
 
-    def ask(parent, plane_name=None):
-        seen["plane"] = plane_name
+    def ask(parent, plane=None, part=None):
+        seen["plane"] = plane
         return {"extent": "plane", "distance": 3.0, "side": "both", "taper": 0.0, "result": "hole",
                 "keep_sketch": True}
 
@@ -452,3 +452,125 @@ def test_an_extrusion_up_to_a_plane_round_trips_through_a_project_file(window, t
     loaded = load_project(file)
     assert [s.params["primitive"] for s in loaded.shapes] == ["plane", "extrude"]
     assert shape_geometry(loaded.shapes[1]).bounds[:, 2].tolist() == pytest.approx([0.0, 9.0])
+
+
+# --- Joined to, cut out of, or kept where it overlaps a part -----------------------------
+
+DOT = [{"type": "circle", "centre": [0, 0], "diameter": 6}]
+DOT_AREA = sketch.profile(DOT).area()
+
+
+def top_sketch(box):
+    top = int(np.argmax(shape_geometry(box).face_normals[:, 2]))
+    frame, _outlines = create.face_plane(box, top)
+    return create.new_sketch(DOT, frame, "Sketch 1")
+
+
+@pytest.mark.parametrize("op, side, volume", [
+    ("difference", "other", 8000 - DOT_AREA * 5),
+    ("union", "one", 8000 + DOT_AREA * 5),
+    ("intersection", "other", DOT_AREA * 5),
+])
+def test_an_extrusion_combines_with_a_part_as_combine_does(op, side, volume):
+    from mesh import modify
+    from mesh.scene import new_primitive
+
+    box = new_primitive("cube")
+    extrusion = create.make_extrude(top_sketch(box), 5.0, side)
+    group = modify.combine(box, [extrusion], op)
+    assert shape_geometry(group).volume == pytest.approx(volume, rel=1e-6)
+
+
+def box_and_top_sketch(window):
+    window.add_primitive("cube")
+    box = window.document.scene.shapes[-1]
+    source = top_sketch(box)
+    window.add_sketch(source.params["entities"], source.transform)
+    source = window.document.scene.shapes[-1]
+    window.document.scene.select([source.id, box.id])
+    return box, source
+
+
+@pytest.mark.parametrize("op, side, volume, name", [
+    ("difference", "other", 8000 - DOT_AREA * 5, "Box (cut)"),
+    ("union", "one", 8000 + DOT_AREA * 5, "Box (join)"),
+    ("intersection", "other", DOT_AREA * 5, "Box (keep overlap)"),
+])
+def test_extrude_combines_with_the_selected_part_in_one_undo_step(window, op, side, volume, name):
+    box, source = box_and_top_sketch(window)
+    steps = len(window.document._undo)
+    assert window.extrude_selected(5.0, side, combine=op)
+    scene = window.document.scene
+    assert [s.name for s in scene.shapes] == [name] and scene.selection == [scene.shapes[0].id]
+    assert shape_geometry(scene.shapes[0]).volume == pytest.approx(volume, rel=1e-6)
+    assert len(window.document._undo) == steps + 1
+    window.do_undo()
+    assert [s.id for s in window.document.scene.shapes] == [box.id, source.id]
+    window.do_redo()
+    window.do_ungroup()
+    kinds = sorted(s.params["primitive"] for s in window.document.scene.shapes)
+    assert kinds == ["cube", "extrude"]
+
+
+def test_a_combined_extrusion_can_keep_its_sketch_and_slope(window):
+    _box, source = box_and_top_sketch(window)
+    assert window.extrude_selected(5.0, "other", hole=True, keep_sketch=True, taper=10.0, combine="difference")
+    scene = window.document.scene
+    assert [s.id for s in scene.shapes][0] == source.id and scene.shapes[1].kind == "group"
+    tool = next(c for c in scene.shapes[1].params["children"] if c["params"]["primitive"] == "extrude")
+    # Cut by Combine's way, so the extrusion itself stays a part.
+    assert tool["params"]["taper"] == 10.0 and not tool["is_hole"]
+
+
+def test_the_extrude_form_offers_the_selected_part(window, monkeypatch):
+    box, _source = box_and_top_sketch(window)
+    seen = {}
+
+    def ask(parent, plane=None, part=None):
+        seen.update(plane=plane, part=part)
+        return {"distance": 5.0, "side": "other", "taper": 0.0, "result": "difference", "keep_sketch": False}
+
+    monkeypatch.setattr(expert_actions, "ask_extrude", ask)
+    window.do_extrude()
+    assert seen == {"plane": None, "part": "Box"}
+    assert [s.name for s in window.document.scene.shapes] == ["Box (cut)"]
+
+
+def test_combining_needs_one_part_and_something_left(window, warnings):
+    window.add_sketch(DOT, sketch.named_plane_frame("xy"))
+    steps = len(window.document._undo)
+    assert not window.extrude_selected(5.0, combine="union")
+    assert window.statusBar().currentMessage() == window.NO_PART
+    box, source = box_and_top_sketch(window)
+    # Straight up from the top face, so it only touches the box.
+    steps = len(window.document._undo)
+    assert not window.extrude_selected(5.0, "one", combine="intersection")
+    assert len(window.document._undo) == steps and warnings
+    window.add_primitive("sphere")
+    window.document.scene.select([source.id, box.id, window.document.scene.shapes[-1].id])
+    assert not window.extrude_selected(5.0, combine="union")
+    assert window.statusBar().currentMessage() == window.EXTRUDE_EXTRAS
+    for text in (window.NO_PART, window.EXTRUDE_EXTRAS, *warnings):
+        assert_plain(text)
+
+
+def test_the_extrude_form_with_a_part_is_plain_language(qapp, close_qt_widget):
+    from mesh.panels import FormDialog
+
+    note = expert_actions.EXTRUDE_NOTE + expert_actions.EXTRUDE_WITH_PART_NOTE
+    form = close_qt_widget(FormDialog(None, "Extrude", expert_actions.extrude_fields("Plane 1", "Box"), note=note))
+    for text in form.labels():
+        assert_plain(text)
+    assert form.values()["result"] == "union"
+    assert form.widgets["result"].count() == 5
+
+
+def test_a_combined_extrusion_round_trips_through_a_project_file(window, tmp_path):
+    box_and_top_sketch(window)
+    window.extrude_selected(5.0, "other", combine="difference")
+    before = shape_geometry(window.document.scene.shapes[0]).volume
+    file = tmp_path / "cut.mesh"
+    window.save_to(file)
+    loaded = load_project(file).shapes
+    assert len(loaded) == 1 and loaded[0].kind == "group"
+    assert shape_geometry(loaded[0]).volume == pytest.approx(before)
