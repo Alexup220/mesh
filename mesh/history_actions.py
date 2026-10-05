@@ -28,10 +28,11 @@ from mesh.shapes import shape_geometry
 
 HISTORY_NOTE = (
     "Every change to the project since the history started, in order. Change a step's "
-    "settings, skip it, move it or remove it, and the whole project is worked out again: tools (Extrude, "
-    "Round an Edge, Combine, the patterns and more) run again on the parts as they are by "
-    "then, so later steps follow. Other steps (adding a shape, moving, typing in the Details "
-    "panel) do again what they did."
+    "settings or the parts it was used on, skip it, move it or remove it, and the whole "
+    "project is worked out again: tools (Extrude, Round an Edge, Combine, the patterns and "
+    "more) run again on the parts as they are by then, so later steps follow. Other steps "
+    "(adding a shape, moving, typing in the Details panel) do again what they did. To use a "
+    "step on other parts, select them first, then choose the step and Use on Selection."
 )
 NOT_KEPT_NOTE = (
     "This project keeps no history yet. Start one, and every change from then on is listed "
@@ -155,7 +156,7 @@ class HistoryDialog(QDialog):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("History")
-        self.resize(800, 420)
+        self.resize(820, 460)
         layout = QVBoxLayout(self)
         self.note = QLabel(self)
         self.note.setWordWrap(True)
@@ -171,6 +172,8 @@ class HistoryDialog(QDialog):
         self.change_button.clicked.connect(self.change)
         self.formulas_button = QPushButton("Use Parameters...", self)
         self.formulas_button.clicked.connect(self.formulas)
+        self.retarget_button = QPushButton("Use on Selection", self)
+        self.retarget_button.clicked.connect(self.retarget)
         self.skip_button = QPushButton("Skip", self)
         self.skip_button.clicked.connect(self.skip)
         self.up_button = QPushButton("Move Up", self)
@@ -181,11 +184,16 @@ class HistoryDialog(QDialog):
         self.remove_button.clicked.connect(self.remove)
         self.stop_button = QPushButton("Stop Keeping It", self)
         self.stop_button.clicked.connect(self.stop)
-        for button in (self.start_button, self.change_button, self.formulas_button, self.skip_button,
-                       self.up_button, self.down_button, self.remove_button, self.stop_button):
+        for button in (self.change_button, self.formulas_button, self.retarget_button, self.skip_button,
+                       self.up_button, self.down_button, self.remove_button):
             bar.addWidget(button)
         bar.addStretch(1)
         layout.addLayout(bar)
+        keeping = QHBoxLayout()
+        for button in (self.start_button, self.stop_button):
+            keeping.addWidget(button)
+        keeping.addStretch(1)
+        layout.addLayout(keeping)
         buttons = QDialogButtonBox(QDialogButtonBox.Close, self)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -201,7 +209,8 @@ class HistoryDialog(QDialog):
         if steps:
             self.steps.setCurrentRow(min(max(row, 0), len(steps) - 1))
         self.start_button.setVisible(not kept)
-        for button in (self.change_button, self.formulas_button, self.skip_button, self.remove_button):
+        for button in (self.change_button, self.formulas_button, self.retarget_button, self.skip_button,
+                       self.remove_button):
             button.setVisible(kept)
             button.setEnabled(bool(steps))
         for button in (self.up_button, self.down_button):
@@ -241,6 +250,12 @@ class HistoryDialog(QDialog):
             self.window.ask_step_formulas(row)
             self.refresh()
 
+    def retarget(self) -> None:
+        row = self._row()
+        if row is not None:
+            self.window.retarget_history_step(row, self.window.document.scene.selection)
+            self.refresh()
+
     def skip(self) -> None:
         row = self._row()
         if row is not None:
@@ -268,6 +283,9 @@ class HistoryActions:
     HISTORY_STOPPED = "The history is no longer kept. The parts stay as they are."
     STEP_FIXED = "That step has no settings to change. It can be skipped, moved or removed."
     FORMULA_ENDED = "That setting no longer follows a formula."
+    STEP_NEEDS_PARTS = "Select the parts to use the step on, then choose the step again."
+    STEP_NAMES_ITS_PARTS = ("That step was used on a clicked face or on a part it names, so it can't "
+                            "be used on the selected parts instead.")
     NO_PARAMETERS = "There are no parameters yet: Modify > Change Parameters."
 
     def history_steps(self) -> list:
@@ -528,6 +546,26 @@ class HistoryActions:
         steps.insert(to, steps.pop(index))
         numbers.insert(to, numbers.pop(index))
         return self._rework("Cannot move the step", "move a step", steps, numbers=numbers)
+
+    def retarget_history_step(self, index: int, ids) -> bool:
+        """Use step `index` (from 0), a tool used on the selection, on the
+        parts `ids` instead, and work the project out again."""
+        steps = copy.deepcopy(self.history_steps())
+        if not 0 <= index < len(steps) or steps[index]["call"] is None:
+            return False
+        call = steps[index]["call"]
+        if getattr(getattr(self, call["method"], None), "replay_faces", ()) or \
+                any(key.endswith(("_id", "ids")) for key in call["args"]):
+            self.statusBar().showMessage(self.STEP_NAMES_ITS_PARTS)
+            return False
+        ids = list(ids)
+        if not ids:
+            self.statusBar().showMessage(self.STEP_NEEDS_PARTS)
+            return False
+        if ids == call["picked"]:
+            return False
+        call["picked"] = ids
+        return self._rework("Cannot use the step on those parts", "use a step on other parts", steps)
 
     def step_sketch(self, index: int):
         """(shape id, its name, the curves) when step `index` drew one

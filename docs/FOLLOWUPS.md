@@ -284,8 +284,10 @@ reflected. What differs from Fusion is how the pattern is chosen.
   A step's settings can be changed (an extrusion's distance, a
   rounding's radius, a pattern's count), and so can the curves of a step
   that drew a sketch or changed one (Change... opens the sketch window),
-  so parts made from it later follow. Which parts a tool was used on
-  can't be changed in a step. Steps that are not
+  so parts made from it later follow. A tool used on the selected parts
+  can be used on other parts instead (select them, then Use on
+  Selection); one used on a clicked face (Round an Edge, Shell ...) or on
+  a part it names can't be moved to other parts. Steps that are not
   tools (adding a shape, moving or dragging, typing in the Details panel,
   drawing a sketch, Lay Flat, Align Face to Face) do again what they did:
   a move moves the part by the same amount from wherever it is by then,

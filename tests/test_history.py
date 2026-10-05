@@ -897,6 +897,57 @@ def test_change_in_the_history_window_opens_the_sketch(window, monkeypatch):
     assert_plain(seen["note"])
 
 
+def test_using_a_step_on_other_parts(window, warnings):
+    window.start_history()
+    first = add(window)
+    second = add(window, "sphere")
+    window.document.scene.select([first.id])
+    window.rectangular_pattern_selected(3, 30.0)
+    assert {s.name for s in window.document.scene.shapes} == {"Box", "Sphere"} and len(window.document.scene.shapes) == 4
+    steps = len(window.document._undo)
+    assert window.retarget_history_step(2, [second.id])
+    names = [s.name for s in window.document.scene.shapes]
+    assert names.count("Sphere") == 3 and names.count("Box") == 1
+    assert window.history_steps()[2]["call"]["picked"] == [second.id]
+    assert len(window.document._undo) == steps + 1 and not warnings
+    assert not window.retarget_history_step(2, [second.id])  # nothing new
+    window.do_undo()
+    assert [s.name for s in window.document.scene.shapes].count("Box") == 3
+
+
+def test_a_step_cannot_be_used_on_parts_it_cannot_reach(window, warnings):
+    window.start_history()
+    box = add(window)
+    window.rectangular_pattern_selected(2, 30.0)
+    later = add(window, "sphere")
+    window.round_edge(box.id, face_towards(box, (0, 0, 1)), (10.0, 0.0, 20.0), 2.0)
+    before = summary(window.document.scene)
+    assert not window.retarget_history_step(1, [later.id])
+    assert warnings and warnings[-1].endswith("a part it uses is only made by a later step.")
+    assert not window.retarget_history_step(1, [])
+    assert window.statusBar().currentMessage() == window.STEP_NEEDS_PARTS
+    assert not window.retarget_history_step(3, [later.id])  # used on a clicked face
+    assert window.statusBar().currentMessage() == window.STEP_NAMES_ITS_PARTS
+    assert summary(window.document.scene) == before
+    for text in (*warnings, window.STEP_NEEDS_PARTS, window.STEP_NAMES_ITS_PARTS):
+        assert_plain(text)
+
+
+def test_use_on_selection_in_the_history_window(window):
+    window.start_history()
+    first = add(window)
+    second = add(window, "sphere")
+    window.document.scene.select([first.id])
+    window.rectangular_pattern_selected(2, 30.0)
+    window.document.scene.select([second.id])
+    dialog = history_actions.HistoryDialog(window)
+    assert not dialog.retarget_button.isHidden()
+    dialog.steps.setCurrentRow(2)
+    dialog.retarget()
+    assert dialog.steps.item(2).text() == "3. Pattern in rows: Sphere"
+    dialog.deleteLater()
+
+
 def test_a_change_that_cannot_be_worked_out_changes_nothing(window, warnings):
     scene = round_then_pattern(window)
     before = summary(scene)

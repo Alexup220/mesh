@@ -203,8 +203,9 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "history", "modify", "Histor&y...",
         "Keep a list of every change to the project. Change a step's settings (an extrusion's "
-        "distance, a rounding's radius) or let them follow your parameters; skip, move or "
-        "remove a step. The project is worked out again so later steps follow.",
+        "distance, a rounding's radius) or let them follow your parameters, change the parts "
+        "it was used on, or skip, move or remove a step. The project is worked out again so "
+        "later steps follow.",
         "do_history",
     ),
     ExpertTool(
