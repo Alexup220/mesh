@@ -260,3 +260,64 @@ def test_chamfer_form_is_plain_language(qapp, close_qt_widget):
                                         note=modify_actions.CHAMFER_NOTE))
     for text in dialog.labels():
         assert_plain(text)
+
+
+# --- Several edges in one go ----------------------------------------------------------
+
+
+def test_every_edge_round_a_face_is_bevelled_in_one_go():
+    box = new_primitive("cube")
+    group = edges.chamfer(box, face_towards(box, (0, 0, 1)), (10, 0, 20), 2.0, whole_face=True)
+    # Four 2 mm bevels, less the corners where two cross (8/3 mm^3 each, taken once).
+    assert shape_geometry(group).volume == pytest.approx(8000.0 - 4 * 20 * 2.0 + 4 * 8 / 3)
+    assert len(ops.ungroup(group)) == 5
+
+
+def test_more_edges_bevelled_unevenly_start_on_the_face_each_was_clicked_on():
+    box = new_primitive("cube")
+    top, side = face_towards(box, (0, 0, 1)), face_towards(box, (1, 0, 0))
+    group = edges.chamfer(box, top, (0, -10, 20), 1.0, distance2=3.0, more=[[side, (10, 0, 1)]])
+    assert len(ops.ungroup(group)) == 3
+    assert shape_geometry(group).volume == pytest.approx(8000.0 - 2 * 20 * 1.5)
+    assert not solid_at(group, (0, -9.9, 18.0))  # 1 mm across the top clicked, 3 mm down the front
+    assert not solid_at(group, (8.5, 0, 0.2)) and solid_at(group, (9.9, 0, 1.5))  # 1 mm up the side
+
+
+def test_finishing_with_nothing_picked_keeps_waiting_and_esc_changes_nothing(window, monkeypatch, qapp):
+    window.add_primitive("cube")
+    box = window.document.scene.shapes[0]
+    top = face_towards(box, (0, 0, 1))
+    monkeypatch.setattr(modify_actions, "ask_chamfer",
+                        lambda parent: {"distance": 1.0, "how": "equal", "edges": "more"})
+    steps = len(window.document._undo)
+    window.do_chamfer()
+    window._on_surface_picked(box.id, top, (10, 0, 20))
+    qapp.processEvents()
+    assert window.tool == "chamfer_more"
+    window._on_surface_picked(box.id, top, (9.5, 5, 20))  # the same edge again: left out
+    assert window.statusBar().currentMessage().startswith("Picked: 0.")
+    assert window.viewport.marked_actor is None
+    window.do_chamfer()
+    assert window.tool == "chamfer_more"
+    assert window.statusBar().currentMessage() == window.NOTHING_PICKED.format(
+        prompt=window.TOOL_PROMPTS["chamfer_more"])
+    window.stop_tool()
+    assert window.tool is None and len(window.document._undo) == steps
+
+
+def test_bevelling_more_edges_in_one_undo_step(window, monkeypatch, qapp):
+    window.add_primitive("cube")
+    box = window.document.scene.shapes[0]
+    top = face_towards(box, (0, 0, 1))
+    monkeypatch.setattr(modify_actions, "ask_chamfer",
+                        lambda parent: {"distance": 2.0, "how": "equal", "edges": "more"})
+    steps = len(window.document._undo)
+    window.do_chamfer()
+    window._on_surface_picked(box.id, top, (10, 0, 20))
+    qapp.processEvents()
+    window._on_surface_picked(box.id, top, (-10, 0, 20))
+    window.do_chamfer()
+    assert window.tool is None and len(window.document._undo) == steps + 1
+    assert shape_geometry(window.document.scene.shapes[0]).volume == pytest.approx(8000.0 - 2 * 20 * 2.0)
+    window.do_undo()
+    assert window.document.scene.shapes[0].id == box.id

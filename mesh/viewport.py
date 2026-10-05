@@ -207,6 +207,9 @@ class Viewport(QWidget):
         self.pick_mode: str | None = None
         # The Measure tool's line between its two clicked points, or None.
         self.measure_actor: vtkActor | None = None
+        # The edges or faces an Expert mode tool has had clicked so far
+        # (drawn as lines on top of the parts), or None.
+        self.marked_actor: vtkActor | None = None
         self._add_grid()
         # Position the camera now, but do NOT call Render() here: the
         # widget's native window is not mapped yet (this runs during
@@ -456,6 +459,33 @@ class Viewport(QWidget):
         if self.measure_actor is not None:
             self.overlay.RemoveActor(self.measure_actor)
             self.measure_actor = None
+            self._render()
+
+    def set_marked_lines(self, lines) -> None:
+        """Show what a click tool has picked so far (world-space polylines,
+        a list of (N, 3) arrays), drawn as the Measure line is; an empty
+        list shows nothing."""
+        self.clear_marked_lines()
+        if not lines:
+            return
+        mapper = vtkPolyDataMapper()
+        mapper.SetInputData(_lines_polydata(lines))
+        actor = vtkActor()
+        actor.SetMapper(mapper)
+        prop = actor.GetProperty()
+        prop.SetColor(*MEASURE_COLOR)
+        prop.SetLineWidth(MEASURE_LINE_WIDTH)
+        prop.SetRenderLinesAsTubes(True)
+        prop.LightingOff()
+        actor.PickableOff()
+        self.overlay.AddActor(actor)
+        self.marked_actor = actor
+        self._render()
+
+    def clear_marked_lines(self) -> None:
+        if self.marked_actor is not None:
+            self.overlay.RemoveActor(self.marked_actor)
+            self.marked_actor = None
             self._render()
 
     def view_preset(self, name: str) -> None:

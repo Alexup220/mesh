@@ -732,6 +732,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         self._measure_points = []
         self.viewport.set_pick_mode(None)
         self.viewport.clear_measure_line()
+        self.viewport.clear_marked_lines()
         for action in (self.act_place, self.act_measure):
             action.blockSignals(True)
             action.setChecked(False)

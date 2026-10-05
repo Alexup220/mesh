@@ -170,17 +170,19 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "fillet", "modify", "&Round an Edge (Fillet)",
         "Click a face of a part next to an edge, then type the radius. The edge is rounded "
-        "along with the edges it runs on into smoothly; an inside edge is filled in round. "
-        "Round surfaces are narrow flat strips, and corners where rounded edges meet are "
-        "not blended into a ball.",
+        "along with the edges it runs on into smoothly, or every edge round that face, or more "
+        "edges you click; an inside edge is filled in round. Round surfaces are narrow flat "
+        "strips, and corners where rounded edges meet are not blended into a ball: they meet "
+        "in a crease.",
         "do_fillet",
     ),
     ExpertTool(
         "chamfer", "modify", "Be&vel an Edge (Chamfer)",
         "Click a face of a part next to an edge, then type how far back to bevel it: the same "
         "on both faces, a different distance on each, or a distance and an angle. The edge is "
-        "cut flat along with the edges it runs on into smoothly; an inside edge is filled in "
-        "flat. Corners where bevelled edges meet are not blended.",
+        "cut flat along with the edges it runs on into smoothly, or every edge round that face, "
+        "or more edges you click; an inside edge is filled in flat. Corners where bevelled "
+        "edges meet are not blended: they meet in a crease.",
         "do_chamfer",
     ),
     ExpertTool(
