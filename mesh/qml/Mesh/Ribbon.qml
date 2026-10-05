@@ -45,7 +45,7 @@ Rectangle {
                             y: menuButton.height
                             entries: menuButton.modelData.entries
                         }
-                        onClicked: dropDown.open()
+                        onClicked: dropDown.openBuilt()
                     }
                 }
             }

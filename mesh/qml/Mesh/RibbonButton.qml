@@ -74,7 +74,7 @@ AbstractButton {
 
     onClicked: {
         if (menuEntries)
-            dropDown.item.open()
+            dropDown.item.openBuilt()
         else
             bridge.trigger(key)
     }

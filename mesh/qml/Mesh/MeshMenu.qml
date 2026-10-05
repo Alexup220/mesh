@@ -12,10 +12,18 @@ Menu {
 
     // Items are made when the menu first opens after its entries changed,
     // not before: most menus are never opened, and the window's menus
-    // change every time Expert mode is switched.
+    // change every time Expert mode is switched. They must exist before
+    // open(): the menu's own window takes its size when it is first shown
+    // and does not grow afterwards, so building them in onAboutToShow left
+    // a window just tall enough for one item. Open with openBuilt().
     property bool stale: true
     onEntriesChanged: stale = true
-    onAboutToShow: if (stale) rebuild()
+
+    function openBuilt() {
+        if (stale)
+            rebuild()
+        open()
+    }
 
     // What rebuild() made, so the next rebuild can throw it away.
     property var made: []
@@ -36,6 +44,7 @@ Menu {
             } else if (entry.type === "menu") {
                 made_one = Qt.createComponent(Qt.resolvedUrl("MeshMenu.qml"))
                                  .createObject(menu, { title: entry.title, entries: entry.entries })
+                made_one.rebuild()
                 menu.addMenu(made_one)
             } else {
                 made_one = itemComponent.createObject(menu.contentItem, { key: entry.key })

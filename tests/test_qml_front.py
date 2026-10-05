@@ -504,3 +504,24 @@ def test_the_classic_window_is_still_there():
     from mesh import app
 
     assert "--classic" in Path(app.__file__).read_text()
+
+
+
+
+def test_a_menu_has_its_items_before_its_window_opens(window, qapp):
+    """A menu's own window keeps the size it opened with, so items made
+    after it opens left it one item tall on a real screen."""
+    from PySide6.QtCore import QMetaObject, Q_RETURN_ARG, QUrl
+    from PySide6.QtQml import QQmlComponent
+
+    component = QQmlComponent(window.engine)
+    component.setData(
+        b"import QtQuick\nimport Mesh\nItem {\n"
+        b"  MeshMenu { id: m; entries: bridge.menus[0].entries }\n"
+        b"  function countAtOpen() { m.openBuilt(); var seen = m.count; m.close(); return seen }\n}",
+        QUrl())
+    root = component.create()
+    assert root is not None, component.errorString()
+    seen = QMetaObject.invokeMethod(root, "countAtOpen", Q_RETURN_ARG("QVariant"))
+    root.deleteLater()
+    assert seen > 1

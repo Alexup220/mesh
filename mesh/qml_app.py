@@ -222,7 +222,7 @@ class QmlWindow(MeshWindow):
             print(f"QML: {warning.toString()}")
 
     def open_view(self, source: str, properties: dict, title: str, modal: bool = False,
-                  size=(480, 360), frameless: bool = False) -> QQuickView:
+                  size=(480, 360)) -> QQuickView:
         """A separate QML window (a dialog) over the main window, sharing
         the engine, so it shares the theme and the bridge."""
         view = QQuickView(self.engine, None)
@@ -240,10 +240,7 @@ class QmlWindow(MeshWindow):
             view.setPosition(centre.x() - size[0] // 2, centre.y() - size[1] // 2)
         if modal:
             view.setModality(Qt.ApplicationModal)
-        if frameless:
-            view.setFlags(Qt.FramelessWindowHint | Qt.Tool)
-        else:
-            view.setFlags(Qt.Dialog)
+        view.setFlags(Qt.Dialog)
         self.views = [v for v in self.views if v.isVisible()] + [view]
         view.show()
         view.requestActivate()
@@ -263,7 +260,11 @@ class QmlWindow(MeshWindow):
         )
 
     def show_command_palette(self) -> None:
-        self.open_view("CommandPalette.qml", {}, "Search commands", size=(560, 420), frameless=True)
+        # A plain dialog that stays open until a command runs or Escape is
+        # pressed. It used to close as soon as it lost focus, but with focus
+        # following the mouse (Hyprland's default) that happened the moment
+        # the mouse moved, so it never seemed to open.
+        self.open_view("CommandPalette.qml", {}, "Search commands", size=(560, 420))
 
     def show_theme_editor(self) -> None:
         self.open_view("ThemeEditor.qml", {"startTheme": self.bridge.themeName}, "Theme editor",

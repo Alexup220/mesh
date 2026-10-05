@@ -105,12 +105,4 @@ Rectangle {
             }
         }
     }
-
-    Connections {
-        target: root.Window.window
-        function onActiveChanged() {
-            if (root.Window.window && !root.Window.window.active)
-                root.Window.window.close()
-        }
-    }
 }
