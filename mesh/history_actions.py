@@ -98,16 +98,27 @@ def editors() -> dict:
     from mesh import pattern_actions as pa
 
     nothing = [SimpleNamespace(id="", name="")]
-    results = (lambda a: _filled(ea.loft_fields(2), _results(a)), lambda v, _a: _from_results(v))
     return {
-        "extrude_selected": ("Extrude", lambda a: _filled(ea.extrude_fields(), {**a, **_results(a)}),
-                             lambda v, _a: {"distance": v["distance"], "side": v["side"], **_from_results(v)}),
+        "extrude_selected": (
+            "Extrude",
+            lambda a: _filled(ea.extrude_fields("the selected plane" if a.get("to_plane") else None,
+                                                "the selected part" if a.get("combine") else None),
+                              {**a, **_results(a), "extent": "plane" if a.get("to_plane") else "distance",
+                               **({"result": a["combine"]} if a.get("combine") else {})}),
+            lambda v, _a: {"distance": v["distance"], "side": v["side"], "taper": v["taper"],
+                           "to_plane": v.get("extent") == "plane",
+                           "combine": v["result"] if v["result"] in ea.modify.COMBINE_OPS else None,
+                           **_from_results(v)}),
         "revolve_selected": ("Revolve",
                              lambda a: _filled(_without(ea.revolve_fields([(a["axis"], "")]), "axis"),
                                                {**a, **_results(a)}),
                              lambda v, _a: {"angle": v["angle"], **_from_results(v)}),
-        "sweep_selected": ("Sweep", *results),
-        "loft_selected": ("Loft", *results),
+        "sweep_selected": ("Sweep", lambda a: _filled(ea.sweep_shape_fields() + ea._result_fields(2),
+                                                      {**a, **_results(a)}),
+                           lambda v, _a: {"twist": v["twist"], "end_scale": v["end_scale"],
+                                          **_from_results(v)}),
+        "loft_selected": ("Loft", lambda a: _filled(ea.loft_fields(2), {**a, **_results(a)}),
+                          lambda v, _a: {"sides": v["sides"], **_from_results(v)}),
         "thread_selected": ("Thread", lambda a: _filled(ea.thread_fields(a["length"], a["pitch"]), a), _same),
         "move_copy_selected": ("Move or Copy", lambda a: _filled(ma.move_copy_fields(), a), _same),
         "scale_selected": ("Scale", lambda a: _filled(ma.scale_fields(), a), _same),

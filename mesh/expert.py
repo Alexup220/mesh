@@ -57,7 +57,10 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "extrude", "create", "&Extrude...",
         "Push the selected sketch's closed outlines straight out of its plane, into a "
-        "new part or a hole. The distance stays editable in the Details panel.",
+        "new part or a hole, with the sides sloping in by an angle if you like. Select a "
+        "construction plane parallel to the sketch as well to go up to it, or a part to join "
+        "the extrusion to or cut it out of (a group: Ungroup gives them back). The distance "
+        "and slope stay editable in the Details panel.",
         "do_extrude", "E",
     ),
     ExpertTool(
@@ -69,15 +72,16 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "sweep", "create", "&Sweep...",
         "Carry one sketch's closed outlines along a path drawn in another sketch, into a "
-        "new part or a hole. Select both sketches first. Curved paths are followed in "
-        "short straight steps.",
+        "new part or a hole, turning them and changing their size evenly along the way if you "
+        "like. Select both sketches first. Curved paths are followed in short straight steps.",
         "do_sweep",
     ),
     ExpertTool(
         "loft", "create", "&Loft...",
         "Join two or more sketches' outlines, in the order picked, with a skin into a new "
         "part or a hole. Each needs one closed outline with no holes; the sides run "
-        "straight from one outline to the next.",
+        "straight from one outline to the next, or along a smooth curve through them all. "
+        "Pick a construction point first or last to close it to a point.",
         "do_loft",
     ),
     ExpertTool(

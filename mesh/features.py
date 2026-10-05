@@ -18,12 +18,20 @@ sketch's: the shape's transform is the sketch's plane.
              fresh revolve stands upright on the workplane; the shape's
              transform is its sketch's plane times axis_frame(axis), which
              puts the axis back where it was drawn.
-    sweep    entities + profile_frame, path_entities + path_frame
+    sweep    entities + profile_frame, path_entities + path_frame,
+             twist, end_scale
              The outline carried along the path. Each frame is a 4x4 list
-             placing that sketch in the sweep's own coordinates.
-    loft     sections: [{entities, frame}, ...]
+             placing that sketch in the sweep's own coordinates. With a
+             twist (degrees) the outline turns evenly along the path, and
+             with an end_scale (percent) its size changes evenly to that at
+             the far end; missing in older files, where they are 0 and 100.
+    loft     sections: [{entities, frame}, ...], sides
              A skin through two or more outlines, in order, each placed by
-             its frame like a sweep's sketches.
+             its frame like a sweep's sketches. The first or last section
+             may instead be {point: [x, y, z]}, closing the loft to that
+             point. Its sides run straight from one outline to the next
+             ("straight"), or along a smooth curve through all of them
+             ("smooth"); missing in older files, where they are straight.
 
 A shape with no sketch of its own (a new primitive) uses a small built-in
 one (DEFAULT_*), so every kind has a sensible default, standing on the
@@ -41,7 +49,7 @@ import numpy as np
 import trimesh
 from shapely.geometry import LinearRing, LineString, Point, Polygon
 
-from mesh.sketch import SEGMENTS, SketchError, profile, signed_area, single_path, to_world
+from mesh.sketch import SEGMENTS, SPLINE_STEPS, SketchError, profile, signed_area, single_path, to_world
 from mesh.solids import from_manifold, m3
 
 SOLIDS = ("extrude", "revolve", "sweep", "loft")
@@ -55,6 +63,13 @@ SIDES = [
 ]
 
 TAPER_LIMIT = 60.0  # degrees: the steepest an extrusion's sides may slope
+TWIST_LIMIT = 3600.0  # degrees: the most a sweep may twist (ten whole turns)
+END_SCALE_LIMITS = (1.0, 1000.0)  # percent: a sweep's size at the far end
+# A twisting sweep's sides are flat strips about as fine as a cylinder's:
+# the outline turns at most a cylinder's step from one point of the path to
+# the next, and no straight piece of it is longer than that step's arc at its
+# furthest point from the path.
+TWIST_STEP = 360.0 / SEGMENTS  # degrees
 
 DEFAULT_EXTRUDE = [{"type": "rectangle", "corner": [-10.0, -10.0], "width": 20.0, "height": 20.0}]
 # Turned about the sketch's Y line: a tube 10 mm across inside, 20 outside.
@@ -113,10 +128,10 @@ def build(kind: str, params: dict, clearance: float = 0.0) -> trimesh.Trimesh:
         return sweep(
             params.get("entities", DEFAULT_SWEEP_PROFILE), params.get("profile_frame", _FLAT),
             params.get("path_entities", DEFAULT_SWEEP_PATH), params.get("path_frame", _UPRIGHT),
-            clearance,
+            clearance, params.get("twist", 0.0), params.get("end_scale", 100.0),
         )
     if kind == "loft":
-        return loft(params.get("sections") or DEFAULT_LOFT, clearance)
+        return loft(params.get("sections") or DEFAULT_LOFT, clearance, params.get("sides", "straight"))
     raise KeyError(f"unknown sketch solid: {kind}")
 
 
@@ -420,7 +435,70 @@ def _sweep_start(path: np.ndarray, closed: bool, area, profile_frame: np.ndarray
     return np.roll(path, -nearest, axis=0), False
 
 
-def sweep(entities, profile_frame, path_entities, path_frame, clearance: float = 0.0) -> trimesh.Trimesh:
+def _world_path(path_entities, path_frame) -> tuple[np.ndarray, np.ndarray, bool]:
+    """The one path a sketch draws, in the world through `path_frame`:
+    (points with no piece of no length, the points in the sketch, closed).
+    A closed path does not repeat its first point at the end."""
+    path_2d, path_closed = single_path(path_entities)
+    path = to_world(path_frame, path_2d)
+    keep = np.concatenate([[True], np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-9])
+    path = path[keep]
+    if path_closed and len(path) > 1 and np.linalg.norm(path[0] - path[-1]) < 1e-9:
+        path = path[:-1]
+    if len(path) < (3 if path_closed else 2):
+        raise SketchError("The path is too short to sweep along.")
+    return path, path_2d, path_closed
+
+
+def _twist_and_scale(twist, end_scale, closed: bool) -> tuple[float, float]:
+    """A sweep's twist (degrees) and size at the far end (percent), checked."""
+    try:
+        twist, end_scale = float(twist), float(end_scale)
+    except (TypeError, ValueError) as exc:
+        raise SketchError("The twist and the size at the far end must be numbers.") from exc
+    if not math.isfinite(twist) or abs(twist) > TWIST_LIMIT:
+        raise SketchError(f"The twist must be between -{TWIST_LIMIT:g} and {TWIST_LIMIT:g} degrees "
+                          "(ten whole turns).")
+    low, high = END_SCALE_LIMITS
+    if not math.isfinite(end_scale) or not low <= end_scale <= high:
+        raise SketchError(f"The size at the far end must be between {low:g}% and {high:g}%.")
+    if closed and end_scale != 100.0:
+        raise SketchError("A closed path ends where it starts, so the outline can't change size along "
+                          "it. Keep the size at the far end at 100%.")
+    if closed and abs(twist / 360.0 - round(twist / 360.0)) > 1e-9:
+        raise SketchError("A closed path ends where it starts, so the twist must be whole turns "
+                          "(360 degrees, 720 and so on).")
+    return twist, end_scale
+
+
+def _subdivided(path: np.ndarray, closed: bool, twist: float) -> np.ndarray:
+    """The path with points added along its pieces, so that a twist of
+    `twist` degrees spread evenly over its length turns the outline at most
+    TWIST_STEP degrees from one point to the next."""
+    loop = np.vstack([path, path[:1]]) if closed else path
+    lengths = np.linalg.norm(np.diff(loop, axis=0), axis=1)
+    total = lengths.sum()
+    out = []
+    for j, length in enumerate(lengths):
+        steps = max(1, int(math.ceil(abs(twist) * length / total / TWIST_STEP - 1e-9)))
+        out.extend(loop[j] + (loop[j + 1] - loop[j]) * (i / steps) for i in range(steps))
+    if not closed:
+        out.append(loop[-1])
+    return np.array(out)
+
+
+def _split_pieces(outline: np.ndarray, longest: float) -> np.ndarray:
+    """A closed outline with points added along its straight pieces, so
+    that none is longer than `longest`."""
+    out = []
+    for a, b in zip(outline, np.roll(outline, -1, axis=0)):
+        steps = max(1, int(math.ceil(np.linalg.norm(b - a) / max(longest, 1e-9) - 1e-9)))
+        out.extend(a + (b - a) * (i / steps) for i in range(steps))
+    return np.array(out)
+
+
+def sweep(entities, profile_frame, path_entities, path_frame, clearance: float = 0.0,
+          twist: float = 0.0, end_scale: float = 100.0) -> trimesh.Trimesh:
     """The outline carried along the path, staying square to it.
 
     If the outline is already drawn across the path at one of its ends (or
@@ -430,45 +508,86 @@ def sweep(entities, profile_frame, path_entities, path_frame, clearance: float =
     each corner of the path the outline is cut on the plane halfway between
     the two directions (a mitre), which is exact for paths of straight
     pieces; curves are many short pieces.
+
+    `twist` turns the outline about the path by that many degrees over the
+    whole path (like a right-hand screw going along it, for more than 0),
+    and `end_scale` makes it that percentage of its size at the far end,
+    both changing evenly with the distance along the path. A twisting
+    sweep has extra steps on long pieces of the path and of the outline
+    (TWIST_STEP), whose sides are flat strips between them. A fitted Hole
+    that changes size is `clearance` bigger square to every straight piece
+    of the outline all along.
     """
     profile_frame, path_frame = _frame(profile_frame), _frame(path_frame)
-    path_2d, path_closed = single_path(path_entities)
-    path = to_world(path_frame, path_2d)
-    keep = np.concatenate([[True], np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-9])
-    path = path[keep]
-    if path_closed and len(path) > 1 and np.linalg.norm(path[0] - path[-1]) < 1e-9:
-        path = path[:-1]
-    if len(path) < (3 if path_closed else 2):
-        raise SketchError("The path is too short to sweep along.")
+    path, path_2d, path_closed = _world_path(path_entities, path_frame)
+    twist, end_scale = _twist_and_scale(twist, end_scale, path_closed)
 
     # The outline in the world.
-    area = _grow(profile(entities), clearance)
+    plain = profile(entities)
+    area = _grow(plain, clearance)
     world = [to_world(profile_frame, np.asarray(p, dtype=np.float64)) for p in area.to_polygons()]
     flat = np.vstack(world)
     middle = (flat.min(axis=0) + flat.max(axis=0)) / 2.0
     path, in_place = _sweep_start(path, path_closed, area, profile_frame, middle)
+    if twist != 0.0:
+        path = _subdivided(path, path_closed, twist)
 
     m = len(path)
     pieces = m if path_closed else m - 1
     directions = [_unit(path[(j + 1) % m] - path[j]) for j in range(pieces)]
     start, t0 = path[0], directions[0]
+    # How far along the path each point is, from 0 at the start to 1 at the
+    # far end (round a closed path, back at the start).
+    lengths = np.linalg.norm(np.diff(np.vstack([path, path[:1]]) if path_closed else path, axis=0), axis=1)
+    along = np.concatenate([[0.0], np.cumsum(lengths)])[:m] / lengths.sum()
 
     # The outline in flat coordinates across the start.
     x_axis = profile_frame[:3, 0]
+    turn = np.eye(3)
     if not in_place:
         facing = _unit(np.cross(profile_frame[:3, 0], profile_frame[:3, 1]))
         turn = _turn(facing, t0)
-        world = [(w - middle) @ turn.T + start for w in world]
         x_axis = turn @ x_axis
     e1 = _unit(x_axis - np.dot(x_axis, t0) * t0)
     e2 = np.cross(t0, e1)
-    outlines = [np.column_stack([(w - start) @ e1, (w - start) @ e2]) for w in world]
-    # Filled again in these coordinates, so every outline runs anticlockwise
-    # seen from ahead along the path, and holes the other way.
-    area = m3.CrossSection([np.ascontiguousarray(o) for o in outlines], m3.FillRule.EvenOdd)
-    outlines = [np.asarray(p, dtype=np.float64) for p in area.to_polygons()]
+
+    def flattened(polygons) -> list:
+        """Sketch polygons as outlines in those flat coordinates, filled
+        again so every outline runs anticlockwise seen from ahead along the
+        path, and holes the other way."""
+        placed = [to_world(profile_frame, np.asarray(p, dtype=np.float64)) for p in polygons]
+        if not in_place:
+            placed = [(w - middle) @ turn.T + start for w in placed]
+        across = [np.column_stack([(w - start) @ e1, (w - start) @ e2]) for w in placed]
+        filled = m3.CrossSection([np.ascontiguousarray(o) for o in across], m3.FillRule.EvenOdd)
+        return [np.asarray(p, dtype=np.float64) for p in filled.to_polygons()]
+
+    outlines = flattened(area.to_polygons())
     if not outlines:
         raise SketchError("The outline encloses no area.")
+    grown_square = clearance > 0.0 and end_scale != 100.0
+    if grown_square:
+        # Scaled first, then grown: each straight piece moved out by the
+        # clearance, keeping its direction, so the gap stays the clearance.
+        outlines = flattened(plain.to_polygons())
+    if twist != 0.0:
+        reach = max(float(np.linalg.norm(o, axis=1).max()) for o in outlines)
+        outlines = [_split_pieces(o, reach * math.radians(TWIST_STEP)) for o in outlines]
+    if grown_square:
+        outward = [moved - points for moved, points in zip(_mitred(outlines, -1.0), outlines)]
+
+    def outlines_at(k: int) -> list:
+        """The outlines at path point k, turned and scaled for how far along
+        the path it is."""
+        if twist == 0.0 and end_scale == 100.0:
+            return outlines
+        size = 1.0 + (end_scale / 100.0 - 1.0) * along[k]
+        angle = math.radians(twist * along[k])
+        c, s = math.cos(angle), math.sin(angle)
+        spin = np.array([[c, -s], [s, c]])
+        if grown_square:
+            return [(size * o + clearance * d) @ spin.T for o, d in zip(outlines, outward)]
+        return [(size * o) @ spin.T for o in outlines]
 
     if clearance > 0.0 and not path_closed:
         # A fitted Hole also reaches `clearance` past each end.
@@ -480,8 +599,8 @@ def sweep(entities, profile_frame, path_entities, path_frame, clearance: float =
     # piece's axes are the piece before's, turned by the bend between them.
     frames = [(e1, e2)]
     for j in range(1, pieces):
-        turn = _turn(directions[j - 1], directions[j])
-        frames.append((turn @ frames[-1][0], turn @ frames[-1][1]))
+        bend = _turn(directions[j - 1], directions[j])
+        frames.append((bend @ frames[-1][0], bend @ frames[-1][1]))
 
     def ring(k: int, outline: np.ndarray) -> np.ndarray:
         """The outline at path point k: square to the piece arriving there,
@@ -499,7 +618,7 @@ def sweep(entities, profile_frame, path_entities, path_frame, clearance: float =
             points = points - np.outer((points - path[k]) @ mitre / np.dot(d_in, mitre), d_in)
         return points
 
-    rings = [[ring(k, o) for o in outlines] for k in range(m)]
+    rings = [[ring(k, o) for o in outlines_at(k)] for k in range(m)]
     if not (LinearRing(path_2d) if path_closed else LineString(path_2d)).is_simple:
         raise SketchError("The path crosses itself, so it can't be swept along.")
 
@@ -518,18 +637,27 @@ def sweep(entities, profile_frame, path_entities, path_frame, clearance: float =
     faces = [_skin(rings, path_closed)]
     if not path_closed:
         end = sum(len(o) for o in rings[0]) * (m - 1)
-        faces.append(_cap(outlines, np.vstack(rings[0]), 0, -directions[0]))
-        faces.append(_cap(outlines, np.vstack(rings[-1]), end, directions[-1]))
+        faces.append(_cap(outlines_at(0), np.vstack(rings[0]), 0, -directions[0]))
+        faces.append(_cap(outlines_at(m - 1), np.vstack(rings[-1]), end, directions[-1]))
     return _solid_from(vertices, np.vstack(faces), "sweep")
 
 
 # --- Loft ---------------------------------------------------------------------------
 
 
-def _section(section) -> tuple[np.ndarray, np.ndarray]:
-    """One loft outline: (its 2D points, its frame)."""
+def _section(section) -> tuple[np.ndarray | None, np.ndarray]:
+    """One loft outline: (its 2D points, its frame); or a point the loft
+    closes to: (None, the point)."""
     if not isinstance(section, dict):
         raise SketchError("A loft outline is damaged.")
+    if "point" in section:
+        try:
+            point = np.asarray(section["point"], dtype=np.float64)
+        except (TypeError, ValueError) as exc:
+            raise SketchError("A loft's point is damaged.") from exc
+        if point.shape != (3,) or not np.isfinite(point).all():
+            raise SketchError("A loft's point is damaged.")
+        return None, point
     frame = _frame(section.get("frame"))
     polygons = profile(section.get("entities", [])).to_polygons()
     if len(polygons) != 1:
@@ -616,31 +744,96 @@ def _check_skin(rings: list) -> None:
             )
 
 
-def _slopes(rings: list, normals: list) -> list[float]:
-    """For each outline, how square to its plane the sides leaving it are
-    at their steepest, as a cosine (1 for sides straight out of the plane)."""
-    cosines = [1.0] * len(rings)
+LOFT_SIDES = [
+    ("straight", "Straight from one outline to the next"),
+    ("smooth", "A smooth curve through all the outlines"),
+]
+# Smooth sides are this many flat strips between one outline and the next,
+# as fine as a sketch's spline.
+SMOOTH_STEPS = SPLINE_STEPS
+
+
+def _smoothed(rings: list) -> tuple[list, list]:
+    """Rings in between `rings`, so each matched point runs along a smooth
+    curve through its place on every outline (a natural cubic spline, spaced
+    by the distance between the outlines' middles, like a sketch's spline):
+    (all the rings, where each of `rings` is among them). The outlines
+    themselves are kept exactly."""
+    from scipy.interpolate import CubicSpline
+
+    middles = np.array([r.mean(axis=0) for r in rings])
+    t = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(middles, axis=0), axis=1))])
+    spline = CubicSpline(t, np.stack(rings), axis=0, bc_type="natural")
+    dense, where = [], []
     for k in range(len(rings) - 1):
-        edges = rings[k + 1] - rings[k]
-        lengths = np.maximum(np.linalg.norm(edges, axis=1), 1e-12)
-        for j in (k, k + 1):
-            cosines[j] = min(cosines[j], float((np.abs(edges @ normals[j]) / lengths).min()))
+        where.append(len(dense))
+        dense.append(rings[k])
+        dense.extend(spline(np.linspace(t[k], t[k + 1], SMOOTH_STEPS + 1)[1:-1]))
+    where.append(len(dense))
+    dense.append(rings[-1])
+    return dense, where
+
+
+def _slopes(rings: list, normals: list, where: list) -> list[float]:
+    """For each outline (rings[where[k]], in the plane facing normals[k]),
+    how square to its plane the sides are at their steepest, from the
+    outline (or point) before it to the one after, as a cosine (1 for sides
+    straight out of the plane)."""
+    cosines = []
+    for k, normal in enumerate(normals):
+        cosine = 1.0
+        low = where[k - 1] if k > 0 else 0
+        high = where[k + 1] if k + 1 < len(where) else len(rings) - 1
+        for i in range(low, high):
+            edges = rings[i + 1] - rings[i]
+            lengths = np.maximum(np.linalg.norm(edges, axis=1), 1e-12)
+            cosine = min(cosine, float((np.abs(edges @ normal) / lengths).min()))
+        cosines.append(cosine)
     return cosines
 
 
-def loft(sections, clearance: float = 0.0) -> trimesh.Trimesh:
+def _tip_reach(tip: np.ndarray, beside: np.ndarray, clearance: float) -> np.ndarray:
+    """Where a fitted Hole's tip goes: out along the way the sides arrive
+    at it (from the ring `beside` it), far enough that each flat side
+    meeting at the tip moves out by `clearance` there (but the tip moves no
+    more than MOST_LOFT_GROWTH times it)."""
+    way = _unit(tip - beside.mean(axis=0))
+    across = np.cross(beside - tip, np.roll(beside, -1, axis=0) - tip)
+    lengths = np.linalg.norm(across, axis=1)
+    sines = np.abs(across @ way)[lengths > 1e-12] / lengths[lengths > 1e-12]
+    sine = float(sines.min()) if len(sines) else 1.0
+    return tip + way * clearance / max(sine, 1.0 / MOST_LOFT_GROWTH)
+
+
+def loft(sections, clearance: float = 0.0, sides: str = "straight") -> trimesh.Trimesh:
     """A skin through two or more outlines, in order, closed at both ends
-    (see _lined_up for how the outlines are joined).
+    (see _lined_up for how the outlines are joined): flat across an end
+    outline, or to a point where the first or last section is one. Its sides
+    run straight from one outline to the next, or (`sides` "smooth", with
+    three or more outlines and points) along a smooth curve through them all
+    (see _smoothed).
 
     A fitted Hole (`clearance` > 0) grows each outline within its plane, by
     more where the sides slope, so the gap square to the sides is at least
     `clearance` (up to MOST_LOFT_GROWTH times it); and reaches `clearance`
-    past each end.
+    past each end (a point moves out along the sides, see _tip_reach). With
+    smooth sides, the slope is the steepest anywhere from the outline before
+    to the one after, and the sides in between follow the grown outlines, so
+    their gap is about `clearance` or more.
     """
+    if sides not in dict(LOFT_SIDES):
+        raise SketchError("A loft's sides must be straight or smooth.")
     if not isinstance(sections, (list, tuple)) or len(sections) < 2:
         raise SketchError("A loft needs at least two sketches, each with one closed outline.")
     parsed = [_section(s) for s in sections]
-    centres = [to_world(frame, points).mean(axis=0) for points, frame in parsed]
+    if any(points is None for points, _f in parsed[1:-1]):
+        raise SketchError("A loft can close to a point only at its first or last end, not between outlines.")
+    outlines = [(points, frame) for points, frame in parsed if points is not None]
+    if not outlines:
+        raise SketchError("A loft needs at least one sketch with a closed outline, not only points.")
+    tips = [parsed[0][1] if parsed[0][0] is None else None,
+            parsed[-1][1] if parsed[-1][0] is None else None]
+    centres = [place if points is None else to_world(place, points).mean(axis=0) for points, place in parsed]
     heading = centres[-1] - centres[0]
     if np.linalg.norm(heading) < 1e-6:
         raise SketchError("The first and last outlines are in the same place, so there is nothing to join.")
@@ -650,7 +843,13 @@ def loft(sections, clearance: float = 0.0) -> trimesh.Trimesh:
         raise SketchError(
             "The loft would fold back on itself. Pick the sketches in order, from one end to the other."
         )
-    normals = [_unit(np.cross(frame[:3, 0], frame[:3, 1])) for _p, frame in parsed]
+    normals = [_unit(np.cross(frame[:3, 0], frame[:3, 1])) for _p, frame in outlines]
+    for tip, outline, normal in ((tips[0], outlines[0], normals[0]), (tips[1], outlines[-1], normals[-1])):
+        if tip is not None and abs(np.dot(tip - to_world(outline[1], outline[0]).mean(axis=0), normal)) < 1e-6:
+            raise SketchError(
+                "The point lies on the plane of the outline next to it, so the loft would be flat there. "
+                "Move the point off that plane."
+            )
 
     def facing_on(outlines):
         """Every outline running anticlockwise seen from behind, looking
@@ -662,12 +861,26 @@ def loft(sections, clearance: float = 0.0) -> trimesh.Trimesh:
             turned.append((points, frame))
         return turned
 
-    flats, rings = _lined_up(facing_on(parsed), heading)
-    _check_skin(rings)
+    def skin_through(outlines, tips):
+        """(the end outlines' flat points, every ring of the skin, where
+        each outline's ring is among them). A point is a ring of copies of
+        itself, first or last."""
+        flats, rings = _lined_up(facing_on(outlines), heading)
+        count = len(rings[0])
+        rings = ([np.repeat(tips[0][None], count, axis=0)] if tips[0] is not None else []) + rings \
+            + ([np.repeat(tips[1][None], count, axis=0)] if tips[1] is not None else [])
+        if sides == "smooth" and len(rings) > 2:
+            rings, where = _smoothed(rings)
+        else:
+            where = list(range(len(rings)))
+        _check_skin(rings)
+        return (flats[0], flats[-1]), rings, where[(tips[0] is not None):len(where) - (tips[1] is not None)]
+
+    ends, rings, where = skin_through(outlines, tips)
 
     if clearance > 0.0:
         grown = []
-        for (points, frame), cosine in zip(parsed, _slopes(rings, normals)):
+        for (points, frame), cosine in zip(outlines, _slopes(rings, normals, where)):
             distance = clearance / max(cosine, 1.0 / MOST_LOFT_GROWTH)
             polygons = _grow(m3.CrossSection([np.ascontiguousarray(points)]), distance).to_polygons()
             if len(polygons) != 1:
@@ -676,19 +889,36 @@ def loft(sections, clearance: float = 0.0) -> trimesh.Trimesh:
                     "Choose a tighter fit, or widen the gap."
                 )
             grown.append((np.asarray(polygons[0], dtype=np.float64), frame))
-        flats, rings = _lined_up(facing_on(grown), heading)
-        # Reaching `clearance` past each end: the end outlines again, that
-        # far out of their planes, joined to them by straight sides.
-        first = normals[0] * np.sign(np.dot(normals[0], steps[0])) * clearance
-        last = normals[-1] * np.sign(np.dot(normals[-1], steps[-1])) * clearance
-        flats = [flats[0]] + flats + [flats[-1]]
-        rings = [rings[0] - first] + rings + [rings[-1] + last]
+        tips = [None if tips[0] is None else _tip_reach(tips[0], rings[1], clearance),
+                None if tips[1] is None else _tip_reach(tips[1], rings[-2], clearance)]
+        ends, rings, _where = skin_through(grown, tips)
+        # Reaching `clearance` past each flat end: the end outline again,
+        # that far out of its plane, joined to it by straight sides.
+        if tips[0] is None:
+            rings = [rings[0] - normals[0] * np.sign(np.dot(normals[0], steps[0])) * clearance] + rings
+        if tips[-1] is None:
+            rings = rings + [rings[-1] + normals[-1] * np.sign(np.dot(normals[-1], steps[-1])) * clearance]
 
-    count = len(flats[0])
-    vertices = np.vstack(rings)
-    faces = [
-        _skin([[r] for r in rings], closed=False),
-        _cap([flats[0]], rings[0], 0, -heading),
-        _cap([flats[-1]], rings[-1], count * (len(rings) - 1), heading),
-    ]
-    return _solid_from(vertices, np.vstack(faces), "loft")
+    # A point's ring of copies becomes the one point, joined to the ring
+    # beside it by a fan of triangles.
+    first = 1 if tips[0] is not None else 0
+    last = len(rings) - 1 if tips[1] is not None else len(rings)
+    body = rings[first:last]
+    count = len(body[0])
+    vertices = [np.vstack(body)]
+    faces = [_skin([[r] for r in body], closed=False)] if len(body) > 1 else []
+    around = np.arange(count)
+    if tips[0] is None:
+        faces.append(_cap([ends[0]], body[0], 0, -heading))
+    else:
+        apex = count * len(body)
+        vertices.append(rings[0][:1])
+        faces.append(np.column_stack([np.full(count, apex), (around + 1) % count, around]))
+    if tips[1] is None:
+        faces.append(_cap([ends[1]], body[-1], count * (len(body) - 1), heading))
+    else:
+        apex = count * len(body) + (tips[0] is not None)
+        vertices.append(rings[-1][:1])
+        low = count * (len(body) - 1)
+        faces.append(np.column_stack([low + around, low + (around + 1) % count, np.full(count, apex)]))
+    return _solid_from(np.vstack(vertices), np.vstack(faces), "loft")

@@ -47,7 +47,7 @@ TURN = ("rx", "ry", "rz")
 # Numbers that may be 0 (none) or less than 0; every other size must be
 # more than 0.
 MAY_BE_ZERO = ("radius", "chamfer")
-MAY_BE_NEGATIVE = ("taper",)
+MAY_BE_NEGATIVE = ("taper", "twist")
 LIMIT = 10000.0  # mm, as in the Details panel
 CURVE = re.compile(r"curve([1-9][0-9]*)\.([a-z_]+(?:\.[0-9]+)?(?:\.[xy])?)\Z")
 CURVE_SIZES = ("width", "height", "diameter", "radius")

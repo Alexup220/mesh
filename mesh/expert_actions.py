@@ -15,7 +15,7 @@ on success.
 
 from PySide6.QtCore import QTimer
 
-from mesh import construct, create, features, parameters, sketch, sketch_editor, threads
+from mesh import construct, create, features, modify, parameters, sketch, sketch_editor, threads
 from mesh.component_actions import ComponentActions
 from mesh.construct_actions import ConstructActions
 from mesh.history import replayable
@@ -40,18 +40,61 @@ def _result_fields(sketches: int = 1):
     ]
 
 
-def extrude_fields():
+def extrude_results(part: str) -> list:
+    """What Extrude can do with a part selected with the sketch, as Fusion's
+    Join, Cut and Intersect do (by mesh.modify.combine's ways)."""
     return [
+        ("union", f"Joined to {part}"),
+        ("difference", f"Cut out of {part}"),
+        ("intersection", f"Only where it overlaps {part}"),
+    ]
+
+
+def extrude_fields(plane: str | None = None, part: str | None = None):
+    """The Extrude form's fields; with the name of a construction plane
+    selected with the sketch, a choice to extrude up to it, and with the
+    name of a part, choices to join to it, cut from it or keep the overlap."""
+    slope = {"min": -features.TAPER_LIMIT, "max": features.TAPER_LIMIT}
+    extent = []
+    if plane is not None:
+        extent = [("extent", "How far", "plane", {"choices": [
+            ("distance", "The distance typed below"),
+            ("plane", f"Up to {plane} (parallel to the sketch)"),
+        ]})]
+    result = _result_fields()
+    if part is not None:
+        result[0] = ("result", "Make", "union", {"choices": extrude_results(part) + RESULTS})
+    return extent + [
         ("distance", "Distance (mm)", 20.0, {"min": 0.1, "max": 10000.0}),
         ("side", "Direction", "one", {"choices": features.SIDES}),
-    ] + _result_fields()
+        ("taper", "Sides slope in (degrees)", 0.0, slope),
+    ] + result
 
 
-def ask_extrude(parent) -> dict | None:
-    return run_form(parent, "Extrude", extrude_fields(),
-                    note="Pushes the sketch's closed outlines straight out of its plane. A sketch "
-                         "on a face faces out of the part: for a hole into that face, choose "
-                         "\"The other way\".")
+EXTRUDE_NOTE = (
+    "Pushes the sketch's closed outlines straight out of its plane. A sketch on a face faces "
+    "out of the part: for a hole into that face, choose \"The other way\". With a slope, every "
+    f"side leans in by that angle going away from the sketch (out, for less than 0; at most "
+    f"{features.TAPER_LIMIT:g} degrees), and the corners stay sharp."
+)
+
+EXTRUDE_TO_PLANE_NOTE = (
+    " Up to a plane: the plane must be parallel to the sketch, and the distance and which way "
+    "are worked out from where it is now. They stay numbers in the Details panel, so moving the "
+    "plane later does not move the end."
+)
+
+EXTRUDE_WITH_PART_NOTE = (
+    " With a part: the extrusion can be joined to it, cut out of it, or kept only where they "
+    "overlap, as Modify > Combine does. The result is a group, and Ungroup gives the part and "
+    "the extrusion back."
+)
+
+
+def ask_extrude(parent, plane: str | None = None, part: str | None = None) -> dict | None:
+    note = (EXTRUDE_NOTE + (EXTRUDE_TO_PLANE_NOTE if plane is not None else "")
+            + (EXTRUDE_WITH_PART_NOTE if part is not None else ""))
+    return run_form(parent, "Extrude", extrude_fields(plane, part), note=note)
 
 
 def revolve_fields(axes):
@@ -70,32 +113,52 @@ def ask_revolve(parent, axes) -> dict | None:
     )
 
 
+def sweep_shape_fields():
+    """How a sweep's outline changes along its path."""
+    low, high = features.END_SCALE_LIMITS
+    return [
+        ("twist", "Twist along the path (degrees)", 0.0,
+         {"min": -features.TWIST_LIMIT, "max": features.TWIST_LIMIT}),
+        ("end_scale", "Size at the far end (%)", 100.0, {"min": low, "max": high}),
+    ]
+
+
 def sweep_fields(sketches, path_id: str):
     return [
         ("path", "Path to follow", path_id, {"choices": [(s.id, s.name) for s in sketches]}),
-    ] + _result_fields(len(sketches))
+    ] + sweep_shape_fields() + _result_fields(len(sketches))
+
+
+SWEEP_NOTE = (
+    "Carries the other sketch's closed outlines along the path, square to it. If the outline is "
+    "not drawn across an end of the path, it is moved to the nearer end. Curved paths are "
+    "followed in short straight steps. A twist turns the outline round the path as it goes (more "
+    "than 0 turns like a screw going along the path), and the size at the far end shrinks or "
+    "grows it towards the path; both change evenly along its length. On a closed path the twist "
+    "must be whole turns and the size can't change."
+)
 
 
 def ask_sweep(parent, sketches, path_id: str) -> dict | None:
-    return run_form(
-        parent, "Sweep", sweep_fields(sketches, path_id),
-        note="Carries the other sketch's closed outlines along the path, square to it. "
-             "If the outline is not drawn across an end of the path, it is moved to the nearer end. "
-             "Curved paths are followed in short straight steps.",
-    )
+    return run_form(parent, "Sweep", sweep_fields(sketches, path_id), note=SWEEP_NOTE)
 
 
 def loft_fields(count: int):
-    return _result_fields(count)
+    return [
+        ("sides", "Sides between the outlines", "straight", {"choices": features.LOFT_SIDES}),
+    ] + _result_fields(count)
 
 
 def ask_loft(parent, sketches) -> dict | None:
     order = ", ".join(s.name for s in sketches)
     return run_form(
         parent, "Loft", loft_fields(len(sketches)),
-        note=f"Joins the sketches' outlines with a smooth-sided skin, in the order you picked "
-             f"them: {order}. Each sketch needs one closed outline with no holes. The sides "
-             "are straight from one outline to the next.",
+        note=f"Joins the sketches' outlines with a skin, in the order you picked them: {order}. "
+             "Each sketch needs one closed outline with no holes. The sides run straight from "
+             "one outline to the next, or along a smooth curve through all of them (with three "
+             "or more outlines; with two, both are the same). Smooth sides are made of narrow "
+             "flat strips, like a cylinder's. A construction point picked first or last closes "
+             "the loft to that point, where the point is now.",
     )
 
 
@@ -290,17 +353,66 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         scene.select([shape.id])
         self.sync()
 
+    EXTRUDE_HINT = "Select one sketch to extrude."
+    EXTRUDE_EXTRAS = ("Select one sketch to extrude, and if you like one construction plane to "
+                      "extrude up to and one part to join it to or cut it from.")
+    NO_PLANE = "Select a construction plane with the sketch to extrude up to it."
+    NO_PART = "Select a part with the sketch to join the extrusion to it or cut it from it."
+
+    def _extrude_selection(self):
+        """(the selected sketch, the construction plane selected with it or
+        None, the part selected with it or None), or None and a message."""
+        chosen = self._picked()
+        sketches = [s for s in chosen if create.is_sketch(s)]
+        planes = [s for s in chosen if construct.is_guide(s, "plane")]
+        parts = [s for s in chosen if not is_reference(s)]
+        if len(sketches) != 1:
+            self.statusBar().showMessage(self.EXTRUDE_HINT)
+            return None
+        if len(planes) > 1 or len(parts) > 1 or len(chosen) > 1 + len(planes) + len(parts):
+            self.statusBar().showMessage(self.EXTRUDE_EXTRAS)
+            return None
+        return sketches[0], (planes[0] if planes else None), (parts[0] if parts else None)
+
     @replayable()
     def extrude_selected(self, distance: float, side: str = "one", hole: bool = False,
-                         keep_sketch: bool = False) -> bool:
-        source = self._chosen_sketch("extrude")
-        if source is None:
+                         keep_sketch: bool = False, taper: float = 0.0, to_plane: bool = False,
+                         combine: str | None = None) -> bool:
+        """Extrude the selected sketch `distance` mm (or, with `to_plane`, up
+        to the construction plane selected with it). With `combine` (a way
+        of mesh.modify.combine), the extrusion is joined to the part
+        selected with it, cut out of it, or kept where they overlap. One
+        undo step."""
+        chosen = self._extrude_selection()
+        if chosen is None:
             return False
-        shape = self._attempt("Cannot extrude",
-                              lambda: create.make_extrude(source, distance, side, hole))
+        source, plane, part = chosen
+        if to_plane and plane is None:
+            self.statusBar().showMessage(self.NO_PLANE)
+            return False
+        if combine is not None and part is None:
+            self.statusBar().showMessage(self.NO_PART)
+            return False
+        scene = self.document.scene
+
+        def build():
+            far, way = create.distance_to_plane(source, plane) if to_plane else (distance, side)
+            made = create.make_extrude(source, far, way, hole and combine is None, taper)
+            if combine is None:
+                return made
+            return modify.combine(part, [made], combine, False, scene.fit_clearances)
+
+        shape = self._attempt("Cannot extrude", build)
         if shape is None:
             return False
-        self._add_from_sketches("extrude", [source], shape, keep_sketch)
+        if combine is None:
+            self._add_from_sketches("extrude", [source], shape, keep_sketch)
+            return True
+        self.document.snapshot("extrude")
+        scene.remove([part.id] + ([] if keep_sketch else [source.id]))
+        scene.add(shape)
+        scene.select([shape.id])
+        self.sync()
         return True
 
     @replayable()
@@ -342,15 +454,16 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
 
     @replayable()
     def sweep_selected(self, path_id: str | None = None, hole: bool = False,
-                       keep_sketch: bool = False) -> bool:
+                       keep_sketch: bool = False, twist: float = 0.0, end_scale: float = 100.0) -> bool:
         """Sweep one selected sketch's outline along the other's path
-        (`path_id`, or the likelier one)."""
+        (`path_id`, or the likelier one), turning it `twist` degrees and
+        changing its size to `end_scale` percent by the far end."""
         pair = self._two_sketches()
         if pair is None:
             return False
         path = next((s for s in pair if s.id == path_id), None) or create.likely_path(*pair)
         outline = pair[1] if path is pair[0] else pair[0]
-        shape = self._attempt("Cannot sweep", lambda: create.make_sweep(outline, path, hole))
+        shape = self._attempt("Cannot sweep", lambda: create.make_sweep(outline, path, hole, twist, end_scale))
         if shape is None:
             return False
         self._add_from_sketches("sweep", pair, shape, keep_sketch)
@@ -362,26 +475,32 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
             return
         values = ask_sweep(self, pair, create.likely_path(*pair).id)
         if values is not None:
-            self.sweep_selected(values["path"], values["result"] == "hole", values["keep_sketch"])
+            self.sweep_selected(values["path"], values["result"] == "hole", values["keep_sketch"],
+                                values.get("twist", 0.0), values.get("end_scale", 100.0))
 
-    LOFT_HINT = "Select two or more sketches, in the order to join them."
+    LOFT_HINT = create.LOFT_PICKS
 
     def _sketches_in_order(self):
+        """The selected sketches in the order picked, perhaps with a
+        construction point first or last; or None and a hint."""
         chosen = self._picked()
-        if len(chosen) < 2 or not all(create.is_sketch(s) for s in chosen):
+        if not create.loft_picks_fit(chosen):
             self.statusBar().showMessage(self.LOFT_HINT)
             return None
         return chosen
 
     @replayable()
-    def loft_selected(self, hole: bool = False, keep_sketch: bool = False) -> bool:
+    def loft_selected(self, hole: bool = False, keep_sketch: bool = False, sides: str = "straight") -> bool:
+        """Loft the selected sketches in the order picked, with straight or
+        smooth sides (features.LOFT_SIDES)."""
         sketches = self._sketches_in_order()
         if sketches is None:
             return False
-        shape = self._attempt("Cannot loft", lambda: create.make_loft(sketches, hole))
+        shape = self._attempt("Cannot loft", lambda: create.make_loft(sketches, hole, sides))
         if shape is None:
             return False
-        self._add_from_sketches("loft", sketches, shape, keep_sketch)
+        # A construction point it closes to stays, as guides do.
+        self._add_from_sketches("loft", [s for s in sketches if create.is_sketch(s)], shape, keep_sketch)
         return True
 
     def do_loft(self) -> None:
@@ -390,15 +509,22 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
             return
         values = ask_loft(self, sketches)
         if values is not None:
-            self.loft_selected(values["result"] == "hole", values["keep_sketch"])
+            self.loft_selected(values["result"] == "hole", values["keep_sketch"],
+                               values.get("sides", "straight"))
 
     def do_extrude(self) -> None:
-        if self._chosen_sketch("extrude") is None:
+        chosen = self._extrude_selection()
+        if chosen is None:
             return
-        values = ask_extrude(self)
+        _source, plane, part = chosen
+        extra = {key: shape.name for key, shape in (("plane", plane), ("part", part)) if shape is not None}
+        values = ask_extrude(self, **extra)
         if values is not None:
-            self.extrude_selected(values["distance"], values["side"], values["result"] == "hole",
-                                  values["keep_sketch"])
+            result = values["result"]
+            self.extrude_selected(values["distance"], values["side"], result == "hole",
+                                  values["keep_sketch"], values.get("taper", 0.0),
+                                  values.get("extent") == "plane",
+                                  result if result in modify.COMBINE_OPS else None)
 
     # --- Thread ----------------------------------------------------------------------
 

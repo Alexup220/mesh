@@ -264,6 +264,7 @@ def _scaled_params(shape, own: np.ndarray) -> dict:
             params[key] = _scaled_frame(params.get(key, default), own[0])
     elif kind == "loft":
         params["sections"] = [
+            {"point": [own[0] * float(v) for v in section["point"]]} if "point" in section else
             {"entities": _scaled_entities(shape, section["entities"], own[0]),
              "frame": _scaled_frame(section["frame"], own[0])}
             for section in (params.get("sections") or features.DEFAULT_LOFT)

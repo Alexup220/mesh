@@ -68,8 +68,8 @@ tools do the closest honest version of their Fusion counterparts:
 - **Curves are straight pieces.** A circle or arc is 64 pieces per whole turn
   (like a cylinder), a spline 16 pieces between typed points. Revolve's round
   surfaces are 64 flat strips per turn, Sweep follows a curved path in those
-  same short straight steps, and Loft's sides run straight from one outline to
-  the next (no smoothing through three or more outlines).
+  same short straight steps, and Loft's smooth sides are 16 flat strips
+  between one outline and the next.
 - **No constraints or driving dimensions** between curves (the binding spec
   leaves them out): every curve is placed by its own typed numbers.
 - **The sketch window** zooms with the mouse wheel, around the pointer, but
@@ -79,27 +79,59 @@ tools do the closest honest version of their Fusion counterparts:
 - **Sketches are not dragged.** A flat sketch's handle box would have no
   thickness, so the drag handles are hidden for sketches; they are moved and
   turned with the Details panel.
-- **Extrude** has no taper angle and no "up to a face". Joining or cutting
-  other parts goes through Make Hole + Group (or Join / Cut Out), not inside
-  Extrude. Its direction starts at "The way the sketch faces" for a hole too;
-  the form says to choose "The other way" for a hole into a face sketched on.
-- **Sweep** has no twist, scale or guide rails. An outline drawn across
+- **Extrude** goes "up to" a construction plane selected with the sketch
+  only when the plane is parallel to the sketch (Fusion also ends on a face,
+  a part, a point or a slanted plane). The distance is worked out once and
+  kept as a number: moving the plane later leaves the end where it was,
+  until the History is worked out again. Its sides slope by one angle (typed
+  in the form, or later with Slope the Sides), which "Both ways" uses on
+  both halves; Fusion can slope the two halves differently. Joined to, cut
+  out of or kept where it overlaps a part works with one part selected with
+  the sketch (Fusion takes several), and the result is a group, as Combine
+  makes: Ungroup gives the part and the extrusion back. Its direction starts
+  at "The way the sketch faces" for a cut or a hole too; the form says to
+  choose "The other way" for a hole into a face sketched on.
+- **Sweep** has no guide rails. Its twist and its size at the far end
+  change evenly with the distance along the path, turning and scaling the
+  outline about the path (Fusion can also scale about other points); on a
+  closed path the twist must be whole turns and the size can't change. A
+  twisted outline's straight pieces become narrow flat strips, about as fine
+  as a cylinder's, so a twisted part is up to about 0.5% smaller than the
+  true shape. A fitted Hole that changes size keeps the gap square to each
+  straight piece of the outline, so its corners stay sharp rather than
+  rounded. An outline drawn across
   either end of an open path, or anywhere round a closed one, is used where it
   is. Any other outline is moved to the nearer end (its middle onto the path),
   so an outline deliberately drawn beside the path is not swept at a distance.
   A path that crosses itself is refused, but one that only passes closer to
   itself than the outline's size is not caught, and makes a part that overlaps
   itself. Change Sketch redraws a sweep's outline, not its path.
-- **Loft**: each sketch must hold one closed outline with no holes; no rails
-  and no single point at an end. A loft's outlines can't be redrawn after it
-  is made (undo, change the sketches, loft again). Sides that would pass
-  through each other are refused by checking seven in-between outlines per
-  step, so a very brief crossing near an outline could slip through. A fitted
-  Hole loft grows each outline in its own plane by more where the sides
-  slope, so the gap square to the sides is at least the fit's clearance; it is
-  larger than that on the gentler sides, and on sides almost flat (growth is
-  capped at three times the clearance) it is less. Growing it exactly in 3D
-  took 5 to 10 seconds for curved outlines, too slow to redraw.
+- **Loft**: each sketch must hold one closed outline with no holes; no
+  rails. A construction point picked first or last closes the loft to that
+  point (a sketch point can't be used); where the point is is kept as
+  numbers when the loft is made, so moving the point later leaves the tip
+  where it was, until the History is worked out again. The point can't lie
+  on the plane of the outline next to it. A loft's outlines can't be
+  redrawn after it is made (undo, change the sketches, loft again). Its
+  sides run straight
+  from one outline to the next, or, as a choice, along a smooth curve through
+  all of them: each matched point of the outlines follows a natural spline
+  (the curve a sketch's spline uses), spaced by the distance between the
+  outlines' middles. Fusion's smooth loft also lets you set how the sides
+  leave the end outlines; here they leave them as the spline does. Sides
+  that would pass through each other are refused by checking seven
+  in-between outlines per strip, so a very brief crossing near an outline
+  could slip through. A fitted Hole loft grows each outline in its own plane
+  by more where the sides slope, so the gap square to the sides is at least
+  the fit's clearance; it is larger than that on the gentler sides, and on
+  sides almost flat (growth is capped at three times the clearance) it is
+  less. With smooth sides the slope is the steepest anywhere between the
+  outline before and the one after, and the sides in between follow the
+  grown outlines, so their gap is about the clearance or more, not exactly
+  at least it. A point the loft closes to moves out along the sides, far
+  enough for the flat sides meeting there (also capped at three times the
+  clearance, so a sharp tip's gap is less). Growing it exactly in 3D took 5
+  to 10 seconds for curved outlines, too slow to redraw.
 - **Size handles** do nothing on a part made from a sketch (they spring
   back): its size comes from the sketch and the Details panel numbers. Moving
   and turning it by its handles work as for any part.

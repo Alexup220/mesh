@@ -11,7 +11,7 @@ import uuid
 
 import numpy as np
 
-from mesh import features, sketch, threads
+from mesh import construct, features, sketch, threads
 from mesh.builders import BuildError
 from mesh.ops import face_direction
 from mesh.scene import Shape
@@ -166,12 +166,42 @@ def _from_sketch(source: Shape, primitive: str, label: str, params: dict, hole: 
     return shape
 
 
-def make_extrude(source: Shape, distance: float, side: str = "one", hole: bool = False) -> Shape:
-    """The sketch's closed outlines pushed `distance` mm out of its plane."""
+def make_extrude(source: Shape, distance: float, side: str = "one", hole: bool = False,
+                 taper: float = 0.0) -> Shape:
+    """The sketch's closed outlines pushed `distance` mm out of its plane,
+    their sides sloping in by `taper` degrees (out, for less than 0)."""
     if not is_sketch(source):
         raise BuildError("Select a sketch to extrude.")
-    return _from_sketch(source, "extrude", "Extrusion",
-                        {"distance": float(distance), "side": str(side)}, hole)
+    params = {"distance": float(distance), "side": str(side)}
+    if float(taper) != 0.0:
+        params["taper"] = float(taper)  # missing means straight sides, as before
+    return _from_sketch(source, "extrude", "Extrusion", params, hole)
+
+
+# How square a plane must be to a sketch to count as parallel to it (the
+# cosine of the angle between the ways they face): within about 0.1 degrees.
+PARALLEL = 1.0 - 1e-6
+
+
+def distance_to_plane(source: Shape, plane: Shape) -> tuple[float, str]:
+    """How far to extrude the sketch `source` so its far end lies on the
+    construction plane `plane`, and which way: (distance, side). Fusion's
+    "To object" extent, for a plane parallel to the sketch; worked out
+    once, from where the plane is now."""
+    if not is_sketch(source) or not construct.is_guide(plane, "plane"):
+        raise BuildError("Select a sketch and a construction plane to extrude up to.")
+    frame = np.asarray(source.transform, dtype=np.float64)
+    facing = frame[:3, 2] / np.linalg.norm(frame[:3, 2])
+    point, normal = construct.plane_of(plane)
+    if abs(float(facing @ normal)) < PARALLEL:
+        raise BuildError(
+            f"{plane.name} is not parallel to {source.name}, so an extrusion can't end flat on it. "
+            "Use a plane parallel to the sketch, or type a distance."
+        )
+    distance = float((point - frame[:3, 3]) @ facing)
+    if abs(distance) < sketch.MIN_SIZE:
+        raise BuildError(f"{plane.name} lies on {source.name}'s plane, so there is no distance to extrude.")
+    return abs(distance), ("one" if distance > 0.0 else "other")
 
 
 def revolve_axes(source: Shape) -> list[tuple[str, str]]:
@@ -229,10 +259,13 @@ def likely_path(first: Shape, second: Shape) -> Shape:
     return second
 
 
-def make_sweep(outline: Shape, path: Shape, hole: bool = False) -> Shape:
+def make_sweep(outline: Shape, path: Shape, hole: bool = False, twist: float = 0.0,
+               end_scale: float = 100.0) -> Shape:
     """The closed outlines of the sketch `outline` carried along the one
-    path drawn in the sketch `path`. The part's own coordinates are the
-    world's, so both sketches are stored with where they were."""
+    path drawn in the sketch `path`, turning `twist` degrees and changing
+    to `end_scale` percent of their size by the far end. The part's own
+    coordinates are the world's, so both sketches are stored with where
+    they were."""
     if not (is_sketch(outline) and is_sketch(path)) or outline.id == path.id:
         raise BuildError("Select two sketches: the outline, and the path to sweep it along.")
     shape = Shape(
@@ -249,31 +282,59 @@ def make_sweep(outline: Shape, path: Shape, hole: bool = False) -> Shape:
         transform=np.eye(4),
         is_hole=bool(hole),
     )
+    # Kept only when used, so a plain sweep's settings are as before.
+    if float(twist) != 0.0:
+        shape.params["twist"] = float(twist)
+    if float(end_scale) != 100.0:
+        shape.params["end_scale"] = float(end_scale)
     _checked(lambda: shape_geometry(shape))
     return shape
 
 
-def make_loft(sketches, hole: bool = False) -> Shape:
-    """A skin through the closed outline of each sketch, in the order given.
+LOFT_PICKS = ("Select two or more sketches, in the order to join them. A construction point "
+              "may come first or last, to close the loft to that point.")
+
+
+def loft_picks_fit(shapes) -> bool:
+    """Whether `shapes`, in order, can be lofted: two or more, sketches
+    except that the first or last may be a construction point, and at least
+    one sketch."""
+    shapes = list(shapes)
+    ends = (0, len(shapes) - 1)
+    return (len(shapes) >= 2 and any(is_sketch(s) for s in shapes)
+            and all(is_sketch(s) or (k in ends and construct.is_guide(s, "point"))
+                    for k, s in enumerate(shapes)))
+
+
+def make_loft(sketches, hole: bool = False, sides: str = "straight") -> Shape:
+    """A skin through the closed outline of each sketch, in the order given,
+    its sides straight or smooth (features.LOFT_SIDES). A construction point
+    first or last closes it to that point (kept as where the point is now).
     Like a sweep, its own coordinates are the world's."""
     sketches = list(sketches)
-    if len(sketches) < 2 or not all(is_sketch(s) for s in sketches):
-        raise BuildError("Select two or more sketches, in the order to join them.")
+    if not loft_picks_fit(sketches):
+        raise BuildError(LOFT_PICKS)
+
+    def section(s) -> dict:
+        if not is_sketch(s):
+            return {"point": construct.point_of(s).tolist()}
+        return {"entities": copy.deepcopy(s.params["entities"]),
+                "frame": np.asarray(s.transform, dtype=np.float64).tolist()}
+
     shape = Shape(
         id=uuid.uuid4().hex,
         name=f"Loft of {sketches[0].name} to {sketches[-1].name}",
         kind="primitive",
         params={
             "primitive": "loft",
-            "sections": [
-                {"entities": copy.deepcopy(s.params["entities"]),
-                 "frame": np.asarray(s.transform, dtype=np.float64).tolist()}
-                for s in sketches
-            ],
+            "sections": [section(s) for s in sketches],
         },
         transform=np.eye(4),
         is_hole=bool(hole),
     )
+    # Kept only when used, so a plain loft's settings are as before.
+    if sides != "straight":
+        shape.params["sides"] = sides
     _checked(lambda: shape_geometry(shape))
     return shape
 

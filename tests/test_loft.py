@@ -158,7 +158,7 @@ def test_loft_refuses_plainly(sections, words):
 
 
 def test_loft_is_an_off_the_shelf_primitive_standing_on_the_workplane():
-    assert PRIMITIVES["loft"]["shelf"] is False and PRIMITIVES["loft"]["defaults"] == {}
+    assert PRIMITIVES["loft"]["shelf"] is False and PRIMITIVES["loft"]["defaults"] == {"sides": "straight"}
     tm = shape_geometry(new_primitive("loft"))
     assert tm.is_watertight
     assert np.allclose(tm.bounds, [[-10, -10, 0], [10, 10, 20]])
@@ -286,4 +286,260 @@ def test_loft_form_is_plain_language(qapp, close_qt_widget):
     form = close_qt_widget(FormDialog(None, "Loft", expert_actions.loft_fields(3)))
     for text in form.labels():
         assert_plain(text)
-    assert form.values() == {"result": "part", "keep_sketch": False}
+    assert form.values() == {"sides": "straight", "result": "part", "keep_sketch": False}
+
+
+# --- Smooth sides --------------------------------------------------------------------
+
+NARROW = [{"type": "circle", "centre": [0, 0], "diameter": 10}]
+WIDE = [{"type": "circle", "centre": [0, 0], "diameter": 20}]
+BARREL = [section(NARROW, 0), section(WIDE, 10), section(NARROW, 20)]
+
+
+def widest_at(tm, height):
+    cut = tm.section(plane_origin=[0, 0, height], plane_normal=[0, 0, 1])
+    return float(np.linalg.norm(cut.vertices[:, :2], axis=1).max())
+
+
+def test_smooth_sides_curve_through_three_outlines():
+    straight = features.loft(BARREL)
+    smooth = features.loft(BARREL, sides="smooth")
+    assert smooth.is_watertight
+    assert np.allclose(smooth.bounds, straight.bounds)
+    # Half way between the ends and the middle the straight sides are half
+    # way out (7.5 mm); the smooth curve (a natural spline through 5, 10
+    # and 5 mm) is already at 8.4375 mm.
+    assert widest_at(straight, 5) == pytest.approx(7.5, abs=1e-4)
+    assert widest_at(smooth, 5) == pytest.approx(8.4375, abs=1e-4)
+    # And it passes exactly through each outline.
+    assert widest_at(smooth, 10) == pytest.approx(10.0, abs=1e-4)
+    assert smooth.volume > straight.volume
+
+
+def test_smooth_sides_between_two_outlines_are_straight():
+    two = [section(BIG, 0), section(SMALL, 10)]
+    assert features.loft(two, sides="smooth").volume == pytest.approx(features.loft(two).volume)
+
+
+def test_a_fitted_hole_smooth_loft_leaves_the_clearance_on_every_side():
+    exact = features.loft(BARREL, sides="smooth")
+    fitted = features.loft(BARREL, clearance=0.4, sides="smooth")
+    assert fitted.is_watertight
+    # Sides of the exact loft all along it (every 29th: it is round),
+    # pushed out 0.39 mm square to themselves, are still inside the hole.
+    pushed = (exact.triangles_center + 0.39 * exact.face_normals)[::29]
+    assert len(pushed) > 100
+    assert np.all(winding(fitted, pushed) == 1)
+    low, high = fitted.bounds[:, 2]
+    assert low == pytest.approx(-0.4) and high == pytest.approx(20.4)
+
+
+def test_sides_that_are_neither_straight_nor_smooth_are_refused():
+    with pytest.raises(sketch.SketchError) as err:
+        features.loft(BARREL, sides="wavy")
+    assert "straight or smooth" in str(err.value)
+    assert_plain(str(err.value))
+
+
+def test_make_loft_keeps_smooth_sides_only_when_chosen():
+    assert "sides" not in create.make_loft(three_sketches()).params
+    shape = create.make_loft(three_sketches(), sides="smooth")
+    assert shape.params["sides"] == "smooth"
+    straight = shape_geometry(create.make_loft(three_sketches())).volume
+    assert shape_geometry(shape).volume != pytest.approx(straight)
+
+
+def test_a_smooth_loft_round_trips_through_a_project_file(tmp_path):
+    scene = Scene()
+    shape = create.make_loft(three_sketches(), sides="smooth")
+    scene.add(shape)
+    path = tmp_path / "smooth.mesh"
+    save_project(scene, path)
+    loaded = load_project(path).get(shape.id)
+    assert loaded.params["sides"] == "smooth"
+    assert shape_geometry(loaded).volume == pytest.approx(shape_geometry(shape).volume)
+
+
+def test_smooth_loft_in_the_window_is_one_undo_step(window, monkeypatch):
+    before = add_three(window)
+    monkeypatch.setattr(expert_actions, "ask_loft",
+                        lambda parent, sketches: {"sides": "smooth", "result": "part", "keep_sketch": False})
+    steps = len(window.document._undo)
+    window.do_loft()
+    loft = window.document.scene.shapes[0]
+    assert loft.params["sides"] == "smooth" and len(window.document._undo) == steps + 1
+    window.do_undo()
+    assert [s.id for s in window.document.scene.shapes] == [s.id for s in before]
+
+
+def test_the_sides_can_be_changed_in_the_details_panel(window):
+    add_three(window)
+    window.loft_selected()
+    shape = window.document.scene.shapes[0]
+    assert window.inspector.visible_param_fields() == {"sides"}
+    # A loft made before there was a choice shows its sides as they are.
+    assert window.inspector.field_value("sides") == "straight"
+    straight = shape_geometry(shape).volume
+    window._on_edited(shape.id, "sides", "smooth")
+    window._finish_edit()
+    assert shape.params["sides"] == "smooth"
+    assert shape_geometry(shape).volume != pytest.approx(straight)
+    window.do_undo()
+    assert "sides" not in window.document.scene.shapes[0].params
+    assert shape_geometry(window.document.scene.shapes[0]).volume == pytest.approx(straight)
+
+
+def test_the_loft_note_and_sides_are_plain_language(window, monkeypatch):
+    seen = {}
+
+    def form(parent, title, fields, note=""):
+        seen["note"] = note
+        return None
+
+    monkeypatch.setattr(expert_actions, "run_form", form)
+    expert_actions.ask_loft(window, three_sketches())
+    assert "smooth curve" in seen["note"]
+    assert_plain(seen["note"])
+    from mesh.panels import FIELD_LABELS
+
+    assert_plain(FIELD_LABELS["sides"])
+    for _value, label in features.LOFT_SIDES:
+        assert_plain(label)
+
+
+# --- Closing to a point -------------------------------------------------------------
+
+
+def tip(x, y, z):
+    return {"point": [x, y, z]}
+
+
+def test_a_square_to_a_point_is_an_exact_pyramid():
+    for sections in ([section(BIG, 0), tip(0, 0, 30)], [tip(0, 0, 30), section(BIG, 0)],
+                     [tip(0, 0, -30), section(BIG, 0)], [section(BIG, 0), tip(15, 5, 30)]):
+        tm = features.loft(sections)
+        assert tm.is_watertight
+        assert tm.volume == pytest.approx(400 * 30 / 3)
+    assert np.allclose(features.loft([section(BIG, 0), tip(0, 0, 30)]).bounds, [[-10, -10, 0], [10, 10, 30]])
+
+
+def test_a_point_at_each_end_makes_a_double_cone():
+    tm = features.loft([tip(0, 0, -10), section(WIDE, 0), tip(0, 0, 10)])
+    assert tm.is_watertight
+    circle = sketch.profile(WIDE).area()
+    assert tm.volume == pytest.approx(2 * circle * 10 / 3)
+    assert np.allclose(tm.bounds, [[-10, -10, -10], [10, 10, 10]], atol=1e-6)
+
+
+def test_smooth_sides_run_into_the_point():
+    sections = [section(BIG, 0), section(ROUND, 10), tip(0, 0, 20)]
+    smooth = features.loft(sections, sides="smooth")
+    assert smooth.is_watertight
+    assert smooth.bounds[1][2] == pytest.approx(20.0)
+    assert smooth.volume != pytest.approx(features.loft(sections).volume)
+
+
+@pytest.mark.parametrize("sides", ["straight", "smooth"])
+def test_a_fitted_hole_closing_to_a_point_leaves_the_clearance(sides):
+    sections = [section(WIDE, 0), section(ROUND, 8), tip(0, 0, 20)]
+    exact = features.loft(sections, sides=sides)
+    fitted = features.loft(sections, clearance=0.4, sides=sides)
+    assert fitted.is_watertight
+    pushed = (exact.triangles_center + 0.39 * exact.face_normals)[::29]
+    assert np.all(winding(fitted, pushed) == 1)
+    assert fitted.bounds[0][2] == pytest.approx(-0.4)
+    # The tip moves out along the sides, so the gap at its sides is the fit.
+    assert fitted.bounds[1][2] > 20.4
+
+
+def test_a_fitted_pyramid_moves_its_tip_out_for_its_flat_sides():
+    fitted = features.loft([section(BIG, 0), tip(0, 0, 30)], clearance=0.4)
+    # Each flat side meets the upright at asin(1/sqrt(10)): moving the tip
+    # out 0.4 / sin of that would be 1.26 mm, capped at three times the fit.
+    assert fitted.bounds[1][2] == pytest.approx(30 + 3 * 0.4)
+
+
+@pytest.mark.parametrize("sections, words", [
+    ([section(BIG, 0), tip(0, 5, 0)], "on the plane"),
+    ([tip(0, 0, 0), tip(0, 0, 5)], "not only points"),
+    ([section(BIG, 0), tip(0, 0, 5), section(BIG, 10)], "first or last end"),
+    ([section(BIG, 0), {"point": [0, "x", 5]}], "damaged"),
+    ([section(BIG, 0), {"point": [0, 5]}], "damaged"),
+])
+def test_a_loft_to_a_point_refuses_plainly(sections, words):
+    with pytest.raises(sketch.SketchError) as err:
+        features.loft(sections)
+    assert words in str(err.value)
+    assert_plain(str(err.value))
+
+
+def test_make_loft_closes_to_a_construction_point_picked_first_or_last():
+    from mesh import construct
+
+    base, middle = three_sketches()[:2]
+    point = construct.new_point((0, 0, 50), "Point 1")
+    shape = create.make_loft([base, middle, point])
+    assert shape.name == "Loft of Sketch 1 to Point 1"
+    assert shape.params["sections"][-1] == {"point": [0.0, 0.0, 50.0]}
+    assert shape_geometry(shape).bounds[1][2] == pytest.approx(50.0)
+    assert create.make_loft([point, base]).params["sections"][0] == {"point": [0.0, 0.0, 50.0]}
+    for picks in ([base, point, middle], [point, construct.new_point((0, 0, 9))], [point]):
+        with pytest.raises(BuildError) as err:
+            create.make_loft(picks)
+        assert "first or last" in str(err.value)
+        assert_plain(str(err.value))
+
+
+def test_a_loft_to_a_point_round_trips_through_a_project_file(tmp_path):
+    from mesh import construct
+
+    scene = Scene()
+    shape = create.make_loft([three_sketches()[0], construct.new_point((0, 0, 30))])
+    scene.add(shape)
+    path = tmp_path / "pointed.mesh"
+    save_project(scene, path)
+    loaded = load_project(path).get(shape.id)
+    assert loaded.params == shape.params
+    assert shape_geometry(loaded).volume == pytest.approx(4000.0)
+
+
+def test_a_loft_to_a_point_scales_with_its_point():
+    from mesh import construct, modify
+
+    shape = create.make_loft([three_sketches()[0], construct.new_point((0, 0, 30))])
+    [scaled] = modify.scaled([shape], (2.0, 2.0, 2.0), about="base")
+    assert scaled.params["sections"][-1] == {"point": [0.0, 0.0, 60.0]}
+    assert shape_geometry(scaled).volume == pytest.approx(8 * 4000.0)
+
+
+def test_lofting_to_a_point_in_the_window_keeps_the_point(window):
+    from mesh import construct
+
+    window.add_sketch(BIG, at(0))
+    base = window.document.scene.shapes[-1]
+    point = construct.new_point((0, 0, 30), "Point 1")
+    window.document.scene.add(point)
+    window.document.scene.select([base.id, point.id])
+    steps = len(window.document._undo)
+    assert window.loft_selected()
+    names = [s.name for s in window.document.scene.shapes]
+    assert names == ["Point 1", "Loft of Sketch 1 to Point 1"]
+    assert len(window.document._undo) == steps + 1
+    window.do_undo()
+    assert {s.id for s in window.document.scene.shapes} == {base.id, point.id}
+
+
+def test_a_point_between_the_sketches_shows_the_hint(window, monkeypatch):
+    from mesh import construct
+
+    monkeypatch.setattr(expert_actions, "ask_loft", lambda *a: pytest.fail("asked"))
+    window.add_sketch(BIG, at(0))
+    first = window.document.scene.shapes[-1]
+    point = construct.new_point((0, 0, 10), "Point 1")
+    window.document.scene.add(point)
+    window.add_sketch(SMALL, at(20))
+    last = window.document.scene.shapes[-1]
+    window.document.scene.select([first.id, point.id, last.id])
+    window.do_loft()
+    assert window.statusBar().currentMessage() == window.LOFT_HINT
+    assert_plain(window.LOFT_HINT)

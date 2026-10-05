@@ -285,6 +285,25 @@ def scenario_extrude(window):
     window.extrude_selected(5.0, keep_sketch=True)
 
 
+def scenario_extrude_sloped(window):
+    add_sketch(window, RECT)
+    window.extrude_selected(5.0, taper=10.0)
+
+
+def scenario_extrude_up_to_plane(window):
+    window.plane_at_distance_selected("xy", 12.0)
+    plane = window.document.scene.selected()[0]
+    pick(window, add_sketch(window, RECT), plane)
+    window.extrude_selected(1.0, to_plane=True)
+
+
+def scenario_extrude_cut(window):
+    box = add(window)
+    top = sketch.plane_frame((0.0, 0.0, 1.0), (0.0, 0.0, 20.0))
+    pick(window, add_sketch(window, SQUARE, top), box)
+    window.extrude_selected(5.0, "other", combine="difference")
+
+
 def scenario_revolve(window):
     add_sketch(window, BAND)
     window.revolve_selected("y", 270.0)
@@ -297,10 +316,33 @@ def scenario_sweep(window):
     window.sweep_selected()
 
 
+def scenario_sweep_twisted(window):
+    add_sketch(window, ELBOW, sketch.named_plane_frame("xz"), "Path")
+    add_sketch(window, SQUARE, None, "Outline")
+    window.do_select_all()
+    window.sweep_selected(twist=90.0, end_scale=50.0)
+
+
 def scenario_loft(window):
     first = add_sketch(window, BIG)
     second = add_sketch(window, SMALL, sketch.named_plane_frame("xy", 15.0))
     pick(window, first, second)
+    window.loft_selected()
+
+
+def scenario_loft_smooth(window):
+    first = add_sketch(window, BIG)
+    second = add_sketch(window, SMALL, sketch.named_plane_frame("xy", 15.0))
+    third = add_sketch(window, BIG, sketch.named_plane_frame("xy", 30.0))
+    pick(window, first, second, third)
+    window.loft_selected(sides="smooth")
+
+
+def scenario_loft_to_point(window):
+    box = add(window)
+    window.point_at(box.id, face_towards(box, (0, 0, 1)), (1.0, 2.0, 20.0))
+    point = window.document.scene.selected()[0]
+    pick(window, add_sketch(window, BIG, sketch.named_plane_frame("xy", -10.0)), point)
     window.loft_selected()
 
 
@@ -1251,7 +1293,9 @@ def test_moving_steps_in_the_history_window(window):
 
 
 SAMPLE_ARGS = {
-    "distance": 5.0, "side": "one", "hole": False, "keep_sketch": False, "axis": "z", "angle": 30.0,
+    "distance": 5.0, "side": "one", "hole": False, "keep_sketch": False, "taper": 0.0, "to_plane": False,
+    "combine": None, "twist": 0.0, "end_scale": 100.0, "sides": "straight", "axis": "z",
+    "angle": 30.0,
     "pitch": 1.5, "length": 10.0, "end": "top", "hand": "right", "dx": 1.0, "dy": 0.0, "dz": 0.0,
     "make_copy": False, "size": 100.0, "stretch_x": 100.0, "stretch_y": 100.0, "stretch_z": 100.0,
     "about": "base", "op": "union", "keep_tools": False, "keep_tool": False, "wall": 2.0, "far_side": False,
@@ -1287,3 +1331,25 @@ def test_history_text_is_plain_language(window):
                  *(history.label_words(label) for label in labels),
                  *(t.tip for t in TOOLS if t.key == "history")):
         assert_plain(text)
+
+
+def test_an_extrusion_up_to_a_plane_follows_the_plane_when_the_history_is_worked_out(window):
+    window.start_history()
+    scenario_extrude_up_to_plane(window)
+    assert window.change_history_step(0, {"distance": 20.0})
+    extrusion = window.document.scene.shapes[-1]
+    assert shape_geometry(extrusion).bounds[:, 2].tolist() == pytest.approx([0.0, 20.0])
+    _title, fields, back = window.step_editor(2)
+    assert fields[0][0] == "extent" and fields[0][2] == "plane"
+    assert back({f[0]: f[2] for f in fields})["to_plane"] is True
+
+
+def test_an_extrusion_cut_from_a_part_can_be_changed_to_a_join(window):
+    window.start_history()
+    scenario_extrude_cut(window)
+    _title, fields, back = window.step_editor(2)
+    values = {f[0]: f[2] for f in fields}
+    assert values["result"] == "difference" and back(values)["combine"] == "difference"
+    cut = shape_geometry(window.document.scene.shapes[0]).volume
+    assert window.change_history_step(2, back({**values, "result": "union", "side": "one"}))
+    assert shape_geometry(window.document.scene.shapes[0]).volume == pytest.approx(cut + 2 * 16 * 5)
