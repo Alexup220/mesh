@@ -16,6 +16,9 @@ project and undone with it:
   selected, in the order picked, "faces": where each clicked face was}.
   Such a step runs the tool again; a clicked face is found again by the
   way it faces and where it was (find_face).
+- "off" (only when true) marks a step that is skipped: the project is
+  worked out as if it weren't there, but it stays in the list, ready to
+  be used again.
 - "effect" is what the step changed (changes): the shapes it added
   (whole), the ones it removed, and for each one it changed the fields
   that changed. A change of position is kept as the move itself, so
@@ -316,7 +319,7 @@ def describe(step: dict) -> str:
         if len(names) > 3:
             shown += f" and {len(names) - 3} more"
         text += f": {shown}"
-    return text
+    return text + " (skipped)" if step.get("off") else text
 
 
 def read(raw) -> dict | None:
@@ -334,5 +337,8 @@ def read(raw) -> dict | None:
             return None
         if effect is not None and not isinstance(effect, dict):
             return None
-        steps.append({"label": str(step.get("label", "")), "call": call, "effect": effect})
+        kept = {"label": str(step.get("label", "")), "call": call, "effect": effect}
+        if step.get("off") is True:
+            kept["off"] = True
+        steps.append(kept)
     return {"base": raw["base"], "steps": steps}

@@ -607,6 +607,46 @@ def test_removing_a_step(window, warnings):
     assert_plain(warnings[0])
 
 
+def test_skipping_a_step_and_using_it_again(window, warnings):
+    round_then_pattern(window)
+    steps = len(window.document._undo)
+    assert window.skip_history_step(2)
+    assert len(window.document.scene.shapes) == 1 and len(window.history_steps()) == 3
+    assert window.history_steps()[2]["off"] is True
+    assert history.describe(window.history_steps()[2]).endswith(" (skipped)")
+    assert not window.skip_history_step(2)
+    # A skipped step can still be changed; it stays skipped.
+    assert window.change_history_step(2, {"count": 4})
+    assert len(window.document.scene.shapes) == 1
+    assert window.skip_history_step(2, False)
+    assert len(window.document.scene.shapes) == 4 and "off" not in window.history_steps()[2]
+    assert not warnings and len(window.document._undo) == steps + 3
+    window.do_undo()
+    window.do_undo()
+    assert len(window.document.scene.shapes) == 1 and window.history_steps()[2]["off"] is True
+
+
+def test_a_step_a_later_one_needs_cannot_be_skipped(window, warnings):
+    scene = round_then_pattern(window)
+    before = summary(scene)
+    assert not window.skip_history_step(1)
+    assert warnings and warnings[0].startswith("Step 3 (Pattern in rows: ")
+    assert summary(window.document.scene) == before and "off" not in window.history_steps()[1]
+    assert_plain(warnings[0])
+
+
+def test_a_skipped_step_is_saved_with_the_project(window, tmp_path):
+    round_then_pattern(window)
+    window.skip_history_step(2)
+    file = tmp_path / "skipped.mesh"
+    window.save_to(file)
+    loaded = load_project(file)
+    assert [s.get("off", False) for s in loaded.history["steps"]] == [False, False, True]
+    assert history.read({"base": {}, "steps": [{"label": "x", "off": "yes"}]})["steps"][0].get("off") is None
+    window.open_from(file)
+    assert window.skip_history_step(2, False) and len(window.document.scene.shapes) == 3
+
+
 def test_a_change_that_cannot_be_worked_out_changes_nothing(window, warnings):
     scene = round_then_pattern(window)
     before = summary(scene)
@@ -691,6 +731,11 @@ def test_the_history_window(window, monkeypatch):
     assert seen["title"] == "Change Round an Edge" and seen["fields"][0][2] == 2.0
     assert window.history_steps()[1]["call"]["args"]["radius"] == 5.0
     dialog.steps.setCurrentRow(1)
+    assert dialog.skip_button.text() == "Skip"
+    dialog.skip()
+    assert dialog.steps.item(1).text().endswith(" (skipped)") and dialog.skip_button.text() == "Use Again"
+    dialog.skip()
+    assert not dialog.steps.item(1).text().endswith(" (skipped)") and dialog.skip_button.text() == "Skip"
     dialog.remove()
     assert dialog.steps.count() == 1
     dialog.stop()

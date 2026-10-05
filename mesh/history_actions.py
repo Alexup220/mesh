@@ -26,7 +26,7 @@ from mesh.scene import Document, Scene
 
 HISTORY_NOTE = (
     "Every change to the project since the history started, in order. Change a step's "
-    "settings, or remove a step, and the whole project is worked out again: tools (Extrude, "
+    "settings, skip it or remove it, and the whole project is worked out again: tools (Extrude, "
     "Round an Edge, Combine, the patterns and more) run again on the parts as they are by "
     "then, so later steps follow. Other steps (adding a shape, moving, typing in the Details "
     "panel) do again what they did."
@@ -151,17 +151,21 @@ class HistoryDialog(QDialog):
         layout.addWidget(self.note)
         self.steps = QListWidget(self)
         self.steps.itemDoubleClicked.connect(lambda _item: self.change())
+        self.steps.currentRowChanged.connect(lambda _row: self._name_skip())
         layout.addWidget(self.steps)
         bar = QHBoxLayout()
         self.start_button = QPushButton("Start Keeping a History", self)
         self.start_button.clicked.connect(self.start)
         self.change_button = QPushButton("Change...", self)
         self.change_button.clicked.connect(self.change)
+        self.skip_button = QPushButton("Skip", self)
+        self.skip_button.clicked.connect(self.skip)
         self.remove_button = QPushButton("Remove", self)
         self.remove_button.clicked.connect(self.remove)
         self.stop_button = QPushButton("Stop Keeping It", self)
         self.stop_button.clicked.connect(self.stop)
-        for button in (self.start_button, self.change_button, self.remove_button, self.stop_button):
+        for button in (self.start_button, self.change_button, self.skip_button, self.remove_button,
+                       self.stop_button):
             bar.addWidget(button)
         bar.addStretch(1)
         layout.addLayout(bar)
@@ -180,10 +184,18 @@ class HistoryDialog(QDialog):
         if steps:
             self.steps.setCurrentRow(min(max(row, 0), len(steps) - 1))
         self.start_button.setVisible(not kept)
-        for button in (self.change_button, self.remove_button):
+        for button in (self.change_button, self.skip_button, self.remove_button):
             button.setVisible(kept)
             button.setEnabled(bool(steps))
         self.stop_button.setVisible(kept)
+        self._name_skip()
+
+    def _name_skip(self) -> None:
+        """The skip button says what it will do to the chosen step."""
+        steps = self.window.history_steps()
+        row = self.steps.currentRow()
+        off = 0 <= row < len(steps) and bool(steps[row].get("off"))
+        self.skip_button.setText("Use Again" if off else "Skip")
 
     def _row(self) -> int | None:
         row = self.steps.currentRow()
@@ -201,6 +213,13 @@ class HistoryDialog(QDialog):
         row = self._row()
         if row is not None:
             self.window.ask_step_change(row)
+            self.refresh()
+
+    def skip(self) -> None:
+        row = self._row()
+        if row is not None:
+            steps = self.window.history_steps()
+            self.window.skip_history_step(row, not steps[row].get("off"))
             self.refresh()
 
     def remove(self) -> None:
@@ -280,6 +299,9 @@ class HistoryActions:
         done = []
         try:
             for number, step in zip(numbers or range(1, len(steps) + 1), steps):
+                if step.get("off"):
+                    done.append(copy.deepcopy(step))  # kept as it was, ready to be used again
+                    continue
                 try:
                     effect = self._replay_step(scratch, step, warned)
                     parameters.apply_links(scratch.scene.shapes, known)
@@ -356,6 +378,19 @@ class HistoryActions:
         del steps[index]
         numbers = [n for n in range(1, len(steps) + 2) if n != index + 1]
         return self._rework("Cannot remove the step", "remove a step", steps, numbers=numbers)
+
+    def skip_history_step(self, index: int, skip: bool = True) -> bool:
+        """Skip step `index` (from 0), or use it again, and work the
+        project out again."""
+        steps = copy.deepcopy(self.history_steps())
+        if not 0 <= index < len(steps) or bool(steps[index].get("off")) == bool(skip):
+            return False
+        if skip:
+            steps[index]["off"] = True
+        else:
+            steps[index].pop("off", None)
+        return self._rework("Cannot skip the step" if skip else "Cannot use the step again",
+                            "skip a step" if skip else "use a step again", steps)
 
     def step_editor(self, index: int):
         """(form title, fields, settings from values) for step `index`, or
