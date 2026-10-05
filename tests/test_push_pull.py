@@ -1,5 +1,7 @@
 """Push/Pull (Expert mode): a flat face moved straight out of a part or into it."""
 
+import math
+
 import numpy as np
 import pytest
 
@@ -177,3 +179,96 @@ def test_push_pull_form_is_plain_language(qapp, close_qt_widget):
                                         note=modify_actions.PUSH_PULL_NOTE))
     for text in dialog.labels():
         assert_plain(text)
+
+
+# --- Sloping sides carried on along their slope ---------------------------------------
+
+SQUARE_20 = [{"type": "rectangle", "corner": [-10, -10], "width": 20, "height": 20}]
+SLOPE = math.tan(math.radians(10.0))
+
+
+def tapered_block():
+    """A 20 mm square narrowing 10 degrees on every side up to 10 mm high."""
+    part = extrusion(SQUARE_20)
+    part.params["taper"] = 10.0
+    return part
+
+
+def tapered_volume(top):
+    """The tapered block's volume from its base up to `top` mm."""
+    side = lambda z: 20.0 - 2.0 * z * SLOPE  # noqa: E731
+    return (side(0.0) ** 3 - side(top) ** 3) / (6.0 * SLOPE)
+
+
+@pytest.mark.parametrize("distance", [5.0, -3.0])
+def test_sloping_sides_carry_on_their_slope_when_the_face_moves(distance):
+    part = tapered_block()
+    top = face_towards(part, (0, 0, 1))
+    group = modify.push_pull(part, top, distance, follow_sides=True)
+    tm = shape_geometry(group)
+    assert tm.volume == pytest.approx(tapered_volume(10.0 + distance), rel=1e-6)
+    assert np.allclose(tm.bounds, [[-10, -10, 0], [10, 10, 10.0 + distance]], atol=1e-4)
+    straight = shape_geometry(modify.push_pull(part, top, distance)).volume
+    assert abs(straight - tm.volume) > 40.0
+
+
+def test_a_wedges_bottom_pulled_down_carries_its_slope_on():
+    wedge = new_primitive("wedge")
+    group = modify.push_pull(wedge, face_towards(wedge, (0, 0, -1)), 3.0, follow_sides=True)
+    tm = shape_geometry(group)
+    assert tm.volume == pytest.approx(0.5 * 23 * 23 * 20, rel=1e-6)
+    assert np.allclose(tm.bounds, [[-10, -10, -3], [13, 10, 20]], atol=1e-4)
+
+
+@pytest.mark.parametrize("make, near, direction, distance", [
+    (lambda: new_primitive("cube"), None, (0, 0, 1), -5.0),
+    (lambda: extrusion(WASHER), None, (0, 0, 1), 5.0),
+    (lambda: extrusion(L_SHAPE), (15, 5, 5), (0, 1, 0), -3.0),
+])
+def test_square_sides_move_the_same_either_way(make, near, direction, distance):
+    part = make()
+    face = face_towards(part, direction, near=near)
+    followed = shape_geometry(modify.push_pull(part, face, distance, follow_sides=True)).volume
+    assert followed == pytest.approx(shape_geometry(modify.push_pull(part, face, distance)).volume)
+
+
+def test_sloping_sides_that_would_cross_or_are_almost_level_are_refused():
+    part = tapered_block()
+    with pytest.raises(BuildError) as err:
+        modify.push_pull(part, face_towards(part, (0, 0, 1)), 50.0, follow_sides=True)
+    assert "meet or cross" in str(err.value)
+    assert_plain(str(err.value))
+    sliver = extrusion([
+        {"type": "line", "start": [0, 0], "end": [20, 0]},
+        {"type": "line", "start": [20, 0], "end": [20, 0.3]},
+        {"type": "line", "start": [20, 0.3], "end": [0, 0]},
+    ])
+    with pytest.raises(BuildError) as err:
+        modify.push_pull(sliver, face_towards(sliver, (0, -1, 0)), 1.0, follow_sides=True)
+    assert "almost level" in str(err.value)
+    assert_plain(str(err.value))
+    assert modify.push_pull(sliver, face_towards(sliver, (0, -1, 0)), 1.0) is not None
+
+
+def test_the_form_carries_sloping_sides_on_in_one_undo_step(window, monkeypatch, qapp):
+    window.add_primitive("wedge")
+    wedge = window.document.scene.shapes[0]
+    monkeypatch.setattr(modify_actions, "ask_push_pull", lambda parent: {"distance": 3.0, "follow_sides": True})
+    window.do_push_pull()
+    steps = len(window.document._undo)
+    window._on_surface_picked(wedge.id, face_towards(wedge, (0, 0, -1)), (0, 0, 0))
+    qapp.processEvents()
+    assert len(window.document._undo) == steps + 1
+    assert shape_geometry(window.document.scene.shapes[0]).volume == pytest.approx(0.5 * 23 * 23 * 20, rel=1e-6)
+    window.do_undo()
+    assert window.document.scene.shapes[0].id == wedge.id
+
+
+def test_carried_on_sides_round_trip_through_a_project_file(tmp_path):
+    part = tapered_block()
+    group = modify.push_pull(part, face_towards(part, (0, 0, 1)), -3.0, follow_sides=True)
+    path = tmp_path / "part.mesh"
+    save_project(Scene(shapes=[group]), path)
+    loaded = load_project(path).shapes[0]
+    assert shape_geometry(loaded).volume == pytest.approx(shape_geometry(group).volume)
+    assert ops.ungroup(loaded)[0].params == part.params

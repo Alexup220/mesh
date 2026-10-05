@@ -352,6 +352,11 @@ def scenario_push_pull(window):
     window.push_pull_face(box.id, face_towards(box, (1, 0, 0)), 5.0)
 
 
+def scenario_push_pull_carrying_sloping_sides_on(window):
+    wedge = add(window, "wedge")
+    window.push_pull_face(wedge.id, face_towards(wedge, (0, 0, -1)), 3.0, follow_sides=True)
+
+
 def scenario_round_edge(window):
     box = add(window)
     window.round_edge(box.id, face_towards(box, (0, 0, 1)), (10.0, 0.0, 20.0), 3.0)
@@ -796,7 +801,7 @@ SAMPLE_ARGS = {
     "radius": 2.0, "count": 3, "spacing": 10.0, "count2": 1, "spacing2": 30.0, "axis2": "y",
     "centre": [0.0, 0.0, 0.0], "follow": False, "plane": "x", "open_top": False, "drain": 0.0,
     "pegs": False, "peg_diameter": 4.0, "join": False, "extent": False, "symmetric": False, "skip": "",
-    "how": "equal", "distance2": 1.0, "walls": "inside",
+    "how": "equal", "distance2": 1.0, "walls": "inside", "follow_sides": False,
 }
 
 

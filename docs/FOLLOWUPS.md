@@ -145,9 +145,12 @@ tools do the closest honest version of their Fusion counterparts:
   thinner than the strip is wide.
 - **Push/Pull** moves the clicked flat face straight out or in, square to
   itself: the face's outline is pushed out as a new piece, or pushed in as a
-  Hole. That is exact where the sides next to the face are square to it.
-  Unlike Fusion, sloping sides next to the face are not extended along their
-  slope, and a round surface can't be pushed as a whole: it is narrow flat
+  Hole. Its new sides are square to it, or, if asked, each carries on the
+  slope of the side next to it, as Fusion extends them. Both are exact for
+  flat sides; a round side is narrow flat strips, each carried on along its
+  own slope, not along the curve. Carried-on sides that would meet or cross
+  are refused, as is a side almost level with the face (under about 2
+  degrees). A round surface can't be pushed as a whole: it is narrow flat
   strips, and only the strip clicked moves.
 - **Round an Edge (Fillet)** rounds runs of edges: a run is the edge next
   to a click and the edges it runs on into smoothly (turning less than 30

@@ -127,13 +127,18 @@ def ask_shell(parent, exact: bool) -> dict | None:
 
 
 def push_pull_fields():
-    return [("distance", "Distance (mm)", 5.0, {"min": -modify.MOVE_LIMIT, "max": modify.MOVE_LIMIT})]
+    return [
+        ("distance", "Distance (mm)", 5.0, {"min": -modify.MOVE_LIMIT, "max": modify.MOVE_LIMIT}),
+        ("follow_sides", "Extend sloping sides along their slope", False, {}),
+    ]
 
 
 PUSH_PULL_NOTE = (
     "More than 0 pulls the face out of the part; less than 0 pushes it in. The face moves "
-    "straight out, square to itself: a sloping side next to it is not extended. A round "
-    "surface is made of narrow flat strips, and only the strip you clicked moves."
+    "straight out, square to itself, and its new sides are square to it too, unless sloping "
+    "sides are extended: then each new side carries on the slope of the side next to it. A "
+    "round surface is made of narrow flat strips: only the strip you clicked moves, and a "
+    "round side is carried on strip by strip."
 )
 
 
@@ -575,12 +580,14 @@ class ModifyActions:
         self.viewport.end_drag()
         values = ask_push_pull(self)
         if values is not None:
-            self.push_pull_face(shape.id, face_index, values["distance"])
+            self.push_pull_face(shape.id, face_index, values["distance"], values.get("follow_sides", False))
 
     @replayable(("shape_id", "face_index"))
-    def push_pull_face(self, shape_id: str, face_index: int, distance: float) -> bool:
-        """Move a part's flat face out (`distance` > 0) or in. One undo step
-        on success."""
+    def push_pull_face(self, shape_id: str, face_index: int, distance: float,
+                       follow_sides: bool = False) -> bool:
+        """Move a part's flat face out (`distance` > 0) or in; with
+        `follow_sides`, its sloping sides carried on along their slope. One
+        undo step on success."""
         scene = self.document.scene
         try:
             shape = scene.get(shape_id)
@@ -588,7 +595,7 @@ class ModifyActions:
             return False
         group = self._attempt(
             "Cannot push or pull",
-            lambda: modify.push_pull(shape, face_index, distance, scene.fit_clearances),
+            lambda: modify.push_pull(shape, face_index, distance, scene.fit_clearances, follow_sides),
         )
         if group is None:
             return False

@@ -165,8 +165,9 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "push_pull", "modify", "&Push/Pull a Face",
         "Click a flat face of a part, then type how far to pull it out or push it in. The "
-        "face moves straight out, square to itself; sloping sides next to it are not "
-        "extended, and on a round surface only the narrow flat strip clicked moves.",
+        "face moves straight out, square to itself; sloping sides next to it can be "
+        "extended along their slope, and on a round surface only the narrow flat strip "
+        "clicked moves.",
         "do_push_pull", "Q",
     ),
     ExpertTool(
