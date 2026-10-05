@@ -263,8 +263,17 @@ reflected. What differs from Fusion is how the pattern is chosen.
   faces (within 2 mm of a corner, from the corner). A click on a round
   surface lands on one of its narrow flat strips, so the "face area" is
   that strip's and the angle is the strip's. The angle is between the
-  faces' planes (0 to 90 degrees). Fusion's measuring of edges and of a
-  round face's radius is not offered.
+  faces' planes (0 to 90 degrees). Fusion's measuring of edges is not
+  offered.
+- **Radius of a Round Face** reads the radius from the part's own sizes
+  (a cylinder, cone, tube, ring, ball, round hardware hole, a thread's
+  crest or a revolved part's outline, a Hole at its fit), so it is the
+  true radius, not the flat strips'. A cone gives both ends and the
+  radius where clicked; a ring or rounded edge gives both ways it curves.
+  A revolved part's curved outline is short straight pieces, so there it
+  is the one piece clicked. Any other part (a box, an imported part, one
+  a Modify tool has changed) or a part stretched unevenly says its radius
+  can't be told; Fusion measures any round face.
 - **Shortest Distance Between Parts** measures two selected parts as they
   are drawn (a Hole at its fit), so next to a round surface, made of flat
   strips, it can be slightly off the true distance. It gives the distance

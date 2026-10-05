@@ -45,13 +45,17 @@ def ask_section(parent, selected=None) -> dict | None:
 class InspectActions:
     """Mixed into MeshWindow through ExpertActions."""
 
-    INSPECT_CLICK_TOOLS = ("measure_faces",)
+    INSPECT_CLICK_TOOLS = ("measure_faces", "measure_radius")
     INSPECT_TOOL_PROMPTS = {
         "measure_faces": "Click a point on a flat face of a part (near a corner, it lands on the "
                          "corner). Esc stops.",
         "measure_faces_second": "Now click a point on the second face.",
+        "measure_radius": "Click the round side of a part to see its radius. Esc stops.",
     }
-    INSPECT_CLICK_HANDLERS = {"measure_faces": "_measure_face_picked"}
+    INSPECT_CLICK_HANDLERS = {
+        "measure_faces": "_measure_face_picked",
+        "measure_radius": "_measure_radius_picked",
+    }
     INSPECT_STAGED = {"measure_faces": ("measure_faces", "measure_faces_second")}
 
     MEASURE_AGAIN = "Click another face to measure again, Esc to stop."
@@ -151,6 +155,23 @@ class InspectActions:
         # Once the click is over: a window opened during it would take the
         # mouse button's release.
         QTimer.singleShot(0, lambda: self._show_measurement("Measure Between Faces", text))
+
+    RADIUS_AGAIN = "Click another round side to measure it, Esc to stop."
+
+    def do_measure_radius(self) -> None:
+        self._start_construct_tool("measure_radius")
+
+    def _measure_radius_picked(self, shape_id: str, face_index: int, point=None) -> None:
+        shape = self._clicked_part(shape_id, face_index)
+        if shape is None:
+            return
+        found = measure.round_face(shape, face_index, point, self.document.scene.fit_clearances)
+        if found.line is None:
+            self.viewport.clear_measure_line()
+        else:
+            self.viewport.set_measure_line(*found.line)
+        self.statusBar().showMessage(self.RADIUS_AGAIN)
+        QTimer.singleShot(0, lambda: self._show_measurement("Radius of a Round Face", found.text))
 
     def measure_selected(self) -> bool:
         parts = [s for s in self._picked() if not is_reference(s)]

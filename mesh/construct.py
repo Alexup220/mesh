@@ -177,6 +177,7 @@ class RoundSpot:
     facing: np.ndarray  # the way out of the part there (world)
     around: float       # how far the point is from the part's line (mm)
     piece: tuple        # the outline piece it is on: ("line", a, b) or ("arc", centre, radius, start, end)
+    centre: np.ndarray  # what it curves round there (world): an arc's middle, else the part's line
 
 
 def _line(a, b) -> tuple:
@@ -438,7 +439,9 @@ def round_spot(shape, face_index: int, point, clearances: dict | None = None) ->
             raise BuildError(FLAT_HERE.format(name=shape.name))
         raise BuildError(OFF_ROUND.format(name=shape.name))
     world = frame[:3, 3] + turn @ np.array([at[0] * out_dir[0], at[0] * out_dir[1], at[1]])
-    return RoundSpot(world, _unit(turn @ facing, shape.name), float(at[0]), piece)
+    middle = (piece[1][0], piece[1][1]) if piece[0] == "arc" else (0.0, at[1])
+    centre = frame[:3, 3] + turn @ np.array([middle[0] * out_dir[0], middle[0] * out_dir[1], middle[1]])
+    return RoundSpot(world, _unit(turn @ facing, shape.name), float(at[0]), piece, centre)
 
 
 # --- Planes -----------------------------------------------------------------------

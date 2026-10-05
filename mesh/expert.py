@@ -357,6 +357,15 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_measure_faces",
     ),
     ExpertTool(
+        "measure_radius", "inspect", "&Radius of a Round Face",
+        "Click the round side of a cylinder, cone, tube, ring, ball, thread, round hardware hole "
+        "or revolved part to see its radius, read from the part's own sizes rather than from "
+        "the narrow flat strips it is drawn with. A cone's radius changes along it: you see both "
+        "ends and the radius where you clicked. Where it can't be told (a box, an imported part, "
+        "a part stretched unevenly) it says so.",
+        "do_measure_radius",
+    ),
+    ExpertTool(
         "measure_volume", "inspect", "&Volume and Area",
         "See how much space the selected parts take up, their surface area all the way round "
         "and their size. Selected Holes are cut out and overlaps counted once, as they would "

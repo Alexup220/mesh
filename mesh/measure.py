@@ -1,6 +1,7 @@
 """Measuring for Expert mode's Inspect menu: between two clicked faces
-(distance, angle, gap and each face's area), the shortest distance
-between two parts, and the selected parts' volume, surface area and size.
+(distance, angle, gap and each face's area), a clicked round face's
+radius, the shortest distance between two parts, and the selected parts'
+volume, surface area and size.
 
 Measuring never changes anything. The beginner Measure tool (distance
 between two clicks, in mesh.app) is unchanged.
@@ -13,7 +14,7 @@ import numpy as np
 from mesh import construct, ops
 from mesh.builders import BuildError
 from mesh.modify import flat_face
-from mesh.shapes import is_reference, shape_geometry
+from mesh.shapes import default_params, hole_clearance, is_reference, shape_geometry
 from mesh.solids import m3, to_manifold
 
 PARALLEL = 0.01  # degrees: faces this close to parallel are parallel
@@ -79,6 +80,56 @@ def describe(first: Clicked, second: Clicked) -> str:
 
 
 HAS_GAPS = "{name} has gaps, so it has no inside to measure."
+
+
+# --- The radius of a round face ----------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RoundFace:
+    text: str
+    line: tuple | None  # (from, to): the radius measured, to draw; None if it can't be told
+
+
+def round_face(shape, face_index: int, point, clearances: dict | None = None) -> RoundFace:
+    """What a click on a part's round face measures, read from the part's
+    own sizes (construct.round_spot), or plainly why it can't be told."""
+    try:
+        found = construct.round_spot(shape, face_index, point, clearances)
+    except BuildError as exc:
+        text = str(exc)
+        if shape.kind == "primitive" and shape.params.get("primitive") == "thread" and not is_reference(shape):
+            # Its sloping sides wind round it: give its outer size instead.
+            size = float(shape.params.get("diameter", default_params("thread")["diameter"]))
+            size += 2.0 * hole_clearance(shape, clearances)
+            text += f" A thread's sloping sides wind round it; its outer diameter is {size:.2f} mm."
+        return RoundFace(text, None)
+    name = shape.name
+    piece = found.piece
+    here = found.around
+    if piece[0] == "arc":
+        across, middle = piece[2], abs(float(piece[1][0]))
+        if middle < 1e-6:
+            text = (f"{name}: this round face is part of a ball, radius {across:.2f} mm "
+                    f"(diameter {2 * across:.2f} mm).")
+        else:
+            text = (f"{name}: this round face curves two ways. Across it, the radius is {across:.2f} mm, "
+                    f"curving round a point {middle:.2f} mm from the part's middle line. Round that "
+                    f"line, where clicked, the radius is {here:.2f} mm.")
+    else:
+        (low, z0), (high, z1) = piece[1], piece[2]
+        if abs(high - low) < 1e-9:
+            text = (f"{name}: this round face is a cylinder, radius {here:.2f} mm "
+                    f"(diameter {2 * here:.2f} mm).")
+        else:
+            slope = float(np.degrees(np.arctan2(abs(high - low), abs(z1 - z0))))
+            text = (f"{name}: this round face is a cone, its radius going from {min(low, high):.2f} mm to "
+                    f"{max(low, high):.2f} mm, sloping {slope:.1f}° to the part's middle line. Where "
+                    f"clicked the radius is {here:.2f} mm (diameter {2 * here:.2f} mm).")
+            if shape.params.get("primitive") == "revolve":
+                text += (" A revolved part's outline is made of short straight pieces, so on a curve in "
+                         "it this is the one piece clicked.")
+    return RoundFace(text, (found.centre, found.point))
 
 
 # --- The shortest distance between two parts -------------------------------------------

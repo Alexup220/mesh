@@ -223,6 +223,116 @@ def test_turning_expert_mode_off_puts_the_measurements_away(window, qapp):
     assert window.tool is None and not window.measure_window.isVisible()
 
 
+# --- The radius of a round face ----------------------------------------------------------
+
+
+def strip_towards(shape, direction, clearances=None):
+    """A narrow flat strip of a round part facing `direction` (the furthest
+    that way, of those facing it), and its middle."""
+    tm = shape_geometry(shape, clearances)
+    direction = np.asarray(direction, dtype=np.float64)
+    facing = tm.face_normals @ direction
+    candidates = np.flatnonzero(facing > facing.max() - 1e-6)
+    face = int(candidates[np.argmax(tm.triangles_center[candidates] @ direction)])
+    return face, tm.triangles_center[face]
+
+
+def radius_of(shape, direction, clearances=None):
+    face, middle = strip_towards(shape, direction, clearances)
+    return measure.round_face(shape, face, middle, clearances)
+
+
+def test_the_radius_of_a_cylinder_a_cone_and_a_ball():
+    found = radius_of(new_primitive("cylinder"), (1, 1, 0))  # 20 across
+    assert found.text == "Cylinder: this round face is a cylinder, radius 10.00 mm (diameter 20.00 mm)."
+    centre, point = found.line  # from the part's middle line out to its true round side
+    assert centre[:2] == pytest.approx((0.0, 0.0)) and np.hypot(point[0], point[1]) == pytest.approx(10.0)
+    assert point[2] == pytest.approx(centre[2])
+    cone = radius_of(new_primitive("cone"), (1, 0, 0.5))  # 20 across at the bottom, 20 high
+    assert "a cone, its radius going from 0.00 mm to 10.00 mm, sloping 26.6°" in cone.text
+    centre, point = cone.line
+    assert np.hypot(point[0], point[1]) == pytest.approx(10.0 * (1 - point[2] / 20.0))
+    ball = radius_of(new_primitive("sphere"), (1, -1, 1))
+    assert ball.text == "Sphere: this round face is part of a ball, radius 10.00 mm (diameter 20.00 mm)."
+    assert np.linalg.norm(ball.line[1] - ball.line[0]) == pytest.approx(10.0)
+
+
+def test_a_ring_and_a_rounded_edge_curve_two_ways():
+    ring = radius_of(new_primitive("torus"), (1, 0, 0))  # 20 across, 6 thick
+    assert ("Across it, the radius is 3.00 mm, curving round a point 7.00 mm from the part's middle line. "
+            "Round that line, where clicked, the radius is ") in ring.text
+    assert np.linalg.norm(ring.line[1] - ring.line[0]) == pytest.approx(3.0)
+    rounded = new_primitive("rounded_cylinder")  # 20 across, its top edge rounded 3 mm
+    found = radius_of(rounded, (1, 0, 1))
+    assert "Across it, the radius is 3.00 mm, curving round a point 7.00 mm" in found.text
+
+
+def test_the_inside_of_a_tube_and_a_fitted_hole():
+    tube = new_primitive("tube")  # 20 across with 2 mm walls
+    tm = shape_geometry(tube)
+    inward = np.column_stack([-tm.triangles_center[:, :2], np.zeros(len(tm.faces))])
+    inside = int(np.argmax(np.einsum("ij,ij->i", tm.face_normals, inward)))
+    found = measure.round_face(tube, inside, tm.triangles_center[inside])
+    assert "a cylinder, radius 8.00 mm (diameter 16.00 mm)" in found.text
+    hole = new_primitive("cylinder")
+    hole.is_hole, hole.fit = True, "loose"
+    fits = {"press": 0.1, "snug": 0.2, "loose": 0.4}
+    assert "radius 10.40 mm (diameter 20.80 mm)" in radius_of(hole, (1, 0, 0), fits).text  # as drawn
+
+
+def test_the_radius_of_a_revolved_part():
+    from mesh import create, sketch
+
+    outline = create.new_sketch([{"type": "rectangle", "corner": [5, 0], "width": 5, "height": 10}],
+                                sketch.plane_frame((0, -1, 0)))
+    turned = create.make_revolve(outline, "y")
+    assert "a cylinder, radius 10.00 mm (diameter 20.00 mm)" in radius_of(turned, (1, 0, 0)).text
+
+
+def test_saying_plainly_when_the_radius_cant_be_told():
+    cylinder = new_primitive("cylinder")
+    end = measure.round_face(cylinder, face_towards(cylinder, (0, 0, 1)), (0, 0, 20))
+    assert end.text == "That face of Cylinder is flat, not round." and end.line is None
+    box = measure.round_face(new_primitive("cube"), 0, (0, 0, 0))
+    assert "Box is not a cylinder, cone, tube, ring, ball" in box.text and box.line is None
+    stretched = new_primitive("cylinder")
+    stretched.transform[0, 0] = 2.0
+    found = radius_of(stretched, (1, 0, 0))
+    assert "is stretched, so its round surfaces can't be told" in found.text and found.line is None
+    thread = new_primitive("thread")  # 10 across
+    tm = shape_geometry(thread)
+    flank = int(np.argmax(np.abs(tm.face_normals[:, 2]) * (np.abs(tm.face_normals[:, 2]) < 0.9)))
+    found = measure.round_face(thread, flank, tm.triangles_center[flank])
+    assert found.text.endswith("A thread's sloping sides wind round it; its outer diameter is 10.00 mm.")
+    for text in (end.text, box.text, found.text):
+        assert_plain(text)
+
+
+def test_measuring_the_radius_of_a_clicked_round_face(window, qapp):
+    cylinder = add(window, "cylinder")
+    steps, revision = len(window.document._undo), window.document.revision
+    window.do_measure_radius()
+    assert window.tool == "measure_radius"
+    assert window.statusBar().currentMessage() == window.TOOL_PROMPTS["measure_radius"]
+    face, middle = strip_towards(cylinder, (0, -1, 0))
+    window._on_surface_picked(cylinder.id, face, middle)
+    qapp.processEvents()
+    assert window.measure_window.text().startswith("Cylinder: this round face is a cylinder, radius 10.00 mm")
+    assert window.measure_window.windowTitle() == "Radius of a Round Face"
+    assert window.viewport.measure_actor is not None
+    # Still measuring; nothing changed.
+    assert window.tool == "measure_radius" and window.statusBar().currentMessage() == window.RADIUS_AGAIN
+    assert len(window.document._undo) == steps and window.document.revision == revision
+    window._on_surface_picked(cylinder.id, face_towards(cylinder, (0, 0, 1)), (0, 0, 20))
+    qapp.processEvents()
+    assert window.measure_window.text() == "That face of Cylinder is flat, not round."
+    assert window.viewport.measure_actor is None
+    window._on_surface_picked("", -1, (0, 0, 0))  # nothing there: keeps waiting
+    assert window.tool == "measure_radius"
+    window.stop_tool()
+    assert window.tool is None
+
+
 # --- The shortest distance between two parts ---------------------------------------------
 
 
@@ -298,7 +408,7 @@ def test_measure_text_is_plain_language():
     from mesh.inspect_actions import InspectActions
 
     for text in (*InspectActions.INSPECT_TOOL_PROMPTS.values(), InspectActions.MEASURE_AGAIN,
-                 InspectActions.VOLUME_HINT, InspectActions.GAP_HINT, measure.GAP_NOTE, measure.OPEN_SURFACE,
+                 InspectActions.VOLUME_HINT, InspectActions.GAP_HINT, InspectActions.RADIUS_AGAIN, measure.GAP_NOTE, measure.OPEN_SURFACE,
                  *(t.tip for t in TOOLS if t.menu == "inspect"),
                  *(t.label for t in TOOLS if t.menu == "inspect")):
         assert_plain(text)
