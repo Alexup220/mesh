@@ -374,10 +374,11 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_measure_edge",
     ),
     ExpertTool(
-        "measure_volume", "inspect", "&Volume and Area",
-        "See how much space the selected parts take up, their surface area all the way round "
-        "and their size. Selected Holes are cut out and overlaps counted once, as they would "
-        "print together.",
+        "measure_volume", "inspect", "&Volume and Area...",
+        "See how much space the selected parts take up, their surface area all the way round, "
+        "their size and centre of gravity, and what they would weigh made solid of a material "
+        "you choose (PLA, PETG, ABS, ASA, TPU, Nylon or a density you type, in g/cm³). Selected "
+        "Holes are cut out and overlaps counted once, as they would print together.",
         "do_measure_volume",
     ),
     ExpertTool(

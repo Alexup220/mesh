@@ -142,6 +142,48 @@ def test_describing_the_amount():
     assert_plain(one)
 
 
+def test_the_centre_of_gravity():
+    box = new_primitive("cube")  # 20 wide, from 0 up to 20
+    assert measure.amount([box]).centre == pytest.approx((0.0, 0.0, 10.0))
+    a, b = new_primitive("cube"), new_primitive("cube")
+    b.transform[0, 3] = 40.0
+    b.params.update(height=40.0)  # twice the first: the middle is two thirds of the way across
+    assert measure.amount([a, b]).centre == pytest.approx((80.0 / 3.0, 0.0, 50.0 / 3.0))
+    hole = new_primitive("cube")
+    hole.is_hole = True
+    hole.transform[:3, 3] = (0, 0, 10)  # takes off the top half
+    assert measure.amount([new_primitive("cube"), hole]).centre == pytest.approx((0.0, 0.0, 5.0))
+
+
+def test_the_weight_in_a_chosen_material():
+    assert measure.material("pla") == ("PLA", 1.24)
+    assert [key for key, _name, _density in measure.MATERIALS] == ["pla", "petg", "abs", "asa", "tpu", "nylon"]
+    assert measure.material(measure.TYPED, 2.7) == (None, 2.7)
+    for typed in (0.0, -1.0):
+        with pytest.raises(BuildError) as err:
+            measure.material(measure.TYPED, typed)
+        assert str(err.value) == measure.NO_DENSITY
+    with pytest.raises(BuildError):
+        measure.material("gold")
+    found = measure.Amount(8000.0, 2400.0, np.array([20.0, 20.0, 20.0]), np.array([0.0, 0.0, 10.0]))
+    assert measure.weight(found, 1.24) == pytest.approx(9.92)
+
+
+def test_describing_the_centre_of_gravity_and_the_weight():
+    found = measure.Amount(8000.0, 2400.0, np.array([20.0, 20.0, 20.0]), np.array([1.5, -2.0, 10.0]))
+    lines = measure.describe_amount(found, 1, measure.material("pla")).split("\n")
+    assert lines[3] == ("Centre of gravity, the same material all through: left/right 1.50 mm, "
+                        "forward/back -2.00 mm, up/down 10.00 mm.")
+    assert lines[4] == "Weight, solid PLA (1.24 g/cm³) all through: 9.92 g."
+    typed = measure.describe_amount(found, 1, measure.material(measure.TYPED, 2.7))
+    assert typed.endswith("Weight, solid at 2.70 g/cm³ all through: 21.60 g.")
+    big = measure.Amount(1_000_000.0, 60000.0, np.array([100.0, 100.0, 100.0]), np.zeros(3))
+    assert measure.describe_amount(big, 1, ("PETG", 1.27)).endswith(": 1270.00 g (1.270 kg).")
+    assert len(measure.describe_amount(found, 1).split("\n")) == 4  # no material, no weight
+    for text in (typed, "\n".join(lines), measure.NO_DENSITY):
+        assert_plain(text)
+
+
 # --- In the window ----------------------------------------------------------------------
 
 
@@ -205,6 +247,49 @@ def test_volume_and_area_of_the_selected_parts(window, warnings):
     window.document.scene.select([])
     window.do_measure_volume()
     assert window.statusBar().currentMessage() == window.VOLUME_HINT and not warnings
+
+
+def test_volume_and_area_weighs_the_parts_as_the_chosen_material(window, warnings, monkeypatch):
+    from mesh import inspect_actions
+
+    asked = []
+    answers = [None, {"material": "petg", "density": 1.0},
+               {"material": measure.TYPED, "density": 2.7}]
+
+    def ask(parent, material, density):
+        asked.append((material, density))
+        return answers.pop(0)
+
+    monkeypatch.setattr(inspect_actions, "ask_volume", ask)
+    box = add(window, "cube")
+    window.document.scene.select([])
+    window.do_measure_volume()  # nothing selected: not asked
+    assert window.statusBar().currentMessage() == window.VOLUME_HINT and asked == []
+    window.document.scene.select([box.id])
+    steps, revision = len(window.document._undo), window.document.revision
+    window.do_measure_volume()  # cancelled
+    assert getattr(window, "measure_window", None) is None
+    window.do_measure_volume()
+    text = window.measure_window.text()
+    assert "Centre of gravity, the same material all through: left/right 0.00 mm" in text
+    assert text.endswith("Weight, solid PETG (1.27 g/cm³) all through: 10.16 g.")
+    window.do_measure_volume()  # the last choice comes up again
+    assert asked == [("pla", 1.0), ("pla", 1.0), ("petg", 1.0)]
+    assert window.measure_window.text().endswith("Weight, solid at 2.70 g/cm³ all through: 21.60 g.")
+    assert len(window.document._undo) == steps and window.document.revision == revision and not warnings
+    assert not window.measure_selected(measure.TYPED, 0.0) and warnings == [measure.NO_DENSITY]
+
+
+def test_the_volume_form_is_plain_language(qapp, close_qt_widget):
+    from mesh.inspect_actions import VOLUME_NOTE, volume_fields
+    from mesh.panels import FormDialog
+
+    dialog = close_qt_widget(FormDialog(None, "Volume and Area", volume_fields("asa", 2.5), VOLUME_NOTE))
+    assert dialog.values() == {"material": "asa", "density": 2.5}
+    texts = [VOLUME_NOTE, *dialog.labels()]
+    texts += [dialog.widgets["material"].itemText(i) for i in range(dialog.widgets["material"].count())]
+    for text in texts:
+        assert_plain(text)
 
 
 def test_a_hole_alone_is_refused(window, warnings):

@@ -1,7 +1,8 @@
 """Measuring for Expert mode's Inspect menu: between two clicked faces
 (distance, angle, gap and each face's area), a clicked round face's
-radius, a clicked edge's length, the shortest distance between two parts, and the selected parts'
-volume, surface area and size.
+radius, a clicked edge's length, the shortest distance between two
+parts, and the selected parts' volume, surface area, size, centre of
+gravity and weight in a chosen material.
 
 Measuring never changes anything. The beginner Measure tool (distance
 between two clicks, in mesh.app) is unchanged.
@@ -43,6 +44,21 @@ class Amount:
     volume: float  # cubic mm
     area: float  # square mm, all the way round
     size: np.ndarray  # width, depth and height in mm
+    centre: np.ndarray | None = None  # the centre of gravity, the same material all through
+
+
+# Materials to weigh parts as: (key, name, density in g/cm³), and the key
+# for a density typed in.
+MATERIALS = (
+    ("pla", "PLA", 1.24),
+    ("petg", "PETG", 1.27),
+    ("abs", "ABS", 1.04),
+    ("asa", "ASA", 1.07),
+    ("tpu", "TPU", 1.21),
+    ("nylon", "Nylon", 1.14),
+)
+TYPED = "typed"
+NO_DENSITY = "Type a density above 0 g/cm³ to weigh the parts."
 
 
 def clicked(shape, face_index: int, point, clearances: dict | None = None) -> Clicked:
@@ -207,14 +223,46 @@ def amount(shapes, clearances: dict | None = None) -> Amount:
     if not solid.is_watertight:
         name = next(s.name for s in shapes if not s.is_hole and not is_reference(s))
         raise BuildError(HAS_GAPS.format(name=name))
-    return Amount(float(solid.volume), float(solid.area), np.asarray(solid.extents, dtype=np.float64))
+    return Amount(float(solid.volume), float(solid.area), np.asarray(solid.extents, dtype=np.float64),
+                  np.asarray(solid.center_mass, dtype=np.float64))
 
 
-def describe_amount(found: Amount, count: int) -> str:
+def material(key: str, typed: float = 0.0) -> tuple[str | None, float]:
+    """(name, density in g/cm³) of a MATERIALS key, or (None, `typed`)
+    for TYPED."""
+    for known, name, density in MATERIALS:
+        if key == known:
+            return name, density
+    if key != TYPED:
+        raise BuildError("Choose a material to weigh the parts as.")
+    if not float(typed) > 0.0:
+        raise BuildError(NO_DENSITY)
+    return None, float(typed)
+
+
+def weight(found: Amount, density: float) -> float:
+    """Grams, made solid of a material of `density` g/cm³ all through."""
+    return found.volume / 1000.0 * float(density)
+
+
+def describe_amount(found: Amount, count: int, weigh_as: tuple[str | None, float] | None = None) -> str:
+    """The lines Volume and Area shows; with `weigh_as` (a material's
+    name, or None for a typed one, and its density), the weight too."""
     what = "The selected part takes" if count == 1 else f"The {count} selected parts, together, take"
     w, d, h = found.size
-    return "\n".join([
+    lines = [
         f"{what} up {found.volume:.2f} mm³ ({found.volume / 1000.0:.2f} cm³).",
         f"Surface area all the way round: {found.area:.2f} mm².",
         f"Size: {w:.2f} x {d:.2f} x {h:.2f} mm (width x depth x height).",
-    ])
+    ]
+    if found.centre is not None:
+        x, y, z = found.centre
+        lines.append(f"Centre of gravity, the same material all through: left/right {x:.2f} mm, "
+                     f"forward/back {y:.2f} mm, up/down {z:.2f} mm.")
+    if weigh_as is not None:
+        name, density = weigh_as
+        grams = weight(found, density)
+        heavy = f"{grams:.2f} g" + (f" ({grams / 1000.0:.3f} kg)" if grams >= 1000.0 else "")
+        made = f"solid {name} ({density:.2f} g/cm³)" if name else f"solid at {density:.2f} g/cm³"
+        lines.append(f"Weight, {made} all through: {heavy}.")
+    return "\n".join(lines)

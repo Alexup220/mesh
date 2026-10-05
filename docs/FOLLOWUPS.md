@@ -285,8 +285,12 @@ reflected. What differs from Fusion is how the pattern is chosen.
   overlap are said to (Fusion draws the nearest points). A part with gaps
   in its surface can't be measured.
 - **Volume and Area** measures the selected parts as they would print
-  together (overlaps once, selected Holes cut out). Fusion's mass and
-  centre of gravity are not offered.
+  together (overlaps once, selected Holes cut out). The centre of gravity
+  and the weight take the same material all through, solid: the weight
+  is the volume times the density of PLA, PETG, ABS, ASA, TPU, Nylon or a
+  typed density, chosen in its form each time (the last choice comes up
+  again until the app closes; it is not saved with the project). Fusion's
+  material per part and its moments of inertia are not offered.
 - **Thread** goes on a plain cylinder only (Fusion threads any round
   face): a threaded hole is a cylinder Hole with a thread, grouped with
   the part. Only the ISO metric shape is offered (no inch, pipe, tapered

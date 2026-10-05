@@ -42,6 +42,27 @@ def ask_section(parent, selected=None) -> dict | None:
     return run_form(parent, "Section View", section_fields(selected), note=SECTION_NOTE)
 
 
+def volume_fields(material: str = "pla", density: float = 1.0):
+    choices = [(key, f"{name} ({value:.2f} g/cm³)") for key, name, value in measure.MATERIALS]
+    choices.append((measure.TYPED, "Another material: the density typed below"))
+    return [
+        ("material", "Weigh them as", material, {"choices": choices}),
+        ("density", "Another material's density (g/cm³)", float(density),
+         {"min": 0.01, "max": 25.0, "decimals": 2, "step": 0.05}),
+    ]
+
+
+VOLUME_NOTE = (
+    "Shows the selected parts' volume, surface area all the way round, size and centre of "
+    "gravity, and what they would weigh made solid of the material chosen: their volume times "
+    "its density. Selected Holes are cut out and overlaps counted once."
+)
+
+
+def ask_volume(parent, material: str = "pla", density: float = 1.0) -> dict | None:
+    return run_form(parent, "Volume and Area", volume_fields(material, density), note=VOLUME_NOTE)
+
+
 class InspectActions:
     """Mixed into MeshWindow through ExpertActions."""
 
@@ -191,20 +212,38 @@ class InspectActions:
         text = measure.describe_edge(shape.name, found)
         QTimer.singleShot(0, lambda: self._show_measurement("Length of an Edge", text))
 
-    def measure_selected(self) -> bool:
+    # What Volume and Area weighs the parts as (a measure.MATERIALS key or
+    # measure.TYPED, and the typed density): the last chosen, this session.
+    _weigh_as = ("pla", 1.0)
+
+    def measure_selected(self, material: str | None = None, density: float = 1.0) -> bool:
+        """Volume, area, size and centre of gravity of the selected parts,
+        and with `material` (see measure.material) their weight."""
         parts = [s for s in self._picked() if not is_reference(s)]
         if not parts:
             self.statusBar().showMessage(self.VOLUME_HINT)
             return False
-        found = self._attempt("Cannot measure", lambda: measure.amount(parts, self.document.scene.fit_clearances))
+
+        def work():
+            weigh_as = None if material is None else measure.material(material, density)
+            return measure.amount(parts, self.document.scene.fit_clearances), weigh_as
+
+        found = self._attempt("Cannot measure", work)
         if found is None:
             return False
         solids = sum(1 for s in parts if not s.is_hole)
-        self._show_measurement("Volume and Area", measure.describe_amount(found, solids))
+        self._show_measurement("Volume and Area", measure.describe_amount(found[0], solids, found[1]))
         return True
 
     def do_measure_volume(self) -> None:
-        self.measure_selected()
+        if not any(not is_reference(s) for s in self._picked()):
+            self.statusBar().showMessage(self.VOLUME_HINT)
+            return
+        values = ask_volume(self, *self._weigh_as)
+        if values is None:
+            return
+        self._weigh_as = (values["material"], values["density"])
+        self.measure_selected(values["material"], values["density"])
 
     GAP_HINT = "Select two parts to measure the shortest distance between them."
 
