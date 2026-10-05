@@ -193,10 +193,12 @@ reflected. What differs from Fusion is how the pattern is chosen.
 - **Copies are separate parts**, as Duplicate makes, not one feature.
   Changing the original later does not change the copies, and patterned
   Holes cut once grouped with the part, like any Hole.
-- **Mirror makes copies only.** Fusion can also mirror a part into one
-  joined body; here Combine (Join) joins a copy to its part. The plane is a
-  selected sketch's plane or construction plane, a clicked flat face, or one
-  of the three middle planes through 0.
+- **Mirror** makes copies, or joins each image to its part into one part
+  as Combine's Join does (a group, so Ungroup takes them apart; an image
+  that doesn't touch its part is still joined into the same part, where
+  Fusion would keep two bodies). The plane is a selected sketch's plane or
+  construction plane, a clicked flat face, or one of the three middle
+  planes through 0.
 
 ## Expert mode, Phase 4 (Construct and Inspect): approximations and limits
 

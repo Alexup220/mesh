@@ -375,6 +375,16 @@ def scenario_mirror_across_face(window):
     window.mirror_across_face(second.id, face_towards(second, (1, 0, 0)), [first.id])
 
 
+def scenario_mirror_into_one(window):
+    add(window, dx=5.0)
+    window.mirror_copy_selected("x", join=True)
+
+
+def scenario_mirror_into_one_across_face(window):
+    first, second = two_boxes(window)
+    window.mirror_across_face(second.id, face_towards(second, (1, 0, 0)), [first.id], join=True)
+
+
 def scenario_plane_distance(window):
     window.plane_at_distance_selected("xy", 15.0)
 
@@ -705,7 +715,7 @@ SAMPLE_ARGS = {
     "about": "base", "op": "union", "keep_tools": False, "keep_tool": False, "wall": 2.0, "far_side": False,
     "radius": 2.0, "count": 3, "spacing": 10.0, "count2": 1, "spacing2": 30.0, "axis2": "y",
     "centre": [0.0, 0.0, 0.0], "follow": False, "plane": "x", "open_top": False, "drain": 0.0,
-    "pegs": False, "peg_diameter": 4.0,
+    "pegs": False, "peg_diameter": 4.0, "join": False,
 }
 
 

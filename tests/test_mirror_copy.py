@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from mesh import create, pattern_actions, patterns, sketch
+from mesh import create, ops, pattern_actions, patterns, sketch
 from mesh.builders import BuildError
 from mesh.io_formats import load_project, save_project
 from mesh.scene import Scene, new_primitive
@@ -129,13 +129,22 @@ def test_mirroring_is_one_undo_step_and_selects_the_parts_and_copies(window):
     assert [s.id for s in window.document.scene.shapes] == [box.id]
 
 
-def test_with_a_sketch_selected_mirror_uses_its_plane_without_asking(window, monkeypatch):
-    monkeypatch.setattr(pattern_actions, "ask_mirror", lambda parent: pytest.fail("no form with a sketch"))
+def test_with_a_sketch_selected_mirror_uses_its_plane_and_asks_only_whether_to_join(window, monkeypatch):
+    seen = {}
+
+    def ask(parent, selected=None):
+        seen["selected"] = selected
+        return {"plane": "selected", "join": False}
+
+    monkeypatch.setattr(pattern_actions, "ask_mirror", ask)
     box = add_box(window)
     window.add_sketch(SQUARE, sketch.plane_frame((1.0, 0.0, 0.0), (30.0, 0.0, 0.0)))
     guide = window.document.scene.shapes[1]
     window.document.scene.select([box.id, guide.id])
     window.do_mirror_copy()
+    assert seen["selected"] == guide.name
+    assert [f[0] for f in pattern_actions.mirror_fields(guide.name)] == ["plane", "join"]
+    assert pattern_actions.mirror_fields(guide.name)[0][3]["choices"] == [("selected", f"The selected {guide.name}")]
     shapes = window.document.scene.shapes
     assert len(shapes) == 3 and middle(shapes[2]) == (60, 0, 10)
     assert guide.id not in window.document.scene.selection
@@ -234,12 +243,108 @@ def test_mirrored_copies_round_trip_through_a_project_file(tmp_path):
     assert shape_geometry(loaded[1]).volume == pytest.approx(shape_geometry(wedge).volume)
 
 
+# --- Mirrored into one part -----------------------------------------------------------------
+
+
+def test_each_part_and_its_image_are_joined_into_one_part():
+    wedge = lopsided()
+    [joined] = patterns.mirrored_into_one([wedge], (0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    [image] = patterns.mirrored([wedge], (0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    tm = shape_geometry(joined)
+    assert joined.kind == "group" and tm.is_volume
+    assert tm.volume == pytest.approx(2 * shape_geometry(wedge).volume)
+    both = np.array([shape_geometry(wedge).bounds, shape_geometry(image).bounds])
+    assert tm.bounds == pytest.approx(np.array([both[:, 0].min(axis=0), both[:, 1].max(axis=0)]), abs=1e-4)
+    assert joined.name == f"{wedge.name} (mirrored, joined)" and joined.id != wedge.id
+    part, again = ops.ungroup(joined)
+    assert part.id == wedge.id and part.params == wedge.params
+    assert corners(again) == corners(image)
+
+
+def test_a_part_touching_the_plane_joins_its_image_where_they_meet():
+    box = new_primitive("cube")
+    box.transform[0, 3] = 10.0  # its left face lies on the plane x = 0
+    [joined] = patterns.mirrored_into_one([box], (0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    tm = shape_geometry(joined)
+    assert tm.volume == pytest.approx(16000.0) and tm.bounds[:, 0] == pytest.approx([-20.0, 20.0])
+    assert len(tm.split(only_watertight=False)) == 1
+
+
+def test_a_hole_is_not_joined_to_its_image():
+    box, hole = new_primitive("cube"), new_primitive("cylinder")
+    hole.is_hole = True
+    with pytest.raises(BuildError) as err:
+        patterns.mirrored_into_one([box, hole], (0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    assert "is a Hole" in str(err.value) and "separate copy" in str(err.value)
+    assert_plain(str(err.value))
+
+
+def test_sketches_are_not_joined_either():
+    with pytest.raises(BuildError) as err:
+        patterns.mirrored_into_one([create.new_sketch(SQUARE, np.eye(4))], (0, 0, 0), (1, 0, 0))
+    assert_plain(str(err.value))
+
+
+def test_mirroring_into_one_part_replaces_the_parts_in_one_undo_step(window):
+    box = add_box(window, 20.0)
+    other = add_box(window, -40.0)
+    window.document.scene.select([box.id, other.id])
+    steps = len(window.document._undo)
+    assert window.mirror_copy_selected("x", join=True)
+    scene = window.document.scene
+    assert len(scene.shapes) == 2 and len(window.document._undo) == steps + 1
+    assert all(s.kind == "group" for s in scene.shapes)
+    assert scene.selection == [s.id for s in scene.shapes]
+    assert [ops.ungroup(s)[0].id for s in scene.shapes] == [box.id, other.id]
+    assert [shape_geometry(s).volume for s in scene.shapes] == pytest.approx([16000.0, 16000.0])
+    window.do_undo()
+    assert [s.id for s in window.document.scene.shapes] == [box.id, other.id]
+
+
+def test_the_form_can_join_across_a_middle_plane_or_a_clicked_face(window, monkeypatch, qapp):
+    monkeypatch.setattr(pattern_actions, "ask_mirror", lambda parent: {"plane": "x", "join": True})
+    add_box(window, 20.0)
+    window.do_mirror_copy()
+    [joined] = window.document.scene.shapes
+    assert joined.name == "Box (mirrored, joined)"
+    window.do_undo()
+    monkeypatch.setattr(pattern_actions, "ask_mirror", lambda parent: {"plane": "face", "join": True})
+    box = window.document.scene.shapes[0]
+    wall = add_box(window, 60.0)
+    window.document.scene.select([box.id])
+    window.do_mirror_copy()
+    window._on_surface_picked(wall.id, face_towards(wall, (-1, 0, 0)), (50, 0, 10))
+    qapp.processEvents()  # mirrored once the click is over
+    shapes = window.document.scene.shapes
+    assert len(shapes) == 2 and shapes[1].name == "Box (mirrored, joined)"
+    assert shape_geometry(shapes[1]).bounds[:, 0] == pytest.approx([10.0, 90.0])
+
+
+def test_a_refused_join_changes_nothing(window, warnings):
+    box = add_box(window)
+    steps = len(window.document._undo)
+    assert not window.mirror_across_face(box.id, -1, [box.id], join=True)
+    assert warnings and len(window.document._undo) == steps
+    assert [s.id for s in window.document.scene.shapes] == [box.id]
+
+
+def test_a_joined_mirror_round_trips_through_a_project_file(tmp_path):
+    shapes = patterns.mirrored_into_one([lopsided()], (5.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    file = tmp_path / "parts.mesh"
+    save_project(Scene(shapes=shapes), file)
+    [loaded] = load_project(file).shapes
+    assert loaded.name == shapes[0].name and loaded.kind == "group"
+    assert shape_geometry(loaded).volume == pytest.approx(shape_geometry(shapes[0]).volume)
+    assert [corners(s) for s in ops.ungroup(loaded)] == [corners(s) for s in ops.ungroup(shapes[0])]
+
+
 def test_mirror_form_is_plain_language(qapp, close_qt_widget):
     from mesh.panels import FormDialog
 
-    dialog = close_qt_widget(FormDialog(None, "Mirror", pattern_actions.mirror_fields(),
-                                        note=pattern_actions.MIRROR_NOTE))
-    for text in dialog.labels():
-        assert_plain(text)
+    for selected in (None, "Plane 1"):
+        dialog = close_qt_widget(FormDialog(None, "Mirror", pattern_actions.mirror_fields(selected),
+                                            note=pattern_actions.MIRROR_NOTE))
+        for text in dialog.labels():
+            assert_plain(text)
     assert_plain(pattern_actions.PatternActions.MIRROR_HINT)
     assert_plain(pattern_actions.PatternActions.PATTERN_TOOL_PROMPTS["mirror_face"])

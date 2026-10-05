@@ -104,19 +104,24 @@ MIRROR_PLANES = [
 ]
 
 
-def mirror_fields():
-    return [("plane", "Mirror across", "face", {"choices": MIRROR_PLANES})]
+JOIN_FIELD = ("join", "Join each mirror image to its part, into one part", False, {})
+
+
+def mirror_fields(selected=None):
+    planes = [("selected", f"The selected {selected}")] if selected else MIRROR_PLANES
+    return [("plane", "Mirror across", planes[0][0], {"choices": planes}), JOIN_FIELD]
 
 
 MIRROR_NOTE = (
     "Adds a mirror image of each selected part on the other side of the plane. To mirror "
-    "across a sketch's plane or a construction plane, select it with the parts. Combine joins "
-    "a copy to its part."
+    "across a sketch's plane or a construction plane, select it with the parts. Joined, each "
+    "part and its image become one part, as Combine's Join makes (Ungroup takes them apart "
+    "again), even where they don't touch; otherwise the images are separate parts."
 )
 
 
-def ask_mirror(parent) -> dict | None:
-    return run_form(parent, "Mirror", mirror_fields(), note=MIRROR_NOTE)
+def ask_mirror(parent, selected=None) -> dict | None:
+    return run_form(parent, "Mirror", mirror_fields(selected), note=MIRROR_NOTE)
 
 
 class PatternActions:
@@ -263,21 +268,35 @@ class PatternActions:
             return None
         return parts, (guides[0] if guides else None)
 
-    def _add_mirrored(self, parts, plane) -> bool:
+    def _add_mirrored(self, parts, plane, join: bool = False) -> bool:
+        """The parts' mirror images added as copies, or joined each to its
+        part in its place: one undo step either way."""
         origin, normal = plane
-        return self._add_pattern("mirror", parts, lambda: patterns.mirrored(parts, origin, normal))
+        if not join:
+            return self._add_pattern("mirror", parts, lambda: patterns.mirrored(parts, origin, normal))
+        joined = self._attempt("Cannot mirror", lambda: patterns.mirrored_into_one(parts, origin, normal))
+        if joined is None:
+            return False
+        scene = self.document.scene
+        self.document.snapshot("mirror into one")
+        scene.remove([s.id for s in parts])
+        for group in joined:
+            scene.add(group)
+        scene.select([g.id for g in joined])
+        self.sync()
+        return True
 
     @replayable()
-    def mirror_copy_selected(self, plane: str = "x") -> bool:
+    def mirror_copy_selected(self, plane: str = "x", join: bool = False) -> bool:
         """Mirrored copies of the selected parts across the selected
         sketch's plane or construction plane, or else the middle plane
-        `plane` ("x", "y", "z")."""
+        `plane` ("x", "y", "z"); with `join`, each joined to its part."""
         chosen = self._mirror_selection()
         if chosen is None:
             return False
         parts, guide = chosen
         return self._add_mirrored(
-            parts, construct.plane_of(guide) if guide else patterns.middle_plane(plane)
+            parts, construct.plane_of(guide) if guide else patterns.middle_plane(plane), join
         )
 
     def do_mirror_copy(self) -> None:
@@ -285,16 +304,18 @@ class PatternActions:
         if chosen is None:
             return
         parts, guide = chosen
-        if guide is not None:
-            self.mirror_copy_selected()
-            return
-        values = ask_mirror(self)
+        values = ask_mirror(self, guide.name) if guide is not None else ask_mirror(self)
         if values is None:
             return
+        join = bool(values.get("join", False))
+        if guide is not None:
+            self.mirror_copy_selected(join=join)
+            return
         if values["plane"] != "face":
-            self.mirror_copy_selected(values["plane"])
+            self.mirror_copy_selected(values["plane"], join)
             return
         self._mirror_ids = [s.id for s in parts]
+        self._mirror_join = join
         self.start_tool("mirror_face")
 
     def _mirror_face_picked(self, shape_id: str, face_index: int, _point=None) -> None:
@@ -312,13 +333,14 @@ class PatternActions:
         self._clear_tool()
         self.sync()
         ids = list(getattr(self, "_mirror_ids", []))
-        QTimer.singleShot(0, lambda: self.mirror_across_face(shape_id, face_index, ids))
+        join = bool(getattr(self, "_mirror_join", False))
+        QTimer.singleShot(0, lambda: self.mirror_across_face(shape_id, face_index, ids, join))
 
     @replayable(("shape_id", "face_index"))
-    def mirror_across_face(self, shape_id: str, face_index: int, part_ids=None) -> bool:
+    def mirror_across_face(self, shape_id: str, face_index: int, part_ids=None, join: bool = False) -> bool:
         """Mirrored copies of the parts `part_ids` (those selected when
         Mirror started) across the flat face of `shape_id` holding
-        `face_index`. One undo step."""
+        `face_index`; with `join`, each joined to its part. One undo step."""
         scene = self.document.scene
         ids = part_ids if part_ids is not None else getattr(self, "_mirror_ids", [])
         parts = [s for s in scene.shapes if s.id in ids and not is_reference(s)]
@@ -332,4 +354,4 @@ class PatternActions:
         plane = self._attempt(
             "Cannot mirror", lambda: patterns.plane_of_face(face_part, face_index, scene.fit_clearances)
         )
-        return plane is not None and self._add_mirrored(parts, plane)
+        return plane is not None and self._add_mirrored(parts, plane, join)

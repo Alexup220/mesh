@@ -16,7 +16,8 @@ that can't be met raises BuildError with a plain message.
                  place relative to the path's start, and optionally turning
                  with it
     mirrored     reflected across a plane: a sketch's, a flat face's, or one
-                 of the middle planes through 0
+                 of the middle planes through 0 (mirrored_into_one also
+                 joins each image to its part, as Combine's Join does)
 
 All exact: copies are the same shapes moved, turned or reflected. Along a
 curved path the copies sit on the path's straight pieces (64 per circle).
@@ -29,7 +30,7 @@ import numpy as np
 
 from mesh import create, sketch
 from mesh.builders import GUIDES_ARE_NOT_PARTS, MAX_COPIES, BuildError, _check_count, _copy
-from mesh.modify import MOVE_LIMIT, _bounds, flat_face
+from mesh.modify import MOVE_LIMIT, _bounds, combine, flat_face
 from mesh.ops import AXES, _canonical
 from mesh.shapes import is_reference
 
@@ -296,6 +297,26 @@ def mirrored(shapes, origin, normal) -> list:
     for clone in out:
         clone.name = f"{clone.name} (mirrored)"
     return out
+
+
+def mirrored_into_one(shapes, origin, normal) -> list:
+    """Each part joined with its mirror image across the plane into one
+    part, as Combine's Join joins two parts: a group per part, which
+    Ungroup takes apart into the part and its image. The image need not
+    touch the part. Holes are refused: joined, a Hole's fit could no
+    longer be added exactly."""
+    holes = [s for s in shapes if s.is_hole and not is_reference(s)]
+    if holes:
+        raise BuildError(
+            f"Joining a mirror image to its part works on solid parts, and {holes[0].name} is a "
+            "Hole. Mirror it as a separate copy, or group it with its part first."
+        )
+    joined = []
+    for part, image in zip(shapes, mirrored(shapes, origin, normal)):
+        group = combine(part, [image], "union")
+        group.name = f"{part.name} (mirrored, joined)"
+        joined.append(group)
+    return joined
 
 
 def plane_of_sketch(guide) -> tuple[np.ndarray, np.ndarray]:

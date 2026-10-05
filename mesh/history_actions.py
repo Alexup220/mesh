@@ -114,8 +114,10 @@ def editors() -> dict:
                                                  "spacing": a["spacing"] or 10.0}),
             lambda v, _a: {"count": v["count"], "spacing": None if v["even"] else v["spacing"],
                            "follow": v["follow"]}),
-        "mirror_copy_selected": ("Mirror", lambda a: [("plane", "Mirror across", a["plane"],
-                                                       {"choices": pa.MIRROR_PLANES[1:]})], _same),
+        "mirror_copy_selected": ("Mirror", lambda a: _filled(
+            [("plane", "Mirror across", a["plane"], {"choices": pa.MIRROR_PLANES[1:]}), pa.JOIN_FIELD], a),
+            _same),
+        "mirror_across_face": ("Mirror", lambda a: _filled([pa.JOIN_FIELD], a), _same),
         "plane_at_distance_selected": (
             "Plane at a Distance", lambda a: _filled(_without(ca.plane_distance_fields(), "source"), a), _same),
         "plane_from_face": (

@@ -103,8 +103,8 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "mirror", "create", "&Mirror...",
         "Add a mirror image of the selected parts across a flat face you click, a middle "
-        "plane, or a sketch or construction plane selected with them. The images are "
-        "separate parts; Combine joins one to its part.",
+        "plane, or a sketch or construction plane selected with them: as separate parts, or "
+        "each joined to its part into one part (Ungroup takes them apart again).",
         "do_mirror_copy",
     ),
     ExpertTool(
