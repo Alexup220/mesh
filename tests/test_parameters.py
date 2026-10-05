@@ -206,8 +206,11 @@ def test_typing_a_number_in_details_ends_the_link(window):
     assert "inner" in box_field.toolTip() and window.inspector.field_labels["width"].font().italic()
     box_field.setValue(25.0)
     assert box.params["width"] == 25 and box.links == {"x": "wall"}
-    window.sync()
+    window._finish_edit()
     assert box_field.toolTip() == "" and not window.inspector.field_labels["width"].font().italic()
+    assert window.statusBar().currentMessage() == window.LINK_ENDED
+    window._finish_edit()
+    assert window.statusBar().currentMessage() != window.LINK_ENDED  # said once
     window.set_parameters([{**TABLE[0], "formula": "80"}, *TABLE[1:]])
     assert box.params["width"] == 25  # no longer follows
 

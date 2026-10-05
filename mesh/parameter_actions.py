@@ -259,7 +259,13 @@ class ParameterActions:
             self.set_links(chosen[0].id, values)
 
     def _end_link(self, shape, field: str) -> None:
-        """A number typed in the Details panel replaces its formula."""
+        """A number typed in the Details panel replaces its formula (said
+        once the typing pauses: see _said_link_ended)."""
         if field in shape.links:
             del shape.links[field]
+            self._link_ended = True
+
+    def _said_link_ended(self) -> None:
+        if getattr(self, "_link_ended", False):
+            self._link_ended = False
             self.statusBar().showMessage(self.LINK_ENDED)

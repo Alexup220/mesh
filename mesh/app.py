@@ -934,6 +934,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         of inspector edits. This is the one sync() the whole burst gets."""
         self._edit_active = False
         self.sync()
+        self._said_link_ended()
 
     # --- files ---------------------------------------------------------
 
