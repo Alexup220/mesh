@@ -113,9 +113,9 @@ def plane_of(shape) -> tuple[np.ndarray, np.ndarray]:
 # Parts round about their own up line (their transform's Z through its
 # origin): a revolve's is the line it was turned around.
 ROUND_KINDS = ("cylinder", "cone", "tube", "torus", "sphere", "rounded_cylinder", "revolve",
-               "screw_hole", "nut_trap", "insert_pocket", "magnet_pocket", "thread")
+               "screw_hole", "nut_trap", "insert_pocket", "magnet_pocket", "thread", "coil")
 NOT_ROUND = ("{name} is not round about a line. Select a cylinder, cone, tube, ring, ball, "
-             "thread, a round hardware hole or a revolved part.")
+             "thread, coil, a round hardware hole or a revolved part.")
 
 
 def axis_of(shape) -> tuple[np.ndarray, np.ndarray]:

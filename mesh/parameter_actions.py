@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from mesh import parameters
 from mesh.builders import BuildError
+from mesh.coils import CoilError
 from mesh.history import replayable
 from mesh.panels import FIELD_LABELS, run_form
 from mesh.shapes import shape_geometry
@@ -192,7 +193,7 @@ class ParameterActions:
                     shape_geometry(trial, clearances)
             except parameters.ParameterError as exc:
                 return f"{shape.name}: {exc}"
-            except (BuildError, SketchError, ThreadError) as exc:
+            except (BuildError, SketchError, ThreadError, CoilError) as exc:
                 return f"{shape.name} can't take those numbers. {exc}"
         return None
 

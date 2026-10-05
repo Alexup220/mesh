@@ -117,11 +117,26 @@ TOOLS: tuple[ExpertTool, ...] = (
     ),
     ExpertTool(
         "thread", "create", "&Thread...",
-        "Put a screw thread on the selected cylinder, along all or part of its height, with "
-        "the standard pitch for its size filled in. On a cylinder Hole it makes a threaded "
-        "hole that a thread of the same size screws into. The thread's sloped sides are made "
-        "of narrow flat strips.",
+        "Put a screw thread on the selected cylinder, along all or part of its height: metric "
+        "with the standard pitch for its size filled in, inch, or straight British pipe, with "
+        "one or more threads side by side. On a cylinder Hole it makes a threaded hole that a "
+        "thread of the same size screws into. The thread's sloped sides are made of narrow "
+        "flat strips, and tapered pipe threads are not offered.",
         "do_thread",
+    ),
+    ExpertTool(
+        "pipe", "create", "P&ipe...",
+        "Select a sketch of a path: a round tube follows it, solid or hollow with a wall. "
+        "Curves are followed in short straight steps, and the tube's outline has many "
+        "straight sides.",
+        "do_pipe",
+    ),
+    ExpertTool(
+        "coil", "create", "C&oil...",
+        "Make a coil spring: a round or square wire wound round an upright line, with its "
+        "outside diameter, pitch, number of turns and wire thickness. Its ends are cut square "
+        "across the wire, and it is made of short straight pieces.",
+        "do_coil",
     ),
     ExpertTool(
         "move_copy", "modify", "&Move or Copy...",

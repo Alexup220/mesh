@@ -15,7 +15,7 @@ on success.
 
 from PySide6.QtCore import QTimer
 
-from mesh import construct, create, features, modify, parameters, sketch, sketch_editor, threads
+from mesh import coils, construct, create, features, modify, parameters, sketch, sketch_editor, threads
 from mesh.component_actions import ComponentActions
 from mesh.construct_actions import ConstructActions
 from mesh.history import replayable
@@ -164,22 +164,85 @@ def ask_loft(parent, sketches) -> dict | None:
 
 def thread_fields(height: float, pitch: float):
     return [
+        ("standard", "Thread sizes", "metric", {"choices": threads.STANDARDS}),
         ("pitch", "Thread pitch (mm per turn)", float(pitch), {"min": 0.2, "max": 100.0, "step": 0.05}),
+        ("per_inch", "Threads per inch, for inch or pipe (0 for the standard count)", 0.0,
+         {"min": 0.0, "max": 200.0, "decimals": 1}),
         ("length", "Threaded length (mm)", float(height), {"min": 0.1, "max": 10000.0}),
         ("end", "Thread starts", "top", {"choices": threads.ENDS}),
         ("hand", "Thread turns", "right", {"choices": threads.HANDS}),
+        ("starts", "Starts (threads side by side)", 1, {"min": 1, "max": threads.MAX_STARTS}),
+        ("lead_in", "Starting end of the thread", "none", {"choices": threads.LEAD_INS}),
     ]
 
 
-def thread_note(standard: str, pitch: float) -> str:
+def thread_note(standard: str, pitch: float, inch: tuple | None = None, pipe: tuple | None = None) -> str:
+    nearest = ""
+    if inch is not None and pipe is not None:
+        nearest = (f" The nearest inch size is {inch[0]} UNC ({inch[1]} threads per inch), and the "
+                   f"nearest British pipe size G {pipe[0]} ({pipe[1]} threads per inch).")
     return (f"Puts a screw thread on the cylinder; its diameter is the thread's full size. The "
-            f"nearest standard size is {standard}, whose pitch ({pitch:g} mm) is filled in. On a "
+            f"nearest metric size is {standard}, whose pitch ({pitch:g} mm) is filled in.{nearest} On a "
             "cylinder Hole it makes a threaded hole: with a fit chosen, a thread of the same size "
-            "screws into it.")
+            "screws into it. With more than one start, that many threads run side by side: the "
+            "pitch is still from one ridge to the next, and a nut goes that many times further "
+            "in each turn. Inch (UNC) threads have the metric shape; British pipe (G) threads "
+            "are straight, not tapered, with the pipe thread's round tips made of short flat "
+            "pieces. Both take the threads per inch, or 0 for the standard count of the size "
+            "nearest the cylinder's diameter (which stays as it is). A bevelled end slopes at 45 "
+            "degrees: a thread down to its root, a threaded hole out to its full size, so they "
+            "start into each other easily.")
 
 
-def ask_thread(parent, height: float, standard: str, pitch: float) -> dict | None:
-    return run_form(parent, "Thread", thread_fields(height, pitch), note=thread_note(standard, pitch))
+def pipe_fields():
+    return [
+        ("diameter", "Diameter across the outside (mm)", 10.0, {"min": 0.1, "max": 10000.0}),
+        ("inside", "Inside", "solid", {"choices": features.PIPE_INSIDES}),
+        ("wall", "Wall thickness, if hollow (mm)", 1.0, {"min": 0.05, "max": 5000.0, "step": 0.5}),
+    ] + _result_fields()
+
+
+PIPE_NOTE = (
+    "Carries a round tube along the sketch's path, square to it, solid or hollow. The sketch needs "
+    "one path, open or closed. Curves are followed in short straight steps, "
+    "the tube's outline has 64 straight sides, and at a sharp corner the tube is cut on the slant "
+    "halfway between the two directions, as Sweep does."
+)
+
+
+def ask_pipe(parent) -> dict | None:
+    return run_form(parent, "Pipe", pipe_fields(), note=PIPE_NOTE)
+
+
+def coil_fields():
+    d = coils.DEFAULTS
+    return [
+        ("diameter", "Diameter across the outside (mm)", d["diameter"], {"min": 0.5, "max": 10000.0}),
+        ("pitch", "Pitch (mm per turn)", d["pitch"], {"min": 0.1, "max": 10000.0, "step": 0.5}),
+        ("turns", "Turns", d["turns"], {"min": 0.05, "max": float(coils.MAX_TURNS), "step": 0.5}),
+        ("wire", "Wire thickness (mm)", d["wire"], {"min": 0.1, "max": 1000.0, "step": 0.5}),
+        ("wire_shape", "Wire shape", d["wire_shape"], {"choices": coils.WIRE_SHAPES}),
+        ("winding", "Coil winds", d["winding"], {"choices": coils.WINDINGS}),
+        ("result", "Make", "part", {"choices": RESULTS}),
+    ]
+
+
+COIL_NOTE = (
+    "Makes a coil spring standing on the workplane: a round or square wire wound round an "
+    "upright line. The pitch is how far it rises in each turn, and must be more than the wire's "
+    "thickness so the turns don't touch. The wire's outline is drawn through the middle line and "
+    "carried round, so the ends are cut square across the wire there. Each turn is made of 48 "
+    "short straight pieces, and a round wire's outline has 24 sides."
+)
+
+
+def ask_coil(parent) -> dict | None:
+    return run_form(parent, "Coil", coil_fields(), note=COIL_NOTE)
+
+
+def ask_thread(parent, height: float, standard: str, pitch: float, inch: tuple | None = None,
+               pipe: tuple | None = None) -> dict | None:
+    return run_form(parent, "Thread", thread_fields(height, pitch), note=thread_note(standard, pitch, inch, pipe))
 
 
 class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActions, ParameterActions,
@@ -532,19 +595,25 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         """The one selected cylinder, or None (and a message)."""
         chosen = [s for s in self._picked() if not is_reference(s)]
         if len(chosen) != 1 or chosen[0].kind != "primitive" or chosen[0].params.get("primitive") != "cylinder":
-            self.statusBar().showMessage(create.NOT_A_CYLINDER)
+            tube = len(chosen) == 1 and chosen[0].kind == "primitive" and chosen[0].params.get("primitive") == "tube"
+            self.statusBar().showMessage(create.TUBE_THREAD if tube else create.NOT_A_CYLINDER)
             return None
         return chosen[0]
 
     @replayable()
-    def thread_selected(self, pitch: float, length: float, end: str = "top", hand: str = "right") -> bool:
-        """Put a thread on the selected cylinder. One undo step on success."""
+    def thread_selected(self, pitch: float, length: float, end: str = "top", hand: str = "right",
+                        starts: int = 1, standard: str = "metric", per_inch: float = 0.0,
+                        lead_in: str = "none") -> bool:
+        """Put a thread on the selected cylinder, with `starts` threads side
+        by side: metric with `pitch`, or inch or pipe with `per_inch`
+        threads to an inch, its starting end cut square or bevelled
+        (`lead_in`). One undo step on success."""
         shape = self._thread_target()
         if shape is None:
             return False
         scene = self.document.scene
         changed = self._attempt("Cannot add the thread", lambda: create.threaded(
-            shape, pitch, length, end, hand, scene.fit_clearances))
+            shape, pitch, length, end, hand, scene.fit_clearances, starts, standard, per_inch, lead_in))
         if changed is None:
             return False
         self.document.snapshot("thread")
@@ -552,11 +621,70 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         self.sync()
         return True
 
+    # --- Pipe ------------------------------------------------------------------------
+
+    def _pipe_path(self):
+        """The one selected sketch, or None (and a message)."""
+        chosen = self._picked()
+        if len(chosen) != 1 or not create.is_sketch(chosen[0]):
+            self.statusBar().showMessage(create.PIPE_PICK)
+            return None
+        return chosen[0]
+
+    @replayable()
+    def pipe_selected(self, diameter: float = 10.0, inside: str = "solid", wall: float = 1.0,
+                      hole: bool = False, keep_sketch: bool = False) -> bool:
+        """A round tube along the selected sketch's path, solid or hollow
+        (see features.pipe). One undo step on success."""
+        path = self._pipe_path()
+        if path is None:
+            return False
+        shape = self._attempt("Cannot make the pipe", lambda: create.make_pipe(path, diameter, inside, wall, hole))
+        if shape is None:
+            return False
+        self._add_from_sketches("pipe", [path], shape, keep_sketch)
+        return True
+
+    def do_pipe(self) -> None:
+        if self._pipe_path() is None:
+            return
+        values = ask_pipe(self)
+        if values is not None:
+            self.pipe_selected(values["diameter"], values["inside"], values["wall"], values["result"] == "hole",
+                               values["keep_sketch"])
+
+    # --- Coil ------------------------------------------------------------------------
+
+    @replayable()
+    def add_coil(self, diameter: float = 20.0, pitch: float = 5.0, turns: float = 5.0, wire: float = 2.0,
+                 wire_shape: str = "round", winding: str = "right", hole: bool = False) -> bool:
+        """Add a coil (see mesh.coils) and select it. One undo step on
+        success."""
+        shape = self._attempt("Cannot make the coil", lambda: create.make_coil(
+            diameter, pitch, turns, wire, wire_shape, winding, hole))
+        if shape is None:
+            return False
+        self.document.snapshot("coil")
+        self.document.scene.add(shape)
+        self.document.scene.select([shape.id])
+        self.sync()
+        return True
+
+    def do_coil(self) -> None:
+        values = ask_coil(self)
+        if values is not None:
+            self.add_coil(values["diameter"], values["pitch"], values["turns"], values["wire"],
+                          values["wire_shape"], values["winding"], values["result"] == "hole")
+
     def do_thread(self) -> None:
         shape = self._thread_target()
         if shape is None:
             return
         standard, pitch = create.thread_choice(shape)
-        values = ask_thread(self, float(shape.params.get("height", 20.0)), standard, pitch)
+        diameter = float(shape.params.get("diameter", 20.0))
+        values = ask_thread(self, float(shape.params.get("height", 20.0)), standard, pitch,
+                            inch=threads.inch_size(diameter), pipe=threads.pipe_size(diameter))
         if values is not None:
-            self.thread_selected(values["pitch"], values["length"], values["end"], values["hand"])
+            self.thread_selected(values["pitch"], values["length"], values["end"], values["hand"],
+                                 values.get("starts", 1), values.get("standard", "metric"),
+                                 values.get("per_inch", 0.0), values.get("lead_in", "none"))

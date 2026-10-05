@@ -11,21 +11,21 @@ import uuid
 
 import numpy as np
 
-from mesh import construct, features, sketch, threads
+from mesh import coils, construct, features, sketch, threads
 from mesh.builders import BuildError
 from mesh.ops import face_direction
-from mesh.scene import Shape
+from mesh.scene import Shape, new_primitive
 from mesh.shapes import shape_geometry
 
 SKETCH_COLOR = "#e8a33d"
 
 
 def _checked(build):
-    """Run `build`, turning a sketch's or thread's complaint into a
+    """Run `build`, turning a sketch's, thread's or coil's complaint into a
     BuildError."""
     try:
         return build()
-    except (sketch.SketchError, threads.ThreadError) as exc:
+    except (sketch.SketchError, threads.ThreadError, coils.CoilError) as exc:
         raise BuildError(str(exc)) from exc
 
 
@@ -113,32 +113,33 @@ def _follow_axis_line(old: Shape, changed: Shape) -> None:
 
 
 def fit_refusal(shapes, clearances: dict | None) -> str | None:
-    """Why one of `shapes`, a Hole made from a sketch, can't be made at its
-    fit with these fit clearances; None if they all can. (A sweep or loft
-    grown by a fit's clearance can bend too tightly or close a gap.)"""
+    """Why one of `shapes`, a Hole made from a sketch or a coil Hole, can't
+    be made at its fit with these fit clearances; None if they all can. (A
+    sweep or loft grown by a fit's clearance can bend too tightly or close a
+    gap, and a coil's turns can run into each other.)"""
     for shape in shapes:
         if (shape.kind == "primitive" and shape.is_hole
-                and shape.params.get("primitive") in features.SOLIDS):
+                and shape.params.get("primitive") in features.SOLIDS + ("coil",)):
             try:
                 shape_geometry(shape, clearances)
-            except sketch.SketchError as exc:
+            except (sketch.SketchError, coils.CoilError) as exc:
                 return f"{shape.name} can't be made at that fit. {exc}"
     return None
 
 
 def edit_refusal(shape, field: str, value, clearances: dict | None) -> str | None:
-    """Why `shape`, a part made from a sketch or a thread, can't take
-    `value` for its number or choice `field` (typed in the Details panel,
-    say: sloped sides can meet, or a pitch too deep for the diameter); None
-    if it can, or if `shape` is neither."""
+    """Why `shape`, a part made from a sketch, a thread or a coil, can't
+    take `value` for its number or choice `field` (typed in the Details
+    panel, say: sloped sides can meet, or a pitch too deep for the
+    diameter); None if it can, or if `shape` is none of those."""
     kind = shape.params.get("primitive") if shape.kind == "primitive" else None
-    if kind not in features.SOLIDS and kind != "thread":
+    if kind not in features.SOLIDS and kind not in ("thread", "coil"):
         return None
     trial = copy.deepcopy(shape)
     trial.params[field] = value if isinstance(value, str) else float(value)
     try:
         shape_geometry(trial, clearances)
-    except (sketch.SketchError, threads.ThreadError) as exc:
+    except (sketch.SketchError, threads.ThreadError, coils.CoilError) as exc:
         return str(exc)
     return None
 
@@ -291,6 +292,35 @@ def make_sweep(outline: Shape, path: Shape, hole: bool = False, twist: float = 0
     return shape
 
 
+def make_pipe(path: Shape, diameter: float, inside: str = "solid", wall: float = 1.0,
+              hole: bool = False) -> Shape:
+    """A round tube `diameter` mm across carried along the one path drawn
+    in the sketch `path` (see features.pipe). The part's own coordinates are
+    the world's, so the sketch is stored with where it was, as a sweep's."""
+    if not is_sketch(path):
+        raise BuildError(PIPE_PICK)
+    shape = Shape(
+        id=uuid.uuid4().hex,
+        name=f"Pipe along {path.name}",
+        kind="primitive",
+        params={
+            "primitive": "pipe",
+            "path_entities": copy.deepcopy(path.params["entities"]),
+            "path_frame": np.asarray(path.transform, dtype=np.float64).tolist(),
+            "diameter": float(diameter),
+            "inside": str(inside),
+            "wall": float(wall),
+        },
+        transform=np.eye(4),
+        is_hole=bool(hole),
+    )
+    _checked(lambda: shape_geometry(shape))
+    return shape
+
+
+PIPE_PICK = "Select one sketch with the path for the pipe to follow."
+
+
 LOFT_PICKS = ("Select two or more sketches, in the order to join them. A construction point "
               "may come first or last, to close the loft to that point.")
 
@@ -402,6 +432,9 @@ def outline_entities(outlines) -> list[dict]:
 
 
 NOT_A_CYLINDER = "Select one cylinder (a part, or a Hole for a threaded hole) to put a thread on."
+TUBE_THREAD = ("A thread goes on a cylinder, not a tube. For a thread on the outside, thread a cylinder "
+               "and group a cylinder Hole through it; for one inside, group a threaded cylinder Hole "
+               "inside a cylinder.")
 
 
 def thread_choice(shape) -> tuple[str, float]:
@@ -410,25 +443,61 @@ def thread_choice(shape) -> tuple[str, float]:
 
 
 def threaded(shape: Shape, pitch: float, length: float, end: str = "top", hand: str = "right",
-             clearances: dict | None = None) -> Shape:
+             clearances: dict | None = None, starts: int = 1, standard: str = "metric",
+             per_inch: float = 0.0, lead_in: str = "none") -> Shape:
     """A copy of the cylinder `shape` with a thread along `length` mm of
-    it, starting at `end`. Its diameter is the thread's full diameter;
-    everything else about it (where it is, its colour, Solid or Hole) is
-    kept. As a Hole it cuts a threaded hole a bolt of the same sizes fits."""
+    it, starting at `end`, with `starts` threads side by side. Its diameter
+    is the thread's full diameter; everything else about it (where it is,
+    its colour, Solid or Hole) is kept. As a Hole it cuts a threaded hole a
+    bolt of the same sizes fits. A metric thread has the `pitch` given; an
+    inch or pipe one has `per_inch` threads to an inch (0: the standard
+    count for the nearest size), and a pipe one the pipe thread's shape.
+    With `lead_in` "bevel", the end where the thread starts is bevelled."""
     if shape.kind != "primitive" or shape.params.get("primitive") != "cylinder":
         raise BuildError(NOT_A_CYLINDER)
     if float(shape.params.get("chamfer", 0.0)) > 0.0:
         raise BuildError(f"{shape.name} has a bottom chamfer, which a thread can't keep. Set its "
                          "bottom chamfer to 0 in the Details panel first.")
+    diameter = float(shape.params.get("diameter", 20.0))
+    try:
+        pitch = threads.standard_pitch(standard, diameter, pitch, per_inch)
+    except threads.ThreadError as exc:
+        raise BuildError(str(exc)) from exc
     changed = copy.deepcopy(shape)
     changed.params = {
         "primitive": "thread",
-        "diameter": float(shape.params.get("diameter", 20.0)),
+        "diameter": diameter,
         "height": float(shape.params.get("height", 20.0)),
         "pitch": float(pitch),
         "thread_length": float(min(length, float(shape.params.get("height", 20.0)))),
         "end": end,
         "hand": hand,
     }
+    # Kept only when used, so a one-start thread's settings are as before.
+    if float(starts) != 1.0:
+        changed.params["starts"] = int(starts) if float(starts) == int(starts) else float(starts)
+    if standard == "pipe":
+        changed.params["thread_shape"] = "round"
+    if lead_in != "none":
+        changed.params["lead_in"] = lead_in
     _checked(lambda: shape_geometry(changed, clearances))
     return changed
+
+
+# --- Coils --------------------------------------------------------------------------
+
+
+def make_coil(diameter: float, pitch: float, turns: float, wire: float, wire_shape: str = "round",
+              winding: str = "right", hole: bool = False) -> Shape:
+    """A new coil (see mesh.coils) standing on the workplane, its middle
+    line upright through the middle of the workplane: `turns` turns of a
+    `wire` mm wire, `diameter` mm across the outside, rising `pitch` mm a
+    turn."""
+    shape = new_primitive("coil")
+    shape.params.update({
+        "diameter": float(diameter), "pitch": float(pitch), "turns": float(turns), "wire": float(wire),
+        "wire_shape": str(wire_shape), "winding": str(winding),
+    })
+    shape.is_hole = bool(hole)
+    _checked(lambda: shape_geometry(shape))
+    return shape

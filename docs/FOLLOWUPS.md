@@ -109,6 +109,13 @@ tools do the closest honest version of their Fusion counterparts:
   A path that crosses itself is refused, but one that only passes closer to
   itself than the outline's size is not caught, and makes a part that overlaps
   itself. Change Sketch redraws a sweep's outline, not its path.
+- **Pipe** (Create menu) carries a round tube, solid or hollow, along a
+  sketch's one path; it is a sweep of a circle (64 straight sides), with
+  the same mitred corners, straight steps round curves and limits on
+  tight bends and paths that pass close to themselves. Fusion's square
+  and triangle sections are not offered, nor a part's edge as the path;
+  the path can't be changed afterwards (the diameter and wall can, in the
+  Details panel).
 - **Loft**: each sketch must hold one closed outline with no holes; no
   rails. A construction point picked first or last closes the loft to that
   point (a sketch point can't be used); where the point is is kept as
@@ -358,13 +365,35 @@ reflected. What differs from Fusion is how the pattern is chosen.
   material per part and its moments of inertia are not offered.
 - **Thread** goes on a plain cylinder only (Fusion threads any round
   face): a threaded hole is a cylinder Hole with a thread, grouped with
-  the part. Only the ISO metric shape is offered (no inch, pipe, tapered
-  or several-start threads), always modeled, never just drawn on. The
-  sloped sides are narrow flat strips, 36 to a turn, so the thread is
-  about 0.5% thinner than the true shape. A fitted thread Hole grows by
-  its fit straight out from the middle, which leaves about half the fit
-  as room on the sloped sides. The ends are cut square, with no lead-in
-  bevel, and a thread makes at most 150 turns.
+  the part, and a threaded tube is a threaded cylinder grouped with a
+  cylinder Hole through it (selecting a tube says so). Metric (ISO), inch (UNC, which has the same 60 degree shape)
+  and straight British pipe threads (G, ISO 228-1, the 55 degree shape
+  with round tips) are offered, always modeled, never just drawn on.
+  Tapered pipe threads (NPT, R) are not, and only the coarse inch sizes
+  are listed (a fine pitch, or any threads per inch, can be typed). The
+  cylinder keeps its own diameter: the standard sizes only fill in the
+  pitch for the size nearest it. One to four threads can run side by
+  side (several starts); the pitch stays the distance from one ridge to
+  the next. The sloped sides are narrow flat strips, 36 to a turn for
+  each start, and a pipe thread's round tips are short flat pieces (6 to
+  each half), so the thread is about 0.5% thinner than the true shape. A
+  fitted thread Hole grows by its fit straight out from the middle, which
+  leaves about half the fit as room on the sloped sides. The end where the
+  thread starts can be bevelled at 45 degrees (a thread down to its root,
+  a threaded hole out to its full size), as a cone of flat strips; the
+  bevel's angle and size can't be chosen, and the far end is always cut
+  square. A thread makes at most 150 turns, counting each start.
+- **Coil** (Create menu) makes a spring of round or square wire, set by
+  its outside diameter, pitch, number of turns and wire thickness. The
+  wire's outline is drawn in the upright plane through the middle line,
+  as Fusion draws a coil's section, and carried round it, so the ends are
+  cut square across the wire there. Fusion's flat spiral, its triangle
+  wire, a tapering coil and placing the wire inside or outside the
+  diameter are not offered. Each turn is 48 straight pieces and a round
+  wire has 24 sides, so the coil is about 0.3% thinner than a true one.
+  The turns can't touch (the pitch must be more than the wire, and more
+  than the wire plus twice the fit for a fitted Hole), and a coil scales
+  only alike in every direction.
 
 ## Expert mode, Phase 5 (Parameters, History, Components): approximations and limits
 
