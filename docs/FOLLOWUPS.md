@@ -235,6 +235,16 @@ reflected. What differs from Fusion is how the pattern is chosen.
   distance. The orange cut faces can't be clicked as a part's face; a
   click there counts as a click on nothing. A part with gaps can't be
   closed, so it is cut along its triangles with no cap.
+- **Measure Between Faces** measures between two clicked points on flat
+  faces (within 2 mm of a corner, from the corner). A click on a round
+  surface lands on one of its narrow flat strips, so the "face area" is
+  that strip's and the angle is the strip's. The angle is between the
+  faces' planes (0 to 90 degrees). Fusion's measuring of edges, of a round
+  face's radius and of the shortest distance between two parts is not
+  offered.
+- **Volume and Area** measures the selected parts as they would print
+  together (overlaps once, selected Holes cut out). Fusion's mass and
+  centre of gravity are not offered.
 
 ## Platform notes
 

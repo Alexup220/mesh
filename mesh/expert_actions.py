@@ -99,7 +99,7 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
     # stops any of them that is waiting for a click.
     EXPERT_CLICK_TOOLS = (
         ("sketch_face",) + ModifyActions.MODIFY_CLICK_TOOLS + PatternActions.PATTERN_CLICK_TOOLS
-        + ConstructActions.CONSTRUCT_CLICK_TOOLS
+        + ConstructActions.CONSTRUCT_CLICK_TOOLS + InspectActions.INSPECT_CLICK_TOOLS
     )
 
     EXPERT_TOOL_PROMPTS = {
@@ -107,6 +107,7 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         **ModifyActions.MODIFY_TOOL_PROMPTS,
         **PatternActions.PATTERN_TOOL_PROMPTS,
         **ConstructActions.CONSTRUCT_TOOL_PROMPTS,
+        **InspectActions.INSPECT_TOOL_PROMPTS,
     }
 
     # The method each of those tools' clicks goes to: (part id, triangle
@@ -116,7 +117,11 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         **ModifyActions.MODIFY_CLICK_HANDLERS,
         **PatternActions.PATTERN_CLICK_HANDLERS,
         **ConstructActions.CONSTRUCT_CLICK_HANDLERS,
+        **InspectActions.INSPECT_CLICK_HANDLERS,
     }
+
+    # The later prompts of the tools that take several clicks.
+    _STAGED = {**ConstructActions._STAGED, **InspectActions.INSPECT_STAGED}
 
     # --- Sketches ------------------------------------------------------------------
 

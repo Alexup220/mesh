@@ -1,12 +1,15 @@
-"""The window's Expert mode Inspect menu: section view.
+"""The window's Expert mode Inspect menu: section view and measuring.
 
 Mixed into MeshWindow through ExpertActions. Inspecting never changes the
 scene: no undo step, nothing saved.
 """
 
 import numpy as np
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QMessageBox
 
-from mesh import construct, sketch
+from mesh import construct, measure, sketch
+from mesh.builders import BuildError
 from mesh.panels import run_form
 from mesh.shapes import is_reference, shape_geometry
 
@@ -41,6 +44,18 @@ def ask_section(parent, selected=None) -> dict | None:
 
 class InspectActions:
     """Mixed into MeshWindow through ExpertActions."""
+
+    INSPECT_CLICK_TOOLS = ("measure_faces",)
+    INSPECT_TOOL_PROMPTS = {
+        "measure_faces": "Click a point on a flat face of a part (near a corner, it lands on the "
+                         "corner). Esc stops.",
+        "measure_faces_second": "Now click a point on the second face.",
+    }
+    INSPECT_CLICK_HANDLERS = {"measure_faces": "_measure_face_picked"}
+    INSPECT_STAGED = {"measure_faces": ("measure_faces", "measure_faces_second")}
+
+    MEASURE_AGAIN = "Click another face to measure again, Esc to stop."
+    VOLUME_HINT = "Select the parts to measure first."
 
     SECTION_NEEDS_PARTS = "Add a part first, then look inside it with Section View."
     SECTION_ON = "Section view: the parts are shown cut open. Choose Section View again to see them whole."
@@ -78,6 +93,13 @@ class InspectActions:
         self.viewport.clear_section()
         self.statusBar().showMessage(self.SECTION_OFF)
 
+    def _end_inspecting(self) -> None:
+        """Show the parts whole and put the measurements away: Expert mode
+        went off, or another project was opened."""
+        self.viewport.clear_section()
+        if getattr(self, "measure_window", None) is not None:
+            self.measure_window.hide()
+
     def do_section_view(self) -> None:
         if self.viewport.section is not None:
             self.end_section()
@@ -88,3 +110,59 @@ class InspectActions:
         if values is None:
             return
         self.section_view(values["plane"], values["distance"], values["flip"], guide)
+
+    # --- Measuring -------------------------------------------------------------------
+
+    def _show_measurement(self, title: str, text: str) -> None:
+        """The results, in a window that stays open beside the 3D view
+        until closed (and can be copied from)."""
+        box = getattr(self, "measure_window", None)
+        if box is None:
+            box = QMessageBox(QMessageBox.Information, title, text, QMessageBox.Close, self)
+            box.setWindowModality(Qt.NonModal)
+            box.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            self.measure_window = box
+        box.setWindowTitle(title)
+        box.setText(text)
+        box.show()
+
+    def do_measure_faces(self) -> None:
+        self._start_construct_tool("measure_faces")
+
+    def _measure_face_picked(self, shape_id: str, face_index: int, point=None) -> None:
+        shape = self._clicked_part(shape_id, face_index)
+        if shape is None:
+            return
+        try:
+            face = measure.clicked(shape, face_index, point, self.document.scene.fit_clearances)
+        except BuildError:
+            self.statusBar().showMessage(self._tool_prompt())
+            return
+        self._construct_picks.append(face)
+        if len(self._construct_picks) == 1:
+            self.viewport.clear_measure_line()
+            self.statusBar().showMessage(f"{measure.describe_face(face)}. {self._tool_prompt()}")
+            return
+        first, second = self._construct_picks
+        self._construct_picks = []
+        self.viewport.set_measure_line(first.point, second.point)
+        self.statusBar().showMessage(self.MEASURE_AGAIN)
+        text = measure.describe(first, second)
+        # Once the click is over: a window opened during it would take the
+        # mouse button's release.
+        QTimer.singleShot(0, lambda: self._show_measurement("Measure Between Faces", text))
+
+    def measure_selected(self) -> bool:
+        parts = [s for s in self._picked() if not is_reference(s)]
+        if not parts:
+            self.statusBar().showMessage(self.VOLUME_HINT)
+            return False
+        found = self._attempt("Cannot measure", lambda: measure.amount(parts, self.document.scene.fit_clearances))
+        if found is None:
+            return False
+        solids = sum(1 for s in parts if not s.is_hole)
+        self._show_measurement("Volume and Area", measure.describe_amount(found, solids))
+        return True
+
+    def do_measure_volume(self) -> None:
+        self.measure_selected()

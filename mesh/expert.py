@@ -249,6 +249,21 @@ TOOLS: tuple[ExpertTool, ...] = (
         "changes; nothing is cut when you save or print. Choose it again to see them whole.",
         "do_section_view",
     ),
+    ExpertTool(
+        "measure_faces", "inspect", "&Measure Between Faces",
+        "Click two flat faces of parts to see the distance between the clicked points (and "
+        "how far left/right, forward/back and up/down), the angle between the faces or, when "
+        "they are parallel, how far apart they are, and each face's area. A click near a "
+        "corner lands on the corner.",
+        "do_measure_faces",
+    ),
+    ExpertTool(
+        "measure_volume", "inspect", "&Volume and Area",
+        "See how much space the selected parts take up, their surface area all the way round "
+        "and their size. Selected Holes are cut out and overlaps counted once, as they would "
+        "print together.",
+        "do_measure_volume",
+    ),
 )
 
 
