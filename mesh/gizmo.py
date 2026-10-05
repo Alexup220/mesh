@@ -13,7 +13,9 @@ from PySide6.QtCore import QObject, Signal
 from vtkmodules.vtkCommonTransforms import vtkTransform
 from vtkmodules.vtkInteractionWidgets import vtkBoxRepresentation, vtkBoxWidget2
 
+from mesh import features
 from mesh.scene import Shape, _signed_scale
+from mesh.shapes import is_reference
 
 # Which size params a corner-handle scale drag should grow, per axis of
 # the gizmo's local box (x, y, z). "radial" params (diameter, wall
@@ -78,9 +80,16 @@ class Gizmo(QObject):
             return
 
         actor = self.viewport.actor_for(shape.id)
-        if actor is None:
+        # A guide (a sketch) is flat, so a box of handles around it has no
+        # thickness to grab; it is moved and turned in the Details panel.
+        if actor is None or is_reference(shape):
             self._widget.Off()
             self._base = None
+            if actor is not None:
+                # Off() does not redraw. A sketch is often chosen from a
+                # window, not by a click in the 3D view (which redraws), so
+                # the last part's handles would stay on screen.
+                self.viewport._render()
             return
 
         self._base = np.asarray(shape.transform, dtype=np.float64).copy()
@@ -113,11 +122,22 @@ class Gizmo(QObject):
         for axis in range(3):
             transform[axis, 3] = self._snap(transform[axis, 3])
 
+        resized = False
         if self._shape.kind == "primitive":
-            transform = self._bake_scale(self._shape, transform)
+            if self._shape.params.get("primitive") in features.SOLIDS:
+                # Sized by its sketch and the Details panel's numbers, not by
+                # the handles: a size drag changes nothing (moving and
+                # turning still do), and the handles go back to the part.
+                resized = not np.allclose(np.linalg.norm(transform[:3, :3], axis=0), 1.0, atol=1e-6)
+            else:
+                transform = self._bake_scale(self._shape, transform)
 
-        self._shape.transform = transform
+        if not resized:
+            self._shape.transform = transform
         self.changed.emit(self._shape.id)
+        if resized:
+            self.attach(self._shape)
+            self.viewport._render()
 
     def _bake_scale(self, shape: Shape, transform: np.ndarray) -> np.ndarray:
         """Fold a corner-handle scale into the shape's size params instead

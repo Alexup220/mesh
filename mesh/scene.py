@@ -63,9 +63,15 @@ class Shape:
     is_hole: bool = False
     visible: bool = True
     fit: str = DEFAULT_FIT
+    # Expert mode: numbers that follow a named parameter's formula (field
+    # -> formula; see mesh.parameters), and the component the part belongs
+    # to (see mesh.components). Saved only when used, so a project that
+    # uses neither is saved exactly as before.
+    links: dict = field(default_factory=dict)
+    component: str = ""
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "id": self.id,
             "name": self.name,
             "kind": self.kind,
@@ -76,6 +82,11 @@ class Shape:
             "visible": self.visible,
             "fit": self.fit,
         }
+        if self.links:
+            d["links"] = dict(self.links)
+        if self.component:
+            d["component"] = self.component
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Shape":
@@ -89,6 +100,8 @@ class Shape:
             is_hole=d.get("is_hole", False),
             visible=d.get("visible", True),
             fit=d.get("fit", DEFAULT_FIT) if d.get("fit") in FITS else DEFAULT_FIT,
+            links={str(k): str(v) for k, v in (d.get("links") or {}).items()},
+            component=str(d.get("component") or ""),
         )
 
 
@@ -111,6 +124,14 @@ class Scene:
     build_volume: tuple[float, float, float] = DEFAULT_BUILD_VOLUME
     snap_mm: float = DEFAULT_SNAP_MM
     fit_clearances: dict = field(default_factory=lambda: dict(DEFAULT_FIT_CLEARANCES))
+    # Expert mode: the named parameters ({"name", "formula", "note"}; see
+    # mesh.parameters). Saved only when there are some.
+    parameters: list = field(default_factory=list)
+    # Expert mode: the components ({"id", "name"}; see mesh.components)
+    # and the history list, once the project keeps one (see mesh.history).
+    # Each is saved only when there is one.
+    components: list = field(default_factory=list)
+    history: dict | None = None
 
     def add(self, shape: Shape) -> None:
         self.shapes.append(shape)
@@ -141,6 +162,9 @@ class Scene:
             "build_volume": list(self.build_volume),
             "snap_mm": self.snap_mm,
             "fit_clearances": dict(self.fit_clearances),
+            **({"parameters": [dict(p) for p in self.parameters]} if self.parameters else {}),
+            **({"components": [dict(c) for c in self.components]} if self.components else {}),
+            **({"history": self.history} if self.history is not None else {}),
         }
 
     @classmethod
@@ -151,7 +175,23 @@ class Scene:
             build_volume=tuple(d.get("build_volume", DEFAULT_BUILD_VOLUME)),
             snap_mm=d.get("snap_mm", DEFAULT_SNAP_MM),
             fit_clearances=_read_fit_clearances(d.get("fit_clearances")),
+            parameters=[{"name": str(p["name"]), "formula": str(p["formula"]), "note": str(p.get("note", ""))}
+                        for p in d.get("parameters") or []],
+            components=_read_components(d.get("components")),
+            history=_read_history(d.get("history")),
         )
+
+
+def _read_components(raw):
+    from mesh import components
+
+    return components.read(raw)
+
+
+def _read_history(raw):
+    from mesh import history
+
+    return history.read(raw)
 
 
 class Document:
@@ -172,12 +212,43 @@ class Document:
         # when nothing has changed can cache against this instead of
         # re-deriving a content hash of the whole scene themselves.
         self.revision = 0
+        # Expert mode's history list (see mesh.history): whether snapshots
+        # add steps to it (off while the history itself is changed or
+        # worked out again), the tool call the next step is made by, and
+        # the scene before the newest step, which settle() compares with
+        # the scene now to work out what that step changed.
+        self.recording = True
+        self.calling = False
+        self.pending_call = None
+        self._step_before = None
+        # The scene before the newest change (None after an undo or redo),
+        # so the window can tell what that change replaced (see
+        # mesh.components.carry_over).
+        self.action_before = None
 
     def snapshot(self, label: str = "") -> None:
+        self.settle()
+        self._step_before = None
         self._undo.append(copy.deepcopy(self.scene))
         del self._undo[:-HISTORY_LIMIT]
         self._redo.clear()
         self.revision += 1
+        self.action_before = self._undo[-1]
+        if self.recording and self.scene.history is not None:
+            self.scene.history["steps"].append({"label": label, "call": self.pending_call, "effect": None})
+            self.pending_call = None
+            self._step_before = self._undo[-1]
+
+    def settle(self) -> None:
+        """Work out what the newest history step has changed so far, from
+        the scene before it to the scene now. Done before the next step,
+        an undo or redo, saving, and showing the history."""
+        history = self.scene.history
+        if self._step_before is None or history is None or not history["steps"]:
+            return
+        from mesh.history import changes
+
+        history["steps"][-1]["effect"] = changes(self._step_before, self.scene)
 
     def can_undo(self) -> bool:
         return bool(self._undo)
@@ -188,6 +259,8 @@ class Document:
     def undo(self) -> bool:
         if not self._undo:
             return False
+        self.settle()
+        self._step_before = self.action_before = None
         self._redo.append(copy.deepcopy(self.scene))
         self.scene = self._undo.pop()
         self.revision += 1
@@ -196,6 +269,7 @@ class Document:
     def redo(self) -> bool:
         if not self._redo:
             return False
+        self._step_before = self.action_before = None
         self._undo.append(copy.deepcopy(self.scene))
         self.scene = self._redo.pop()
         self.revision += 1

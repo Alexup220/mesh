@@ -14,14 +14,18 @@ from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
     QFileDialog,
+    QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QToolBar,
 )
 from PySide6.QtCore import QTimer, Qt
 
-from mesh import builders, hardware, ops, panels
+from mesh import builders, create, expert, hardware, ops, panels
+from mesh.expert_actions import ExpertActions
 from mesh.gizmo import Gizmo
+from mesh.history import replayable
 from mesh.io_formats import (
     EXPORT_EXTS,
     IMPORT_EXTS,
@@ -36,19 +40,24 @@ from mesh.io_formats import (
 from mesh.panels import Inspector, ShapeShelf
 from mesh.printcheck import check
 from mesh.scene import MAX_FIT_CLEARANCE, Document, new_primitive, transform_with_euler
-from mesh.shapes import shape_geometry
+from mesh.settings import Settings, default_path
+from mesh.shapes import is_reference, shape_geometry
 from mesh.text import has_letters
 from mesh.viewport import Viewport
 
 
-class MeshWindow(QMainWindow):
+class MeshWindow(ExpertActions, QMainWindow):
     EDIT_COALESCE_MS = 400
 
-    def __init__(self) -> None:
+    def __init__(self, settings: Settings | None = None) -> None:
         super().__init__()
         self.setWindowTitle("mesh")
         self.resize(1400, 900)
         self.document = Document()
+        # Preferences of this computer, such as Expert mode. A window built
+        # without them (as in the tests) starts from the defaults and saves
+        # nothing; run() passes the user's own.
+        self.settings = settings if settings is not None else Settings()
 
         self.viewport = Viewport(self)
         self.setCentralWidget(self.viewport)
@@ -93,8 +102,10 @@ class MeshWindow(QMainWindow):
         self._edit_timer.timeout.connect(self._finish_edit)
 
         self._build_menus()
+        self._build_expert_menus()
         self._build_bottom_bar()
         self.statusBar().showMessage("Add a shape to get started.")
+        self._apply_expert_mode()
 
     def _dock(self, title, widget, area) -> None:
         dock = QDockWidget(title, self)
@@ -174,13 +185,70 @@ class MeshWindow(QMainWindow):
         tools = self.menuBar().addMenu("&Tools")
         self.act_measure = self._act(tools, "&Measure", "M", self.toggle_measure)
         self.act_measure.setCheckable(True)
+        tools.addSeparator()
+        self.act_expert = self._act(tools, "&Expert Mode", None, self.set_expert_mode)
+        self.act_expert.setCheckable(True)
+        self.act_expert.setStatusTip(self.EXPERT_TIP)
 
         view = self.menuBar().addMenu("&View")
+        self.view_menu = view
         self.act_view_home = self._act(view, "&Home", "Home", lambda: self.viewport.view_preset("home"))
         self.act_view_front = self._act(view, "&Front", "1", lambda: self.viewport.view_preset("front"))
         self.act_view_right = self._act(view, "&Right", "3", lambda: self.viewport.view_preset("right"))
         self.act_view_top = self._act(view, "&Top", "7", lambda: self.viewport.view_preset("top"))
         self._act(view, "&Zoom to Selection", "F", self.viewport.frame_selection)
+
+    def _build_expert_menus(self) -> None:
+        """One menu item per tool in mesh.expert.TOOLS, under the expert
+        menus (placed before View). They are shown or hidden only by
+        _apply_expert_mode."""
+        self.expert_menus = {}
+        self.expert_actions = {}
+        for key, title in expert.MENUS:
+            menu = QMenu(title, self)
+            self.menuBar().insertMenu(self.view_menu.menuAction(), menu)
+            menu.setToolTipsVisible(True)
+            self.expert_menus[key] = menu
+            for tool in expert.tools_in(key):
+                action = self._act(menu, tool.label, tool.shortcut, getattr(self, tool.handler))
+                action.setToolTip(tool.tip)
+                action.setStatusTip(tool.tip)
+                self.expert_actions[tool.key] = action
+        # Shown in the status bar while Expert mode is on.
+        self.expert_badge = QLabel("Expert mode", self)
+        self.statusBar().addPermanentWidget(self.expert_badge)
+
+    EXPERT_TIP = "Show the extra modeling tools for experienced users. Turn off to hide them again."
+    EXPERT_NOT_SAVED = "Expert mode changed, but it could not be saved for next time."
+
+    def set_expert_mode(self, on: bool) -> None:
+        """Show or hide every expert tool, and remember the choice.
+
+        A preference, not an edit: no undo step, and the scene is left
+        exactly as it is, so nothing made with an expert tool is lost or
+        changed when the mode goes off."""
+        self.settings.expert_mode = bool(on)
+        saved = self.settings.save()
+        if not on and self.tool in self.EXPERT_CLICK_TOOLS:
+            self.stop_tool()
+        if not on:
+            self._end_inspecting()
+        self._apply_expert_mode()
+        if self.settings.path is not None and not saved:
+            self.statusBar().showMessage(self.EXPERT_NOT_SAVED)
+
+    def _apply_expert_mode(self) -> None:
+        on = self.settings.expert_mode
+        self.act_expert.blockSignals(True)
+        self.act_expert.setChecked(on)
+        self.act_expert.blockSignals(False)
+        for action in self.expert_actions.values():
+            # Hidden and disabled, so a hidden tool's shortcut does nothing.
+            action.setVisible(on)
+            action.setEnabled(on)
+        for menu in self.expert_menus.values():
+            menu.menuAction().setVisible(on and bool(menu.actions()))
+        self.expert_badge.setVisible(on)
 
     def _build_bottom_bar(self) -> None:
         """A visible bottom bar for the actions and camera presets the
@@ -214,6 +282,7 @@ class MeshWindow(QMainWindow):
     # --- helpers -------------------------------------------------------
 
     def sync(self, keep_gizmo: bool = False) -> None:
+        self._carry_components()
         self.viewport.set_scene(self.document.scene)
         self.viewport.refresh()
         chosen = self.document.scene.selected()
@@ -287,6 +356,7 @@ class MeshWindow(QMainWindow):
         self.document.scene.select([s.id for s in self.document.scene.shapes])
         self.sync()
 
+    @replayable()
     def do_delete(self) -> None:
         if not self.document.scene.selection:
             return
@@ -294,6 +364,7 @@ class MeshWindow(QMainWindow):
         self.document.scene.remove(list(self.document.scene.selection))
         self.sync()
 
+    @replayable()
     def do_duplicate(self) -> None:
         chosen = self.document.scene.selected()
         if not chosen:
@@ -305,19 +376,49 @@ class MeshWindow(QMainWindow):
         self.document.scene.select([c.id for c in clones])
         self.sync()
 
+    @replayable()
     def do_toggle_hole(self) -> None:
-        chosen = self.document.scene.selected()
+        # A guide (a sketch) is never printed, so it is never a hole.
+        chosen = [s for s in self.document.scene.selected() if not is_reference(s)]
         if not chosen:
             return
-        self.document.snapshot("hole")
         target = not chosen[0].is_hole
+        trials = [copy.copy(s) for s in chosen]
+        for trial in trials:
+            trial.is_hole = target
+        if not self._fits_build(trials, "Cannot make a hole"):
+            return
+        self.document.snapshot("hole")
         for shape in chosen:
             shape.is_hole = target
         self.sync()
 
+    def _fits_build(self, shapes, title: str, clearances: dict | None = None) -> bool:
+        """Whether every Hole made from a sketch among `shapes` can be made
+        at its fit (with `clearances`, or the scene's). If not, say why."""
+        problem = create.fit_refusal(
+            shapes, self.document.scene.fit_clearances if clearances is None else clearances
+        )
+        if problem is not None:
+            self._warn(title, problem)
+        return problem is None
+
+    GUIDES_ONLY = "Sketches are guides, not parts, so there is nothing to combine. Select parts too."
+
+    def _parts_chosen(self):
+        """The selected shapes to combine: guides (sketches) are left out
+        and stay where they are. None, and a message, if only guides are."""
+        selected = self.document.scene.selected()
+        chosen = [s for s in selected if not is_reference(s)]
+        if selected and not chosen:
+            self.statusBar().showMessage(self.GUIDES_ONLY)
+            return None
+        return chosen
+
+    @replayable()
     def do_group(self) -> None:
-        chosen = self.document.scene.selected()
-        if len(chosen) < 1:
+        chosen = self._parts_chosen()
+        if not chosen:
             return
         try:
             group = ops.make_group(chosen, clearances=self.document.scene.fit_clearances)
@@ -330,13 +431,14 @@ class MeshWindow(QMainWindow):
         self.document.scene.select([group.id])
         self.sync()
 
+    @replayable()
     def do_boolean(self, op: str) -> None:
         """The explicit Join / Cut Out / Keep Overlap menu items: the
         secondary route to ops.boolean for a user who wants the operator
         directly rather than the Solid/Hole flag. Solid/Hole + Group stays
         the primary path."""
-        chosen = self.document.scene.selected()
-        if len(chosen) < 1:
+        chosen = self._parts_chosen()
+        if not chosen:
             return
         try:
             group = ops.make_boolean_group(
@@ -351,14 +453,18 @@ class MeshWindow(QMainWindow):
         self.document.scene.select([group.id])
         self.sync()
 
+    @replayable()
     def do_ungroup(self) -> None:
         chosen = [s for s in self.document.scene.selected() if s.kind == "group"]
         if not chosen:
             return
+        unpacked = [(group, ops.ungroup(group)) for group in chosen]
+        # The fits may have changed since the group was made.
+        if not self._fits_build([c for _g, children in unpacked for c in children], "Cannot ungroup"):
+            return
         self.document.snapshot("ungroup")
         restored = []
-        for group in chosen:
-            children = ops.ungroup(group)
+        for group, children in unpacked:
             self.document.scene.remove([group.id])
             for child in children:
                 self.document.scene.add(child)
@@ -385,6 +491,8 @@ class MeshWindow(QMainWindow):
             cleaned[key] = value
         if cleaned == current:
             return False
+        if not self._fits_build(self.document.scene.shapes, "Cannot change fits", cleaned):
+            return False
         self.document.snapshot("fit clearances")
         self.document.scene.fit_clearances = cleaned
         self.sync()
@@ -395,6 +503,7 @@ class MeshWindow(QMainWindow):
         if values is not None:
             self.set_fit_clearances(values)
 
+    @replayable()
     def do_mirror(self, axis: str) -> None:
         chosen = self.document.scene.selected()
         if not chosen:
@@ -404,6 +513,7 @@ class MeshWindow(QMainWindow):
             ops.mirror(shape, axis)
         self.sync()
 
+    @replayable()
     def do_align(self, axis: str, mode: str) -> None:
         chosen = self.document.scene.selected()
         if len(chosen) < 2:
@@ -441,6 +551,7 @@ class MeshWindow(QMainWindow):
         self._warn(title, error)
         return None
 
+    @replayable()
     def hollow_selected(self, wall: float, open_top: bool = False, drain: float = 0.0) -> bool:
         shape = self._one_selected("hollow out")
         if shape is None:
@@ -463,6 +574,7 @@ class MeshWindow(QMainWindow):
         if values is not None:
             self.hollow_selected(values["wall"], values.get("open_top", False), values["drain"])
 
+    @replayable()
     def split_selected(
         self, axis: str, distance: float, pegs: bool = False, peg_diameter: float = 4.0
     ) -> bool:
@@ -505,6 +617,7 @@ class MeshWindow(QMainWindow):
         self.document.scene.select([shape.id] + [c.id for c in copies])
         self.sync()
 
+    @replayable()
     def repeat_row_selected(self, count: int, spacing: float, axis: str = "x") -> bool:
         shape = self._one_selected("repeat")
         if shape is None:
@@ -517,6 +630,7 @@ class MeshWindow(QMainWindow):
         self._add_copies("repeat in a row", shape, copies)
         return True
 
+    @replayable()
     def repeat_circle_selected(self, count: int, radius: float, centre, angle: float = 360.0) -> bool:
         shape = self._one_selected("repeat")
         if shape is None:
@@ -599,6 +713,7 @@ class MeshWindow(QMainWindow):
         "place_ready": "Now add a shape. It will sit on the face you clicked. Esc cancels.",
         "measure": "Click the first point on a part. Esc or Measure again to stop.",
         "measure_second": "Now click the second point.",
+        **ExpertActions.EXPERT_TOOL_PROMPTS,
     }
 
     def start_tool(self, tool: str) -> None:
@@ -617,6 +732,7 @@ class MeshWindow(QMainWindow):
         self._measure_points = []
         self.viewport.set_pick_mode(None)
         self.viewport.clear_measure_line()
+        self.viewport.clear_marked_lines()
         for action in (self.act_place, self.act_measure):
             action.blockSignals(True)
             action.setChecked(False)
@@ -627,7 +743,7 @@ class MeshWindow(QMainWindow):
             return self.TOOL_PROMPTS["place_ready"]
         if self.tool == "measure" and len(self._measure_points) == 1:
             return self.TOOL_PROMPTS["measure_second"]
-        return self.TOOL_PROMPTS[self.tool]
+        return self._construct_prompt() or self.TOOL_PROMPTS[self.tool]
 
     def stop_tool(self) -> None:
         if self.tool is None:
@@ -689,6 +805,8 @@ class MeshWindow(QMainWindow):
             self._place_picked(shape_id, face_index, point)
         elif self.tool == "measure":
             self._measure_picked(shape_id, point)
+        elif self.tool in self.EXPERT_CLICK_HANDLERS:
+            getattr(self, self.EXPERT_CLICK_HANDLERS[self.tool])(shape_id, face_index, point)
 
     def _place_picked(self, shape_id: str, face_index: int, point) -> None:
         """Remember the clicked face; nothing in the scene changes until a
@@ -738,12 +856,26 @@ class MeshWindow(QMainWindow):
             shape = self.document.scene.get(shape_id)
         except KeyError:
             return
+        if field in ("is_hole", "fit"):
+            trial = copy.copy(shape)
+            setattr(trial, field, bool(value) if field == "is_hole" else str(value))
+            if not self._fits_build([trial], "Cannot change the fit"):
+                self.inspector.show_shape(shape)
+                return
+        elif field not in ("color", "x", "y", "z", "rx", "ry", "rz"):
+            problem = create.edit_refusal(shape, field, value, self.document.scene.fit_clearances)
+            if problem is not None:
+                self._warn("Cannot change that", problem)
+                self.inspector.show_shape(shape)
+                return
 
         # One snapshot per burst of edits, not one per keystroke: see the
         # comment on self._edit_timer in __init__.
         if not self._edit_active:
             self.document.snapshot("edit")
             self._edit_active = True
+        # A typed number replaces a formula (Expert mode's parameters).
+        self._end_link(shape, field)
 
         if field == "is_hole":
             shape.is_hole = bool(value)
@@ -803,6 +935,7 @@ class MeshWindow(QMainWindow):
         of inspector edits. This is the one sync() the whole burst gets."""
         self._edit_active = False
         self.sync()
+        self._said_link_ended()
 
     # --- files ---------------------------------------------------------
 
@@ -810,6 +943,7 @@ class MeshWindow(QMainWindow):
         export_scene(self.document.scene, path)
 
     def save_to(self, path) -> None:
+        self.document.settle()
         save_project(self.document.scene, path)
 
     def open_from(self, path) -> None:
@@ -824,8 +958,10 @@ class MeshWindow(QMainWindow):
         # empty document) was open before rather than leaving the window
         # half-switched to a document it couldn't actually display.
         previous_document = self.document
-        # A clicked face or measured point belongs to the old project.
+        # A clicked face or measured point belongs to the old project, and
+        # so does a section view's cut.
         self._clear_tool()
+        self._end_inspecting()
         self.document = new_document
         try:
             self.sync()
@@ -921,6 +1057,11 @@ class MeshWindow(QMainWindow):
         self.sync()
 
 
+def make_window() -> MeshWindow:
+    """The app's window, with this computer's saved preferences."""
+    return MeshWindow(Settings.load(default_path()))
+
+
 def run(argv: list[str] | None = None) -> int:
     import os
 
@@ -951,7 +1092,7 @@ def run(argv: list[str] | None = None) -> int:
 
     app = QApplication(argv or sys.argv)
     apply_theme(app)
-    window = MeshWindow()
+    window = make_window()
     window.show()
     window.viewport.start()
     return app.exec()

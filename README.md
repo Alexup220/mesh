@@ -56,6 +56,33 @@ Everything here is in millimetres, and everything can be undone with `Ctrl+Z`.
 
 `Esc` stops whichever of the click-on-a-part tools is running.
 
+## Expert mode
+
+**Tools → Expert Mode** shows a larger set of modeling tools for people who
+have modeled before, in extra menus between *Tools* and *View*. It is off on a
+fresh install, and mesh looks exactly as described above until you turn it on.
+The choice is remembered on this computer (in `~/.config/mesh/settings.json`),
+never in a project file, so opening a project doesn't change it. Turning it
+off only hides the tools: anything you made with them stays in your model,
+visible and editable.
+
+With Expert mode on:
+
+- **Sketch → New Sketch** draws flat curves (lines, rectangles, circles,
+  arcs, polygons and splines) on the workplane or an upright plane. Type each
+  curve in millimetres, or turn on *Draw Lines* and click points into the
+  drawing. **Sketch on a Face** draws on a clicked flat face of a part and
+  shows that face's outline, which you can copy in to trace. **Change
+  Sketch** redraws a sketch, or the sketch a part was made from. Sketches are
+  guides: they show in orange, save with the project and undo like anything
+  else, but are never printed.
+- **Create → Extrude** pushes a sketch's closed outlines out of its plane,
+  **Revolve** turns them around a line, **Sweep** carries them along a path
+  drawn in a second sketch, and **Loft** joins the outlines of two or more
+  sketches with a skin. Each makes a new part or a hole. The sketch is used up
+  unless you keep it; the part keeps a copy of its curves, so its distance or
+  angle stays editable in Details.
+
 ## Shortcuts
 
 | Key | Action |
@@ -74,6 +101,7 @@ Everything here is in millimetres, and everything can be undone with `Ctrl+Z`.
 | `P` | Place next shape on a face |
 | `T` | Add text |
 | `M` | Measure |
+| `E` | Extrude (Expert mode) |
 | `Esc` | Stop the current tool |
 
 ## Develop

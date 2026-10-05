@@ -38,14 +38,22 @@ from vtkmodules.vtkRenderingCore import (
     vtkRenderer,
 )
 
+from mesh import guides, section
 from mesh.scene import Scene
-from mesh.shapes import hole_clearance, shape_geometry
+from mesh.shapes import hole_clearance, is_reference, shape_geometry
+from mesh.sketch import sketch_lines
 
 HOLE_OPACITY = 0.35
 BACKGROUND = (0.16, 0.17, 0.20)
 GRID_COLOR = (0.50, 0.53, 0.58)
 MEASURE_COLOR = (1.0, 0.85, 0.2)
 MEASURE_LINE_WIDTH = 4.0  # pixels
+SELECTED_COLOR = (1.0, 0.85, 0.2)
+# A guide (a sketch) is its curves, drawn as lines, over a faint shading of
+# the area its closed outlines fill.
+GUIDE_FILL_OPACITY = 0.18
+GUIDE_LINE_WIDTH = 2.0
+GUIDE_SELECTED_LINE_WIDTH = 3.5
 
 VIEW_PRESETS = {
     "home": ((1.0, -1.0, 0.8), (0.0, 0.0, 1.0)),
@@ -68,6 +76,36 @@ def _to_polydata(tm) -> vtkPolyData:
     poly.SetPoints(points)
     poly.SetPolys(cells)
     return poly
+
+
+def _lines_polydata(lines) -> vtkPolyData:
+    """World-space polylines (a list of (N, 3) arrays) as VTK lines."""
+    points = vtkPoints()
+    cells = vtkCellArray()
+    for line in lines:
+        start = points.GetNumberOfPoints()
+        for point in line:
+            points.InsertNextPoint(*(float(v) for v in point))
+        cells.InsertNextCell(len(line))
+        for index in range(len(line)):
+            cells.InsertCellPoint(start + index)
+    poly = vtkPolyData()
+    poly.SetPoints(points)
+    poly.SetLines(cells)
+    return poly
+
+
+def _guide_lines(shape) -> list:
+    """A guide's curves (a sketch's) or lines (a construction guide's) as
+    world-space polylines."""
+    transform = np.asarray(shape.transform, dtype=np.float64)
+    kind = shape.params.get("primitive")
+    if kind == "sketch":
+        local = [np.column_stack([line, np.zeros(len(line))])
+                 for line in sketch_lines(shape.params.get("entities", []))]
+    else:
+        local = guides.guide_lines(kind, shape.params)
+    return [(np.column_stack([line, np.ones(len(line))]) @ transform.T)[:, :3] for line in local]
 
 
 def _hex_to_rgb(value: str) -> tuple[float, float, float]:
@@ -107,6 +145,8 @@ class Viewport(QWidget):
         super().__init__(parent)
         self._scene: Scene | None = None
         self._actors: dict[str, vtkActor] = {}
+        # A guide's (sketch's) curves, drawn as lines beside its shading.
+        self._outlines: dict[str, vtkActor] = {}
         # What each actor's polydata was last built from. shape_geometry()
         # runs a per-vertex Python loop to build a vtkPolyData -- rebuilding
         # every actor on every refresh() call (e.g. once per keystroke while
@@ -114,6 +154,14 @@ class Viewport(QWidget):
         # shape's own parameters and transform have not changed since the
         # last rebuild.
         self._geometry_keys: dict[str, tuple] = {}
+        # Section view (Expert mode): (point, way it faces) of the plane the
+        # parts are drawn cut along, or None. While it is on, each cut
+        # part's actor shows what is left of its own faces, `_face_maps`
+        # says which of the part's triangles each of those came from, and
+        # `_caps` holds the flat faces that close each cut.
+        self.section: tuple[np.ndarray, np.ndarray] | None = None
+        self._face_maps: dict[str, np.ndarray] = {}
+        self._caps: dict[str, vtkActor] = {}
 
         # QVTKRenderWindowInteractor is a "native"/foreign-window widget
         # (WA_PaintOnScreen); Qt's layout engine treats its sizeHint()
@@ -159,6 +207,9 @@ class Viewport(QWidget):
         self.pick_mode: str | None = None
         # The Measure tool's line between its two clicked points, or None.
         self.measure_actor: vtkActor | None = None
+        # The edges or faces an Expert mode tool has had clicked so far
+        # (drawn as lines on top of the parts), or None.
+        self.marked_actor: vtkActor | None = None
         self._add_grid()
         # Position the camera now, but do NOT call Render() here: the
         # widget's native window is not mapped yet (this runs during
@@ -207,7 +258,10 @@ class Viewport(QWidget):
         an equal key are guaranteed to produce the same polydata."""
         transform = np.asarray(shape.transform, dtype=np.float64)
         clearance = hole_clearance(shape, self._clearances())
-        return (shape.kind, repr(shape.params), transform.tobytes(), clearance)
+        cut = None
+        if self.section is not None and not is_reference(shape):
+            cut = tuple(np.concatenate(self.section).tolist())
+        return (shape.kind, repr(shape.params), transform.tobytes(), clearance, cut)
 
     def _clearances(self) -> dict | None:
         return getattr(self._scene, "fit_clearances", None)
@@ -221,6 +275,14 @@ class Viewport(QWidget):
             if shape_id not in wanted:
                 self.renderer.RemoveActor(self._actors.pop(shape_id))
                 self._geometry_keys.pop(shape_id, None)
+                self._face_maps.pop(shape_id, None)
+        for shape_id in list(self._caps):
+            if shape_id not in wanted or self.section is None:
+                self.renderer.RemoveActor(self._caps.pop(shape_id))
+        guides = {s.id for s in self._scene.shapes if s.visible and is_reference(s)}
+        for shape_id in list(self._outlines):
+            if shape_id not in guides:
+                self.renderer.RemoveActor(self._outlines.pop(shape_id))
 
         selected = set(self._scene.selection)
         for shape in self._scene.shapes:
@@ -234,11 +296,19 @@ class Viewport(QWidget):
                 self.renderer.AddActor(actor)
 
             key = self._geometry_key(shape)
-            if self._geometry_keys.get(shape.id) != key:
-                actor.GetMapper().SetInputData(
-                    _to_polydata(shape_geometry(shape, self._clearances()))
-                )
+            changed = self._geometry_keys.get(shape.id) != key
+            if changed:
+                tm = shape_geometry(shape, self._clearances())
+                if self.section is not None and not is_reference(shape):
+                    tm = self._cut(shape.id, tm)
+                else:
+                    self._face_maps.pop(shape.id, None)
+                actor.GetMapper().SetInputData(_to_polydata(tm))
                 self._geometry_keys[shape.id] = key
+
+            if is_reference(shape):
+                self._refresh_guide(shape, actor, shape.id in selected, changed)
+                continue
 
             prop = actor.GetProperty()
             prop.SetColor(*_hex_to_rgb(shape.color))
@@ -246,8 +316,86 @@ class Viewport(QWidget):
             prop.SetEdgeVisibility(shape.id in selected)
             prop.SetEdgeColor(1.0, 0.85, 0.2)
             prop.SetLineWidth(2.0)
+            cap = self._caps.get(shape.id)
+            if cap is not None:
+                cap.GetProperty().SetOpacity(HOLE_OPACITY if shape.is_hole else 1.0)
 
         self._render()
+
+    def _cut(self, shape_id: str, tm):
+        """Section view: what is left of a part, with its cap actor."""
+        kept, face_map, cap_tm = section.cut_away(tm, *self.section)
+        self._face_maps[shape_id] = face_map
+        cap = self._caps.get(shape_id)
+        if cap is None:
+            cap = vtkActor()
+            cap.SetMapper(vtkPolyDataMapper())
+            cap.GetProperty().SetColor(*_hex_to_rgb(section.SECTION_COLOR))
+            self._caps[shape_id] = cap
+            self.renderer.AddActor(cap)
+        cap.GetMapper().SetInputData(_to_polydata(cap_tm))
+        return kept
+
+    def set_section(self, origin, normal) -> None:
+        """Draw every part cut along the plane through `origin`, hiding the
+        side `normal` points to. Only the drawing changes."""
+        self.section = section.where(origin, normal)
+        self.refresh()
+
+    def clear_section(self) -> None:
+        """Draw the parts whole again."""
+        if self.section is None:
+            return
+        self.section = None
+        self.refresh()
+
+    def cap_for(self, shape_id: str):
+        """A cut part's cap actor while the section view is on, or None."""
+        return self._caps.get(shape_id)
+
+    def _refresh_guide(self, shape, shading: vtkActor, selected: bool, changed: bool) -> None:
+        """A guide is faint shading plus its curves as lines, yellow and
+        thicker while selected."""
+        color = _hex_to_rgb(shape.color)
+        prop = shading.GetProperty()
+        prop.SetColor(*color)
+        prop.SetOpacity(GUIDE_FILL_OPACITY)
+        prop.SetEdgeVisibility(False)
+        prop.LightingOff()
+        outline = self._outlines.get(shape.id)
+        if outline is None:
+            outline = vtkActor()
+            outline.SetMapper(vtkPolyDataMapper())
+            outline.GetProperty().LightingOff()
+            self._outlines[shape.id] = outline
+            self.renderer.AddActor(outline)
+            changed = True
+        if changed:
+            outline.GetMapper().SetInputData(_lines_polydata(_guide_lines(shape)))
+        line = outline.GetProperty()
+        line.SetColor(*(SELECTED_COLOR if selected else color))
+        line.SetLineWidth(GUIDE_SELECTED_LINE_WIDTH if selected else GUIDE_LINE_WIDTH)
+
+    def outline_for(self, shape_id: str):
+        """A guide's line actor (its curves), or None."""
+        return self._outlines.get(shape_id)
+
+    def _shape_hit(self, actor) -> str | None:
+        for shape_id, candidate in self._actors.items():
+            if candidate is actor:
+                return shape_id
+        for shape_id, candidate in self._outlines.items():
+            if candidate is actor:
+                return shape_id
+        for shape_id, candidate in self._caps.items():
+            if candidate is actor:
+                return shape_id
+        return None
+
+    def end_drag(self) -> None:
+        """Forget a mouse button held down in the 3D view, before a window
+        opens on top of it and takes the button's release."""
+        self.interactor.GetInteractorStyle().OnLeftButtonUp()
 
     def set_pick_mode(self, mode: str | None) -> None:
         self.pick_mode = mode
@@ -260,11 +408,8 @@ class Viewport(QWidget):
         self._picker.Pick(x, y, 0, self.renderer)
         hit = self._picker.GetActor()
         additive = bool(interactor.GetShiftKey())
-        for shape_id, actor in self._actors.items():
-            if actor is hit:
-                self.picked.emit(shape_id, additive)
-                return
-        self.picked.emit("", additive)
+        shape_id = self._shape_hit(hit) if hit is not None else None
+        self.picked.emit(shape_id or "", additive)
 
     def _on_surface_click(self, x: int, y: int) -> None:
         self._cell_picker.Pick(x, y, 0, self.renderer)
@@ -272,9 +417,20 @@ class Viewport(QWidget):
         point = tuple(float(v) for v in self._cell_picker.GetPickPosition())
         for shape_id, actor in self._actors.items():
             if actor is hit:
-                self.surface_picked.emit(shape_id, int(self._cell_picker.GetCellId()), point)
+                self.surface_picked.emit(shape_id, self.face_of_cell(shape_id, self._cell_picker.GetCellId()),
+                                         point)
                 return
+        # Nothing, or a section view's cap: the cut is not one of the
+        # part's own faces.
         self.surface_picked.emit("", -1, point)
+
+    def face_of_cell(self, shape_id: str, cell: int) -> int:
+        """The part's own triangle a drawn triangle is, even while the part
+        is drawn cut open."""
+        face_map = self._face_maps.get(shape_id)
+        if face_map is None:
+            return int(cell)
+        return int(face_map[cell]) if 0 <= cell < len(face_map) else -1
 
     def set_measure_line(self, a, b) -> None:
         """Draw (or move) the Measure tool's line from a to b."""
@@ -305,6 +461,33 @@ class Viewport(QWidget):
             self.measure_actor = None
             self._render()
 
+    def set_marked_lines(self, lines) -> None:
+        """Show what a click tool has picked so far (world-space polylines,
+        a list of (N, 3) arrays), drawn as the Measure line is; an empty
+        list shows nothing."""
+        self.clear_marked_lines()
+        if not lines:
+            return
+        mapper = vtkPolyDataMapper()
+        mapper.SetInputData(_lines_polydata(lines))
+        actor = vtkActor()
+        actor.SetMapper(mapper)
+        prop = actor.GetProperty()
+        prop.SetColor(*MEASURE_COLOR)
+        prop.SetLineWidth(MEASURE_LINE_WIDTH)
+        prop.SetRenderLinesAsTubes(True)
+        prop.LightingOff()
+        actor.PickableOff()
+        self.overlay.AddActor(actor)
+        self.marked_actor = actor
+        self._render()
+
+    def clear_marked_lines(self) -> None:
+        if self.marked_actor is not None:
+            self.overlay.RemoveActor(self.marked_actor)
+            self.marked_actor = None
+            self._render()
+
     def view_preset(self, name: str) -> None:
         if name not in VIEW_PRESETS:
             raise ValueError(f"unknown view {name!r}; expected one of {tuple(VIEW_PRESETS)}")
@@ -314,7 +497,8 @@ class Viewport(QWidget):
     def frame_selection(self) -> None:
         if self._scene is None:
             return
-        chosen = [self._actors[s.id] for s in self._scene.selected() if s.id in self._actors]
+        chosen = [self._outlines.get(s.id) or self._actors[s.id]
+                  for s in self._scene.selected() if s.id in self._actors]
         if not chosen:
             self.renderer.ResetCamera()
         else:

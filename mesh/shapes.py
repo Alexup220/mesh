@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 from shapely.geometry import Polygon
 
-from mesh import hardware, solids, text
+from mesh import coils, features, guides, hardware, sketch, solids, text, threads
 from mesh.blobs import decode_mesh
 
 PRIMITIVES: dict[str, dict] = {
@@ -93,6 +93,58 @@ PRIMITIVES: dict[str, dict] = {
         "defaults": {"diameter": 6.0, "depth": 2.0},
         "shelf": False,
     },
+    # Solids made from a sketch (Expert mode; see mesh/features.py). Their
+    # params also hold the sketch's curves ("entities"), which are not a
+    # Details panel field: Sketch > Change Sketch edits them.
+    "extrude": {
+        "label": "Extrusion",
+        "defaults": {"distance": 20.0, "side": "one", "taper": 0.0},
+        "choices": {"side": features.SIDES},
+        "shelf": False,
+    },
+    # Also holds "axis", the line it turns around (see features.revolve).
+    "revolve": {
+        "label": "Revolve",
+        "defaults": {"angle": 360.0},
+        "shelf": False,
+    },
+    # Also holds its path's curves and both sketches' planes (features.sweep).
+    "sweep": {
+        "label": "Sweep",
+        "defaults": {"twist": 0.0, "end_scale": 100.0},
+        "shelf": False,
+    },
+    # Also holds its path's curves and plane (features.pipe).
+    "pipe": {
+        "label": "Pipe",
+        "defaults": {"diameter": 10.0, "inside": "solid", "wall": 1.0},
+        "choices": {"inside": features.PIPE_INSIDES},
+        "shelf": False,
+    },
+    # Holds its outlines' curves and planes, in order (features.loft).
+    "loft": {
+        "label": "Loft",
+        "defaults": {"sides": "straight"},
+        "choices": {"sides": features.LOFT_SIDES},
+        "shelf": False,
+    },
+    # A cylinder with a modeled screw thread (Expert mode's Thread tool;
+    # see mesh/threads.py). As a Hole it cuts a threaded hole.
+    "thread": {
+        "label": "Thread",
+        "defaults": dict(threads.DEFAULTS),
+        "choices": {"end": threads.ENDS, "hand": threads.HANDS, "thread_shape": threads.THREAD_SHAPES,
+                    "lead_in": threads.LEAD_INS},
+        "shelf": False,
+    },
+    # A spring: a wire wound round an upright line (Expert mode's Coil
+    # tool; see mesh/coils.py).
+    "coil": {
+        "label": "Coil",
+        "defaults": dict(coils.DEFAULTS),
+        "choices": {"wire_shape": coils.WIRE_SHAPES, "winding": coils.WINDINGS},
+        "shelf": False,
+    },
 }
 
 HARDWARE_PRIMITIVES = ("screw_hole", "nut_trap", "insert_pocket", "magnet_pocket")
@@ -101,6 +153,26 @@ HARDWARE_PRIMITIVES = ("screw_hole", "nut_trap", "insert_pocket", "magnet_pocket
 def shelf_primitives() -> list[str]:
     """The primitives that get a button on the shape shelf."""
     return [k for k, info in PRIMITIVES.items() if info.get("shelf", True)]
+
+
+# Guides drawn in the scene but never printed (Expert mode): a sketch is a
+# flat drawing on a plane, and the others are construction guides (see
+# mesh.guides). They are stored like primitives (kind "primitive",
+# params["primitive"] one of these) but are not in PRIMITIVES, which lists
+# solids only. Combining, the status bar check and Save for Printing leave
+# them out; see is_reference.
+REFERENCES: dict[str, dict] = {
+    "sketch": {"label": "Sketch"},
+    "plane": {"label": "Plane"},
+    "axis": {"label": "Axis"},
+    "point": {"label": "Point"},
+}
+
+
+def is_reference(shape) -> bool:
+    """True for a guide that is shown but never printed (a sketch or a
+    construction guide)."""
+    return shape.kind == "primitive" and shape.params.get("primitive") in REFERENCES
 
 SEGMENTS = 64
 
@@ -147,11 +219,12 @@ def hole_clearance(shape, clearances: dict | None) -> float:
     return value if np.isfinite(value) and value > 0.0 else 0.0
 
 
-def primitive_mesh(kind: str, params: dict, clearance: float = 0.0) -> trimesh.Trimesh:
+def primitive_mesh(kind: str, params: dict, clearance: float = 0.0, hole: bool = False) -> trimesh.Trimesh:
     """Build a primitive resting on the workplane.
 
     `clearance` > 0 grows it by that much on every side (see hole_clearance);
     the grown shape is lowered by the same amount so it grows evenly in Z too.
+    `hole` says the shape is a Hole (only a thread's lead-in differs).
     """
     if kind not in PRIMITIVES:
         raise KeyError(f"unknown primitive: {kind}")
@@ -159,6 +232,17 @@ def primitive_mesh(kind: str, params: dict, clearance: float = 0.0) -> trimesh.T
     if kind in HARDWARE_PRIMITIVES:
         # Hardware holes add their clearance themselves, radius by radius.
         return hardware.build(kind, p, clearance)
+    if kind in features.SOLIDS:
+        # Placed by their sketch's plane, so not moved onto the workplane;
+        # a fitted Hole grows along the outline, not by scaling.
+        return features.build(kind, p, clearance)
+    if kind == "thread":
+        # Grows across and at the ends, but keeps its pitch and its turns
+        # where they are, so a bolt fits the threaded Hole.
+        return threads.thread_mesh(p, clearance, hole)
+    if kind == "coil":
+        # The wire grows all round and its ends grow along it.
+        return coils.coil_mesh(p, clearance)
     if kind == "text":
         # Letters grow outward along their own outline, not by scaling.
         return text.text_mesh(str(p["text"]), float(p["letter_height"]), float(p["depth"]), clearance)
@@ -290,8 +374,17 @@ def shape_geometry(shape, clearances: dict | None = None) -> trimesh.Trimesh:
     agree on what a fitted Hole looks like.
     """
     clearance = hole_clearance(shape, clearances)
-    if shape.kind == "primitive":
-        tm = primitive_mesh(shape.params["primitive"], shape.params, clearance)
+    if is_reference(shape):
+        # In the guide's own coordinates; a fit means nothing for it.
+        kind = shape.params["primitive"]
+        if kind == "sketch":
+            tm = sketch.sketch_geometry(shape.params.get("entities", []))
+        else:
+            tm = guides.guide_geometry(kind, shape.params)
+        clearance = 0.0
+    elif shape.kind == "primitive":
+        tm = primitive_mesh(shape.params["primitive"], shape.params, clearance,
+                            bool(getattr(shape, "is_hole", False)))
     elif shape.kind in ("imported", "group"):
         tm = decode_mesh(shape.params["blob"])
     else:

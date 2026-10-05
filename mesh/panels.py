@@ -24,8 +24,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from mesh.features import END_SCALE_LIMITS, TAPER_LIMIT, TWIST_LIMIT
+from mesh.threads import MAX_STARTS
 from mesh.scene import DEFAULT_COLOR, DEFAULT_FIT, FITS, Shape, euler_from_transform
-from mesh.shapes import PRIMITIVES, shelf_primitives
+from mesh.shapes import PRIMITIVES, is_reference, shelf_primitives
 from mesh.text import has_letters
 
 POSITION_FIELDS = ("x", "y", "z")
@@ -80,6 +82,25 @@ FIELD_LABELS = {
     "letter_height": "Letter height (mm)",
     "size": "Size",
     "head": "Screw head",
+    "distance": "Distance (mm)",
+    "side": "Direction",
+    "angle": "Angle (degrees)",
+    "taper": "Sides slope in (degrees)",
+    "twist": "Twist along the path (degrees)",
+    "end_scale": "Size at the far end (%)",
+    "sides": "Sides between the outlines",
+    "pitch": "Pitch (mm per turn)",
+    "thread_length": "Threaded length (mm)",
+    "end": "Thread starts",
+    "hand": "Thread turns",
+    "starts": "Starts (threads side by side)",
+    "thread_shape": "Thread shape",
+    "lead_in": "Starting end of the thread",
+    "turns": "Turns",
+    "wire": "Wire thickness (mm)",
+    "wire_shape": "Wire shape",
+    "winding": "Coil winds",
+    "inside": "Inside",
 }
 
 
@@ -110,6 +131,7 @@ class Inspector(QWidget):
 
         layout = QFormLayout(self)
         self.fields: dict[str, QDoubleSpinBox] = {}
+        self.field_labels: dict[str, QLabel] = {}
         self._rows: dict[str, int] = {}
 
         for field in POSITION_FIELDS + SIZE_FIELDS + ROTATION_FIELDS:
@@ -118,12 +140,29 @@ class Inspector(QWidget):
             box.setSingleStep(1.0)
             if field in ROTATION_FIELDS:
                 box.setRange(-360.0, 360.0)
+            elif field == "angle":
+                # How far a Revolve turns: at most one whole turn.
+                box.setRange(0.1, 360.0)
+            elif field == "taper":
+                # How far an Extrusion's sides slope in (out, below 0).
+                box.setRange(-TAPER_LIMIT, TAPER_LIMIT)
+            elif field == "twist":
+                # How far a Sweep turns along its path, either way.
+                box.setRange(-TWIST_LIMIT, TWIST_LIMIT)
+            elif field == "end_scale":
+                box.setRange(*END_SCALE_LIMITS)
+            elif field == "starts":
+                # How many threads run side by side: a whole number.
+                box.setDecimals(0)
+                box.setRange(1.0, float(MAX_STARTS))
             elif field in SIZE_FIELDS:
                 box.setRange(0.0 if field in ZERO_ALLOWED else 0.1, 10000.0)
             else:
                 box.setRange(-10000.0, 10000.0)
             box.valueChanged.connect(lambda value, f=field: self._emit(f, value))
-            layout.addRow(QLabel(FIELD_LABELS[field]), box)
+            label = QLabel(FIELD_LABELS[field])
+            layout.addRow(label, box)
+            self.field_labels[field] = label
             self.fields[field] = box
             self._rows[field] = layout.rowCount() - 1
 
@@ -159,6 +198,7 @@ class Inspector(QWidget):
         self.hole_box = QCheckBox("Make this a hole", self)
         self.hole_box.toggled.connect(lambda value: self._emit("is_hole", value))
         layout.addRow(self.hole_box)
+        self._hole_row = layout.rowCount() - 1
 
         # How snugly the hole fits what goes into it. Only meaningful for a
         # Hole, so the row is hidden for solids (see show_shape).
@@ -251,6 +291,9 @@ class Inspector(QWidget):
             for field in SIZE_FIELDS + CHOICE_FIELDS + TEXT_FIELDS:
                 self._layout.setRowVisible(self._rows[field], False)
             self._layout.setRowVisible(self._fit_row, False)
+            # Hidden while a sketch was shown; every part has it.
+            self._layout.setRowVisible(self._hole_row, True)
+            self._show_links({})
             return
 
         self._loading = True
@@ -260,10 +303,12 @@ class Inspector(QWidget):
                 self.fields[field].setValue(float(transform[axis, 3]))
 
             active = self._active_size_fields(shape)
+            # A number a part made before it existed lacks means its default.
+            defaults = PRIMITIVES[shape.params["primitive"]]["defaults"] if active else {}
             for field in SIZE_FIELDS:
                 self._layout.setRowVisible(self._rows[field], field in active)
                 if field in active:
-                    self.fields[field].setValue(float(shape.params.get(field, 0.0)))
+                    self.fields[field].setValue(float(shape.params.get(field, defaults.get(field, 0.0))))
             choices = self._choices(shape)
             for field, combo in self.choice_boxes.items():
                 shown = field in active
@@ -272,7 +317,7 @@ class Inspector(QWidget):
                 if shown:
                     for value, label in choices.get(field, []):
                         combo.addItem(label, value)
-                    combo.setCurrentIndex(max(combo.findData(shape.params.get(field)), 0))
+                    combo.setCurrentIndex(max(combo.findData(shape.params.get(field, defaults.get(field))), 0))
             for field, line in self.text_boxes.items():
                 shown = field in active
                 self._layout.setRowVisible(self._rows[field], shown)
@@ -285,13 +330,33 @@ class Inspector(QWidget):
             for field, value in zip(ROTATION_FIELDS, (rx, ry, rz)):
                 self.fields[field].setValue(float(value))
 
+            # A guide (a sketch) is never printed, so solid or hole means
+            # nothing for it.
+            guide = is_reference(shape)
             self.hole_box.setChecked(bool(shape.is_hole))
-            self._layout.setRowVisible(self._fit_row, bool(shape.is_hole))
+            self._layout.setRowVisible(self._hole_row, not guide)
+            self._layout.setRowVisible(self._fit_row, bool(shape.is_hole) and not guide)
             index = self.fit_box.findData(getattr(shape, "fit", DEFAULT_FIT))
             self.fit_box.setCurrentIndex(max(index, 0))
             self._set_color_swatch(shape.color or DEFAULT_COLOR)
+            self._show_links(getattr(shape, "links", None) or {})
         finally:
             self._loading = False
+
+    LINKED_TIP = "Follows the formula {formula} (Modify > Change Parameters). Typing a number ends the link."
+
+    def _show_links(self, links: dict) -> None:
+        """A number that follows a parameter's formula is shown in italics,
+        with the formula in its tooltip (Expert mode)."""
+        for field, box in self.fields.items():
+            formula = links.get(field)
+            tip = self.LINKED_TIP.format(formula=formula) if formula else ""
+            box.setToolTip(tip)
+            label = self.field_labels[field]
+            label.setToolTip(tip)
+            font = label.font()
+            font.setItalic(bool(formula))
+            label.setFont(font)
 
 
 class FormDialog(QDialog):

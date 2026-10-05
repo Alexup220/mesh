@@ -12,7 +12,7 @@ import trimesh
 
 from mesh.blobs import encode_mesh
 from mesh.scene import Shape, euler_from_transform, transform_with_euler
-from mesh.shapes import shape_geometry
+from mesh.shapes import is_reference, shape_geometry
 
 ENGINE = "manifold"
 OPS = ("union", "difference", "intersection")
@@ -79,8 +79,10 @@ def evaluate(shapes: list[Shape], clearances: dict | None = None) -> trimesh.Tri
     """Union every solid, then subtract every hole.
 
     `clearances` is the scene's fit_clearances: Holes with a fit are cut at
-    their fitted size (see mesh.shapes.hole_clearance).
+    their fitted size (see mesh.shapes.hole_clearance). Guides (sketches)
+    are never part of the result.
     """
+    shapes = [s for s in shapes if not is_reference(s)]
     solids = [shape_geometry(s, clearances) for s in shapes if not s.is_hole]
     holes = [shape_geometry(s, clearances) for s in shapes if s.is_hole]
 
@@ -96,10 +98,11 @@ def evaluate(shapes: list[Shape], clearances: dict | None = None) -> trimesh.Tri
 
 
 def boolean(shapes: list[Shape], op: str, clearances: dict | None = None) -> trimesh.Trimesh:
-    """Explicit boolean, ignoring the is_hole flag."""
+    """Explicit boolean, ignoring the is_hole flag. Guides (sketches) are
+    left out."""
     if op not in OPS:
         raise ValueError(f"unknown operation {op!r}; expected one of {OPS}")
-    meshes = [shape_geometry(s, clearances) for s in shapes]
+    meshes = [shape_geometry(s, clearances) for s in shapes if not is_reference(s)]
     if not meshes:
         raise NothingToCombineError("Select at least one shape.")
     if len(meshes) == 1:

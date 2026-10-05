@@ -1,0 +1,428 @@
+"""Expert mode: the larger set of modeling tools, listed in one place.
+
+Expert mode is a preference of this computer (mesh.settings), off on a
+fresh install, and never stored in a project. With it off, none of the
+tools below appear anywhere and mesh looks and behaves exactly as it does
+without them. Turning it off only hides tools: shapes made with them are
+ordinary shapes, so they stay in the scene, visible and editable.
+
+Every expert tool is one ExpertTool in TOOLS. The window makes one menu
+item from each entry, under its menu in MENUS, and shows or hides all of
+them together when the mode changes. Listing a tool here is the only step
+that puts it behind the switch.
+"""
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ExpertTool:
+    key: str          # unique id, e.g. "extrude"
+    menu: str         # a key of MENUS
+    label: str        # menu text, plain words ("&" marks the shortcut letter)
+    tip: str          # tooltip: what it does, and what it can't do exactly
+    handler: str      # the MeshWindow method the menu item calls
+    shortcut: str | None = None
+
+
+# The expert menus, in menu bar order: (key, title).
+MENUS: tuple[tuple[str, str], ...] = (
+    ("sketch", "S&ketch"),
+    ("create", "&Create"),
+    ("modify", "Mo&dify"),
+    ("assemble", "&Assemble"),
+    ("construct", "C&onstruct"),
+    ("inspect", "&Inspect"),
+)
+
+TOOLS: tuple[ExpertTool, ...] = (
+    ExpertTool(
+        "new_sketch", "sketch", "&New Sketch...",
+        "Draw a flat sketch on the workplane or an upright plane: lines, rectangles, "
+        "circles, arcs, polygons and splines, placed by typed millimetres or by clicking. "
+        "A sketch is a guide and is never printed; its closed outlines make parts.",
+        "do_new_sketch",
+    ),
+    ExpertTool(
+        "sketch_on_face", "sketch", "Sketch on a &Face",
+        "Click a flat face of a part to draw a sketch on it. The face's outline is shown "
+        "and can be copied in to trace.",
+        "do_sketch_on_face",
+    ),
+    ExpertTool(
+        "edit_sketch", "sketch", "&Change Sketch...",
+        "Change the curves of the selected sketch, or of the sketch a part was made from.",
+        "do_edit_sketch",
+    ),
+    ExpertTool(
+        "extrude", "create", "&Extrude...",
+        "Push the selected sketch's closed outlines straight out of its plane, into a "
+        "new part or a hole, with the sides sloping in by an angle if you like. Select a "
+        "construction plane parallel to the sketch as well to go up to it, or a part to join "
+        "the extrusion to or cut it out of (a group: Ungroup gives them back). The distance "
+        "and slope stay editable in the Details panel.",
+        "do_extrude", "E",
+    ),
+    ExpertTool(
+        "revolve", "create", "&Revolve...",
+        "Turn the selected sketch's closed outlines around a line, like a lathe, into a "
+        "new part or a hole. Round surfaces are narrow flat strips, as on a cylinder.",
+        "do_revolve",
+    ),
+    ExpertTool(
+        "sweep", "create", "&Sweep...",
+        "Carry one sketch's closed outlines along a path drawn in another sketch, into a "
+        "new part or a hole, turning them and changing their size evenly along the way if you "
+        "like. Select both sketches first. Curved paths are followed in short straight steps.",
+        "do_sweep",
+    ),
+    ExpertTool(
+        "loft", "create", "&Loft...",
+        "Join two or more sketches' outlines, in the order picked, with a skin into a new "
+        "part or a hole. Each needs one closed outline with no holes; the sides run "
+        "straight from one outline to the next, or along a smooth curve through them all. "
+        "Pick a construction point first or last to close it to a point.",
+        "do_loft",
+    ),
+    ExpertTool(
+        "rectangular_pattern", "create", "Pattern in Ro&ws (Rectangular)...",
+        "Copy the selected parts in a row, a set distance apart (or spread over a set length), "
+        "and in more rows if you like: left/right, forward/back, up/down or along a construction "
+        "axis selected with them, one way or both ways from the parts. Copies can be left out "
+        "by their number.",
+        "do_rectangular_pattern",
+    ),
+    ExpertTool(
+        "circular_pattern", "create", "Pattern Aro&und a Line (Circular)...",
+        "Copy the selected parts round a line through a point you type, or round a "
+        "construction axis selected with them, turning each copy with it: all the way round, "
+        "over a set angle, or spread evenly either side of the parts. The parts stay where they "
+        "are, and copies can be left out by their number.",
+        "do_circular_pattern",
+    ),
+    ExpertTool(
+        "path_pattern", "create", "Pattern Along a &Path...",
+        "Select the parts and a sketch of a path, or just the parts and then click next to "
+        "an edge of a part: copies go along the path, spread evenly or a set distance apart, "
+        "and can turn as it turns. Copies can be left out by their number. Curves are "
+        "followed in short straight pieces, and an edge must lie flat in one plane.",
+        "do_path_pattern",
+    ),
+    ExpertTool(
+        "mirror", "create", "&Mirror...",
+        "Add a mirror image of the selected parts across a flat face you click, a middle "
+        "plane, or a sketch or construction plane selected with them: as separate parts, or "
+        "each joined to its part into one part (Ungroup takes them apart again).",
+        "do_mirror_copy",
+    ),
+    ExpertTool(
+        "thread", "create", "&Thread...",
+        "Put a screw thread on the selected cylinder, along all or part of its height: metric "
+        "with the standard pitch for its size filled in, inch, or straight British pipe, with "
+        "one or more threads side by side. On a cylinder Hole it makes a threaded hole that a "
+        "thread of the same size screws into. The thread's sloped sides are made of narrow "
+        "flat strips, and tapered pipe threads are not offered.",
+        "do_thread",
+    ),
+    ExpertTool(
+        "pipe", "create", "P&ipe...",
+        "Select a sketch of a path: a round tube follows it, solid or hollow with a wall. "
+        "Curves are followed in short straight steps, and the tube's outline has many "
+        "straight sides.",
+        "do_pipe",
+    ),
+    ExpertTool(
+        "coil", "create", "C&oil...",
+        "Make a coil spring: a round or square wire wound round an upright line, with its "
+        "outside diameter, pitch, number of turns and wire thickness. Its ends are cut square "
+        "across the wire, and it is made of short straight pieces.",
+        "do_coil",
+    ),
+    ExpertTool(
+        "move_copy", "modify", "&Move or Copy...",
+        "Move or turn the selected parts by exact amounts, or make moved copies of them. "
+        "A turn goes around a line through their middle.",
+        "do_move_copy",
+    ),
+    ExpertTool(
+        "align_faces", "modify", "&Align Face to Face",
+        "Click a flat face of the part to move, then a face of another part: the first "
+        "part turns and moves so the two faces touch, facing each other, middle to middle.",
+        "do_align_faces",
+    ),
+    ExpertTool(
+        "scale", "modify", "&Scale...",
+        "Make the selected parts bigger or smaller by a percentage, the same in every "
+        "direction or stretched in one. Sizes stay editable. A round part stretches alike "
+        "across it, roundings and bottom chamfers keep their size when stretched, and "
+        "hardware holes keep their standard sizes.",
+        "do_scale",
+    ),
+    ExpertTool(
+        "combine", "modify", "&Combine...",
+        "Join the other selected parts to one of them, cut them out of it, or keep only "
+        "where they overlap, choosing which part to change and whether to keep the others. "
+        "Ungroup gives the parts back.",
+        "do_combine",
+    ),
+    ExpertTool(
+        "split_body", "modify", "Split &Body...",
+        "Split a part where it stands: select it and a sketch or construction plane to cut it "
+        "along that plane, or another part to cut it into the piece inside that part and the "
+        "piece outside. Ungroup on a piece gives the part back.",
+        "do_split_body",
+    ),
+    ExpertTool(
+        "shell", "modify", "S&hell",
+        "Click a flat face of a part to hollow it out with walls of an even thickness, "
+        "leaving that face open (and, if you like, the face across from it, or more faces "
+        "you click). The walls go inside the part, outside it, or half each side. Exact for "
+        "boxes and cylinders through their flat sides and ends; other parts are shelled "
+        "approximately: walls inside can come out a little thinner in places, and walls "
+        "outside get rounded corners.",
+        "do_shell",
+    ),
+    ExpertTool(
+        "push_pull", "modify", "&Push/Pull a Face",
+        "Click a flat face of a part, then type how far to pull it out or push it in. The "
+        "face moves straight out, square to itself; sloping sides next to it can be "
+        "extended along their slope, and on a round surface only the narrow flat strip "
+        "clicked moves.",
+        "do_push_pull", "Q",
+    ),
+    ExpertTool(
+        "fillet", "modify", "&Round an Edge (Fillet)",
+        "Click a face of a part next to an edge, then type the radius. The edge is rounded "
+        "along with the edges it runs on into smoothly, or every edge round that face, or more "
+        "edges you click; an inside edge is filled in round. Round surfaces are narrow flat "
+        "strips, and corners where rounded edges meet are not blended into a ball: they meet "
+        "in a crease.",
+        "do_fillet",
+    ),
+    ExpertTool(
+        "chamfer", "modify", "Be&vel an Edge (Chamfer)",
+        "Click a face of a part next to an edge, then type how far back to bevel it: the same "
+        "on both faces, a different distance on each, or a distance and an angle. The edge is "
+        "cut flat along with the edges it runs on into smoothly, or every edge round that face, "
+        "or more edges you click; an inside edge is filled in flat. Corners where bevelled "
+        "edges meet are not blended: they meet in a crease.",
+        "do_chamfer",
+    ),
+    ExpertTool(
+        "draft", "modify", "Slope the Sides (&Draft)...",
+        "Select an Extrusion, box, cylinder or tube, then type an angle: every side slopes in "
+        "(or out) by it, going away from its sketch or base. A box, cylinder or tube becomes "
+        "an Extrusion. Single faces can't be sloped on their own.",
+        "do_draft",
+    ),
+    ExpertTool(
+        "parameters", "modify", "Change Parame&ters...",
+        "Name the numbers your design is built from (a width, a wall) as parameters, with "
+        "formulas that can use each other. Parts whose sizes are linked to them follow "
+        "whenever you change them, and so do tools' settings that use them in the history.",
+        "do_change_parameters",
+    ),
+    ExpertTool(
+        "link_sizes", "modify", "&Link Sizes to Parameters...",
+        "Make the selected part's sizes, position or turn, or a sketch's curves, follow "
+        "formulas of your parameters, such as width / 2. Typing a number in the Details panel "
+        "or Change Sketch ends that link. A sweep's path and a loft's outlines can't be linked.",
+        "do_link_sizes",
+    ),
+    ExpertTool(
+        "history", "modify", "Histor&y...",
+        "Keep a list of every change to the project. Change a step's settings (an extrusion's "
+        "distance, a rounding's radius) or let them follow your parameters, change the parts "
+        "it was used on, or skip, move or remove a step. The project is worked out again so "
+        "later steps follow, construction planes, axes and points included.",
+        "do_history",
+    ),
+    ExpertTool(
+        "new_component", "assemble", "&New Component from Selection...",
+        "Keep the selected parts (and sketches or guides) together as one named component, "
+        "without joining them. A component whose parts are all selected goes inside the new "
+        "one. Parts a tool makes from a component's parts stay in it.",
+        "do_make_component",
+    ),
+    ExpertTool(
+        "select_component", "assemble", "&Select Whole Component",
+        "Add the rest of the selected part's component (and of the components inside it) to "
+        "the selection, to move or copy the component as one.",
+        "do_select_component",
+    ),
+    ExpertTool(
+        "leave_component", "assemble", "&Take Out of Component",
+        "Take the selected parts out of their component, into the component that holds it, "
+        "if any. They stay where they are.",
+        "leave_component",
+    ),
+    ExpertTool(
+        "components", "assemble", "&Components...",
+        "List the components, with those inside others set in under them: rename one, select "
+        "its parts, show or hide it, copy it, put it inside another, save it for printing on "
+        "its own, or break it apart. Copies are separate: changing one does not change the "
+        "other.",
+        "do_components",
+    ),
+    ExpertTool(
+        "plane_distance", "construct", "Plane at a &Distance...",
+        "Add a construction plane parallel to a flat face you click, a selected sketch or "
+        "plane, or one of the workplane's planes, the distance you type away from it. Sketch "
+        "on it, mirror across it or split a part with it. It is never printed.",
+        "do_plane_at_distance",
+    ),
+    ExpertTool(
+        "plane_angle", "construct", "Plane at an &Angle...",
+        "Add a construction plane through a selected construction axis or one of the "
+        "left/right, forward/back or upright lines through 0, turned around it by the angle "
+        "you type.",
+        "do_plane_at_angle",
+    ),
+    ExpertTool(
+        "midplane", "construct", "Plane &Halfway Between (Midplane)",
+        "Click two flat faces (or select two sketches or planes) for the plane halfway "
+        "between them: halfway across if they are parallel, otherwise splitting the angle "
+        "where they meet.",
+        "do_midplane",
+    ),
+    ExpertTool(
+        "plane_points", "construct", "Plane Through &Three Points",
+        "Click three points on parts (or select three construction points) for the plane "
+        "through them. A click near a corner of the face lands exactly on the corner. The plane "
+        "stays where the points were, even when the history is worked out again.",
+        "do_plane_through_points",
+    ),
+    ExpertTool(
+        "plane_round", "construct", "Plane Touching a R&ound Part",
+        "Click the round side of a cylinder, cone, tube, ring, ball, thread, round hardware hole or "
+        "revolved part for the plane touching it there, facing out. It touches the true round "
+        "surface worked out from the part's own sizes, not the narrow flat strips it is drawn "
+        "with. Parts made round another way (an Extrusion of a circle, a group) can't be used.",
+        "do_plane_touching",
+    ),
+    ExpertTool(
+        "plane_path", "construct", "Plane A&long a Path...",
+        "Select a sketch of a path (curves joined end to end, or one closed outline) for a "
+        "construction plane square to the path, the distance you type along it from one end. "
+        "Curves are followed in short straight pieces; on a curve the plane turns smoothly from "
+        "one piece to the next.",
+        "do_plane_along_path",
+    ),
+    ExpertTool(
+        "axis_round", "construct", "Axis Through a &Round Part",
+        "Add a construction axis along the middle of each selected round part: a cylinder, "
+        "cone, tube, ring, ball, round hardware hole or revolved part. Turn a pattern or a "
+        "plane around it.",
+        "do_axis_round_part",
+    ),
+    ExpertTool(
+        "axis_points", "construct", "Axis Through Two &Points",
+        "Click two points on parts (or select two construction points) for the axis through "
+        "them, pointing from the first to the second. A click near a corner of the face lands "
+        "exactly on the corner. The axis stays where the points were, even when the history is "
+        "worked out again.",
+        "do_axis_two_points",
+    ),
+    ExpertTool(
+        "axis_face", "construct", "Axis &Square to a Face",
+        "Click a point on a flat face for the axis through it, square to the face and "
+        "pointing out of it.",
+        "do_axis_square_to_face",
+    ),
+    ExpertTool(
+        "axis_edge", "construct", "Axis Along an &Edge",
+        "Click a face of a part next to a straight edge for the axis along that edge (the edge "
+        "nearest the click, as Round an Edge picks it). A round edge is made of short straight "
+        "pieces, so there the axis runs along the piece clicked; for a round part's middle, use "
+        "Axis Through a Round Part.",
+        "do_axis_along_edge",
+    ),
+    ExpertTool(
+        "axis_planes", "construct", "Axis Where Two Planes &Meet",
+        "Select two sketches or construction planes at an angle for the axis along the line "
+        "where they meet.",
+        "do_axis_two_planes",
+    ),
+    ExpertTool(
+        "point_spot", "construct", "Point at a &Click",
+        "Click a part to add a construction point there; a click near a corner of the face "
+        "lands exactly on the corner. Type its exact position in the Details panel.",
+        "do_point_at_spot",
+    ),
+    ExpertTool(
+        "point_middle", "construct", "Point at the Middle of a Fa&ce",
+        "Click a flat face to add a construction point at the middle of its area, such as "
+        "the centre of a cylinder's end.",
+        "do_point_at_middle",
+    ),
+    ExpertTool(
+        "point_edge", "construct", "Point at the End of an Ed&ge",
+        "Click a face of a part next to an edge, nearer the end you want: the point goes on that "
+        "end of the straight edge. A round edge is made of short straight pieces, so there it "
+        "goes on an end of the piece clicked.",
+        "do_point_at_edge_end",
+    ),
+    ExpertTool(
+        "point_planes", "construct", "Point Where Three Planes Mee&t",
+        "Select three sketches or construction planes at angles to each other for the point where "
+        "they all meet.",
+        "do_point_three_planes",
+    ),
+    ExpertTool(
+        "point_axis_plane", "construct", "Point Where an A&xis Meets a Plane",
+        "Select a construction axis and a sketch or construction plane for the point where the axis "
+        "passes through the plane.",
+        "do_point_axis_plane",
+    ),
+    ExpertTool(
+        "section_view", "inspect", "&Section View...",
+        "See inside the parts: they are shown cut open along a flat or upright plane through "
+        "their middle, or along a selected sketch or construction plane. Only the view "
+        "changes; nothing is cut when you save or print. Choose it again to see them whole.",
+        "do_section_view",
+    ),
+    ExpertTool(
+        "measure_faces", "inspect", "&Measure Between Faces",
+        "Click two flat faces of parts to see the distance between the clicked points (and "
+        "how far left/right, forward/back and up/down), the angle between the faces or, when "
+        "they are parallel, how far apart they are, and each face's area. A click near a "
+        "corner lands on the corner.",
+        "do_measure_faces",
+    ),
+    ExpertTool(
+        "measure_radius", "inspect", "&Radius of a Round Face",
+        "Click the round side of a cylinder, cone, tube, ring, ball, thread, round hardware hole "
+        "or revolved part to see its radius, read from the part's own sizes rather than from "
+        "the narrow flat strips it is drawn with. A cone's radius changes along it: you see both "
+        "ends and the radius where you clicked. Where it can't be told (a box, an imported part, "
+        "a part stretched unevenly) it says so.",
+        "do_measure_radius",
+    ),
+    ExpertTool(
+        "measure_edge", "inspect", "&Length of an Edge",
+        "Click a face of a part next to an edge to see how long the edge is. An edge that goes "
+        "on round curves gives the straight stretch clicked and the whole edge's length (or "
+        "how far it is all the way round). It is measured on the part as drawn: a round edge is "
+        "short straight pieces, so it comes out a little short of the true curve.",
+        "do_measure_edge",
+    ),
+    ExpertTool(
+        "measure_volume", "inspect", "&Volume and Area...",
+        "See how much space the selected parts take up, their surface area all the way round, "
+        "their size and centre of gravity, and what they would weigh made solid of a material "
+        "you choose (PLA, PETG, ABS, ASA, TPU, Nylon or a density you type, in g/cm³). Selected "
+        "Holes are cut out and overlaps counted once, as they would print together.",
+        "do_measure_volume",
+    ),
+    ExpertTool(
+        "measure_gap", "inspect", "Shortest &Distance Between Parts",
+        "Select two parts to see the shortest distance between them, or whether they touch or "
+        "overlap. It is measured on the parts as drawn, so near round surfaces, made of narrow "
+        "flat strips, it can be slightly off.",
+        "do_measure_gap",
+    ),
+)
+
+
+def tools_in(menu: str) -> list[ExpertTool]:
+    return [tool for tool in TOOLS if tool.menu == menu]
