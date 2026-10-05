@@ -388,6 +388,18 @@ def scenario_plane_angle(window):
     window.plane_at_angle_selected("z", 30.0)
 
 
+def round_side(shape, direction):
+    """A narrow strip on a round part's side facing about `direction`, and its middle."""
+    tm = shape_geometry(shape)
+    face = int(np.argmax(tm.face_normals @ np.asarray(direction, dtype=np.float64)))
+    return face, tm.triangles_center[face]
+
+
+def scenario_plane_touching(window):
+    cylinder = add(window, "cylinder")
+    window.plane_touching_round(cylinder.id, *round_side(cylinder, (1, 0, 0)))
+
+
 def scenario_midplane(window):
     box = add(window)
     window.midplane_of_faces((box.id, face_towards(box, (1, 0, 0))), (box.id, face_towards(box, (-1, 0, 0))))

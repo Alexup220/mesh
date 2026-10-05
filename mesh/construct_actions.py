@@ -60,10 +60,12 @@ def ask_plane_angle(parent, lines) -> dict | None:
 class ConstructActions:
     """Mixed into MeshWindow through ExpertActions."""
 
-    CONSTRUCT_CLICK_TOOLS = ("plane_face", "midplane", "plane_points", "axis_points", "axis_face",
-                             "point_spot", "point_middle")
+    CONSTRUCT_CLICK_TOOLS = ("plane_face", "midplane", "plane_points", "plane_round", "axis_points",
+                             "axis_face", "point_spot", "point_middle")
     CONSTRUCT_TOOL_PROMPTS = {
         "plane_face": "Click a flat face of a part for the new plane. Esc cancels.",
+        "plane_round": "Click the round side of a cylinder, cone, ball, ring or other round part; the "
+                       "plane touches it there. Esc cancels.",
         "midplane": "Click the first of two flat faces; the plane goes halfway between them. Esc cancels.",
         "midplane_second": "Now click the second flat face.",
         "plane_points": "Click the first of three points on parts (near a corner, it lands on the corner). Esc cancels.",
@@ -79,6 +81,7 @@ class ConstructActions:
         "plane_face": "_plane_face_picked",
         "midplane": "_midplane_picked",
         "plane_points": "_plane_point_picked",
+        "plane_round": "_plane_round_picked",
         "axis_points": "_axis_point_picked",
         "axis_face": "_axis_face_picked",
         "point_spot": "_point_spot_picked",
@@ -299,6 +302,36 @@ class ConstructActions:
             return
         points = list(self._construct_picks)
         self._finish_construct(lambda: self.plane_through_spots(points))
+
+    # --- Plane touching a round part ------------------------------------------------
+
+    @replayable(("shape_id", "face_index"))
+    def plane_touching_round(self, shape_id: str, face_index: int, point) -> bool:
+        """The plane touching a round part's true round surface where it
+        was clicked."""
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+        except KeyError:
+            return False
+        name = self._next_name("Plane")
+        return self._add_guide("add plane", lambda: construct.plane_touching(
+            shape, face_index, point, scene.fit_clearances, name))
+
+    def do_plane_touching(self) -> None:
+        self._start_construct_tool("plane_round")
+
+    def _plane_round_picked(self, shape_id: str, face_index: int, point=None) -> None:
+        shape = self._clicked_part(shape_id, face_index)
+        if shape is None:
+            return
+        try:
+            construct.round_spot(shape, face_index, point, self.document.scene.fit_clearances)
+        except BuildError as exc:
+            # Not a round surface: say why, and keep waiting for one.
+            self.statusBar().showMessage(f"{exc} {self._tool_prompt()}")
+            return
+        self._finish_construct(lambda: self.plane_touching_round(shape_id, face_index, point))
 
     # --- Axes ------------------------------------------------------------------------
 

@@ -20,14 +20,23 @@ points clicked, not drawn by eye.
 import math
 import re
 import uuid
+from dataclasses import dataclass
 
 import numpy as np
 
-from mesh import guides, sketch
+from mesh import features, guides, hardware, sketch, threads
 from mesh.builders import BuildError
 from mesh.modify import MOVE_LIMIT, flat_face
 from mesh.scene import Shape
-from mesh.shapes import is_reference, shape_geometry
+from mesh.shapes import (
+    _grow_for_clearance,
+    default_params,
+    hole_clearance,
+    is_reference,
+    primitive_mesh,
+    shape_geometry,
+)
+from mesh.solids import m3
 
 GUIDE_COLOR = "#5fc4b8"
 SNAP = 2.0  # a click this close to a face's corner (mm) lands on the corner
@@ -141,6 +150,218 @@ def spot(shape, face_index: int, point, clearances: dict | None = None) -> np.nd
     distances = np.linalg.norm(corners - p, axis=1)
     k = int(np.argmin(distances))
     return corners[k] if distances[k] <= SNAP else p
+
+
+# --- Round surfaces ---------------------------------------------------------------
+#
+# A round part is drawn with narrow flat strips, but its own sizes say
+# where its true round surface is. Each kind's outline is listed here in
+# its own coordinates as (distance from its line, height) pieces, going
+# anticlockwise round the solid, so the way out of the part is to the
+# right of each line piece and away from the middle of each arc.
+
+ROUND_ONLY = ("{name} is not a cylinder, cone, tube, ring, ball, thread, round hardware hole or "
+              "revolved part, so where its round surfaces are can't be told from its own sizes.")
+FLAT_HERE = "That face of {name} is flat, not round."
+OFF_ROUND = "That spot on {name} is not on one of its round surfaces."
+STRETCHED = "{name} is stretched, so its round surfaces can't be told from its own sizes."
+NEAR_ROUND = 0.02  # a click this far off the true surface (times the part's size) is not on it
+AGREE = math.cos(math.radians(30.0))  # the strip clicked faces within this of the true surface
+
+
+@dataclass(frozen=True)
+class RoundSpot:
+    """Where a click on a round part lands on its true round surface."""
+
+    point: np.ndarray   # on the round surface (world)
+    facing: np.ndarray  # the way out of the part there (world)
+    around: float       # how far the point is from the part's line (mm)
+    piece: tuple        # the outline piece it is on: ("line", a, b) or ("arc", centre, radius, start, end)
+
+
+def _line(a, b) -> tuple:
+    return ("line", np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64))
+
+
+def _arc(centre, radius: float, start: float = -180.0, end: float = 180.0) -> tuple:
+    """An arc anticlockwise from `start` to `end` degrees (the solid inside it)."""
+    return ("arc", np.asarray(centre, dtype=np.float64), float(radius), math.radians(start), math.radians(end))
+
+
+def _round_pieces(shape, clearance: float) -> list:
+    """The outline of a round part, in its own coordinates (see above)."""
+    kind = shape.params.get("primitive")
+    p = {**default_params(kind), **shape.params}
+    c = clearance
+    if kind in ("cylinder", "cone", "tube", "torus", "sphere", "rounded_cylinder"):
+        # Grown and lowered as mesh.shapes draws a fitted Hole.
+        if c > 0.0:
+            p = _grow_for_clearance(kind, p, c)
+        low = -c
+        r, h = float(p["diameter"]) / 2.0, float(p.get("height", 0.0))
+        if kind == "cylinder":
+            bevel = min(float(p.get("chamfer", 0.0)), h - 1e-3, r - 1e-3)
+            bevel = bevel if bevel > 1e-6 else 0.0
+            pieces = [_line((0, 0), (r - bevel, 0)), _line((r - bevel, 0), (r, bevel)),
+                      _line((r, bevel), (r, h)), _line((r, h), (0, h))]
+        elif kind == "cone":
+            pieces = [_line((0, 0), (r, 0)), _line((r, 0), (0, h))]
+        elif kind == "tube":
+            inner = max(r - float(p["wall"]), 0.01)
+            pieces = [_line((inner, 0), (r, 0)), _line((r, 0), (r, h)), _line((r, h), (inner, h)),
+                      _line((inner, h), (inner, 0))]
+        elif kind == "rounded_cylinder":
+            a = max(0.0, min(float(p["radius"]), min(2.0 * r, h) / 2.0))
+            bevel = min(float(p.get("chamfer", 0.0)), h - 1e-3, r - 1e-3)
+            pieces = [_line((0, 0), (r - a, 0)), _line((r, a), (r, h - a)), _line((r - a, h), (0, h))]
+            if a > 1e-6:
+                pieces += [_arc((r - a, a), a, -90.0, 0.0), _arc((r - a, h - a), a, 0.0, 90.0)]
+            if bevel > 1e-6:
+                pieces.append(_line((r - bevel, 0), (r, bevel)))
+        else:
+            # A ball and a ring are centred on their own drawing's middle.
+            middle = float(primitive_mesh(kind, shape.params, c).bounds[:, 2].mean())
+            if kind == "sphere":
+                return [_arc((0, middle), r, -90.0, 90.0)]
+            across = float(p["thickness"]) / 2.0
+            return [_arc((r - across, middle), across)]
+        up = np.array([0.0, low])
+        return [_line(piece[1] + up, piece[2] + up) if piece[0] == "line" else ("arc", piece[1] + up, *piece[2:])
+                for piece in pieces]
+    if kind in ("screw_hole", "insert_pocket", "magnet_pocket", "nut_trap", "thread"):
+        # Built with their clearance already in their sizes, from -c up.
+        low, top = -c, None
+        if kind == "screw_hole":
+            depth = float(p["depth"])
+            bore = hardware.dim("clearance", p["size"], "diameter") / 2.0 + c
+            top = depth + c
+            steps = [(bore, low)]
+            if p["head"] == "countersunk":
+                wide = hardware.dim("countersink", p["size"], "diameter") / 2.0 + c
+                drop = min(wide - bore, depth)
+                steps += [(bore, depth - drop), (wide - drop, depth - drop), (wide + c, top)]
+            elif p["head"] == "counterbored":
+                wide = hardware.dim("counterbore", p["size"], "diameter") / 2.0 + c
+                start = max(depth - min(hardware.dim("counterbore", p["size"], "depth"), depth) - c, low)
+                steps += [(bore, start), (wide, start), (wide, top)]
+            else:
+                steps.append((bore, top))
+        elif kind == "nut_trap":
+            depth = float(p["depth"])
+            bore = hardware.dim("clearance", p["size"], "diameter") / 2.0 + c
+            nut = min(hardware.dim("nut", p["size"], "depth"), depth)
+            corner = (hardware.dim("nut", p["size"], "flats") / 2.0 + c) / math.cos(math.pi / 6.0)
+            top = depth + c
+            # The six-sided pocket for the nut is flat-sided, not round.
+            steps = [(bore, low), (bore, depth - nut - c), (corner, depth - nut - c)]
+            return [_line((0, low), steps[0])] + [_line(a, b) for a, b in zip(steps, steps[1:])] + [
+                _line((corner, top), (0, top))]
+        elif kind == "thread":
+            # Only the crest of the thread and the plain part are round
+            # about its line; the sloping sides wind round it.
+            outer = float(p["diameter"]) / 2.0 + c
+            top = float(p["height"]) + c
+            steps = [(outer, low), (outer, top)]
+        else:
+            if kind == "insert_pocket":
+                radius = hardware.dim("insert", p["size"], "diameter") / 2.0 + c
+                top = hardware.dim("insert", p["size"], "depth") + c
+            else:
+                radius, top = float(p["diameter"]) / 2.0 + c, float(p["depth"]) + c
+            steps = [(radius, low), (radius, top)]
+        return ([_line((0, low), steps[0])] + [_line(a, b) for a, b in zip(steps, steps[1:])]
+                + [_line(steps[-1], (0, top))])
+    if kind == "revolve":
+        return [_line(a, b) for a, b in _revolve_outline(p, c)
+                if max(abs(a[0]), abs(b[0])) > 1e-9]
+    raise BuildError(ROUND_ONLY.format(name=shape.name))
+
+
+def _revolve_outline(p: dict, clearance: float) -> list:
+    """A revolve's outline pieces as features.revolve turns it: (distance
+    from its line, height) pairs, anticlockwise round the solid."""
+    entities = p.get("entities", features.DEFAULT_REVOLVE)
+    to_axis = np.linalg.inv(features.axis_frame(p.get("axis", features.DEFAULT_AXIS)))
+    try:
+        polygons = []
+        for polygon in sketch.profile(entities).to_polygons():
+            flat = np.column_stack([polygon, np.zeros(len(polygon)), np.ones(len(polygon))])
+            polygons.append((flat @ to_axis.T)[:, [0, 2]])
+    except sketch.SketchError as exc:
+        raise BuildError(str(exc)) from exc
+    if max(float(poly[:, 0].max()) for poly in polygons) <= 1e-6:
+        polygons = [poly * (-1.0, 1.0) for poly in polygons]
+    area = features._grow(m3.CrossSection(polygons, m3.FillRule.EvenOdd), clearance)
+    low_x, low, high_x, high = area.bounds()
+    if low_x < 0.0 < high_x:
+        area = area ^ m3.CrossSection.square((high_x + 1.0, high - low + 2.0)).translate((0.0, low - 1.0))
+    out = []
+    for polygon in area.to_polygons():
+        polygon = np.asarray(polygon, dtype=np.float64)
+        out += list(zip(polygon, np.roll(polygon, -1, axis=0)))
+    return out
+
+
+def _nearest_on(piece, q) -> tuple[np.ndarray, np.ndarray]:
+    """The point of an outline piece nearest q, and the way out there."""
+    if piece[0] == "line":
+        a, b = piece[1], piece[2]
+        along = b - a
+        length = float(np.linalg.norm(along))
+        if length < 1e-12:
+            return a, np.zeros(2)
+        t = min(max(float((q - a) @ along) / length**2, 0.0), 1.0)
+        return a + t * along, np.array([along[1], -along[0]]) / length
+    centre, radius, start, end = piece[1:]
+    angle = math.atan2(q[1] - centre[1], q[0] - centre[0])
+    span = end - start
+    if span < 2.0 * math.pi - 1e-9:
+        past = (angle - start) % (2.0 * math.pi)
+        if past > span:  # outside the arc: its nearer end
+            angle = end if past - span < 2.0 * math.pi - past else start
+    out = np.array([math.cos(angle), math.sin(angle)])
+    return centre + radius * out, out
+
+
+def round_spot(shape, face_index: int, point, clearances: dict | None = None) -> RoundSpot:
+    """Where a click on a round part (a cylinder, cone, tube, ring, ball,
+    thread, round hardware hole or revolved part) lands on its true round
+    surface, worked out from its own sizes, and the way out of it there."""
+    if is_reference(shape):
+        raise BuildError("Click a part, not a sketch or guide.")
+    if shape.kind != "primitive" or shape.params.get("primitive") not in ROUND_KINDS:
+        raise BuildError(ROUND_ONLY.format(name=shape.name))
+    frame = np.asarray(shape.transform, dtype=np.float64)
+    turn = frame[:3, :3]
+    if not np.allclose(turn.T @ turn, np.eye(3), atol=1e-6):
+        raise BuildError(STRETCHED.format(name=shape.name))
+    tm = shape_geometry(shape, clearances)
+    if not 0 <= face_index < len(tm.faces):
+        raise BuildError("Click on a face of a part.")
+    pieces = [piece for piece in _round_pieces(shape, hole_clearance(shape, clearances))
+              if piece[0] == "arc" or np.linalg.norm(piece[2] - piece[1]) > 1e-9]
+    local = turn.T @ (_point(point) - frame[:3, 3])
+    strip = turn.T @ tm.face_normals[face_index]
+    across = math.hypot(local[0], local[1])
+    angle = math.atan2(local[1], local[0]) if across > 1e-9 else 0.0
+    out_dir = np.array([math.cos(angle), math.sin(angle), 0.0])
+    q = np.array([across, local[2]])
+    found = []
+    for piece in pieces:
+        at, way = _nearest_on(piece, q)
+        found.append((float(np.linalg.norm(at - q)), piece, at, way))
+    distance, piece, at, way = min(found, key=lambda f: f[0])
+    facing = way[0] * out_dir + np.array([0.0, 0.0, way[1]])
+    near = distance <= NEAR_ROUND * float(tm.extents.max()) + 1e-3 and float(facing @ strip) >= AGREE
+    if near and abs(way[0]) < 1e-9:
+        raise BuildError(FLAT_HERE.format(name=shape.name))
+    if not near:
+        side = abs(float(strip @ np.array([-out_dir[1], out_dir[0], 0.0])))
+        if abs(float(strip[2])) > math.cos(math.radians(1.0)) or side > 0.9:
+            raise BuildError(FLAT_HERE.format(name=shape.name))
+        raise BuildError(OFF_ROUND.format(name=shape.name))
+    world = frame[:3, 3] + turn @ np.array([at[0] * out_dir[0], at[0] * out_dir[1], at[1]])
+    return RoundSpot(world, _unit(turn @ facing, shape.name), float(at[0]), piece)
 
 
 # --- Planes -----------------------------------------------------------------------
@@ -260,6 +481,16 @@ def plane_through_points(a, b, c, label: str = "Plane") -> Shape:
     middle = (a + b + c) / 3.0
     size = float(min(max(guides.PLANE_SIZE / 2.0, 1.5 * span), 1000.0))
     return new_plane(middle, n, size, label)
+
+
+def plane_touching(shape, face_index: int, point, clearances: dict | None = None,
+                   label: str = "Plane") -> Shape:
+    """The plane touching a round part's true round surface (see
+    round_spot) where it was clicked, facing out of the part there."""
+    found = round_spot(shape, face_index, point, clearances)
+    extent = float(shape_geometry(shape, clearances).extents.max())
+    size = float(min(max(guides.PLANE_SIZE / 2.0, 1.25 * extent), 1000.0))
+    return new_plane(found.point, found.facing, size, label)
 
 
 # --- Axes -------------------------------------------------------------------------

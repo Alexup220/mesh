@@ -259,6 +259,14 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_plane_through_points",
     ),
     ExpertTool(
+        "plane_round", "construct", "Plane Touching a R&ound Part",
+        "Click the round side of a cylinder, cone, tube, ring, ball, thread, round hardware hole or "
+        "revolved part for the plane touching it there, facing out. It touches the true round "
+        "surface worked out from the part's own sizes, not the narrow flat strips it is drawn "
+        "with. Parts made round another way (an Extrusion of a circle, a group) can't be used.",
+        "do_plane_touching",
+    ),
+    ExpertTool(
         "axis_round", "construct", "Axis Through a &Round Part",
         "Add a construction axis along the middle of each selected round part: a cylinder, "
         "cone, tube, ring, ball, round hardware hole or revolved part. Turn a pattern or a "

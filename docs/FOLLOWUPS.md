@@ -211,8 +211,15 @@ reflected. What differs from Fusion is how the pattern is chosen.
   three planes; at an angle around the left/right, forward/back or upright
   line through 0; halfway between two faces (or two planes); and through
   three clicked points, where a click within 2 mm of a corner of the
-  clicked face lands on the corner. Fusion's plane touching a round surface
-  and plane along a path are not offered.
+  clicked face lands on the corner; and touching a round part where it is
+  clicked. The touching plane is worked out from the part's own sizes (a
+  cylinder, cone, tube, ring, ball, round hardware hole or revolved part,
+  and a thread's crest and plain part), so it touches the true round
+  surface rather than the flat strip clicked; a revolve's outline is
+  itself made of short straight pieces, so on a curve in it the plane
+  touches the piece clicked. A part made round another way (an Extrusion
+  of a circle, a group, an imported part) can't be used. Fusion's plane
+  along a path is not offered.
 - **Construction axes** are drawn as a line (120 mm, or longer for a long
   part) with an arrow showing the way it points, but go on without end.
   Offered: along the middle of a round part (a cylinder, cone, tube, ring,
