@@ -58,8 +58,8 @@ def _baked_child(tm, name: str, color: str, is_hole: bool) -> Shape:
 
 
 GUIDES_ARE_NOT_PARTS = (
-    "{tool} works on solid parts. A sketch is a flat drawing and a construction plane is a "
-    "guide, not a part: use Extrude or Revolve to make a part from a sketch."
+    "{tool} works on solid parts. A sketch is a flat drawing and a construction plane or "
+    "axis is a guide, not a part: use Extrude or Revolve to make a part from a sketch."
 )
 
 NOT_CLEAN = (

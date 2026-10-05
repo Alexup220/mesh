@@ -139,6 +139,7 @@ def shelf_primitives() -> list[str]:
 REFERENCES: dict[str, dict] = {
     "sketch": {"label": "Sketch"},
     "plane": {"label": "Plane"},
+    "axis": {"label": "Axis"},
 }
 
 

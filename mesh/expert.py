@@ -87,8 +87,9 @@ TOOLS: tuple[ExpertTool, ...] = (
     ),
     ExpertTool(
         "circular_pattern", "create", "Pattern Aro&und a Line (Circular)...",
-        "Copy the selected parts round a line through a point you type, turning each copy "
-        "with it: all the way round or over a set angle. The parts stay where they are.",
+        "Copy the selected parts round a line through a point you type, or round a "
+        "construction axis selected with them, turning each copy with it: all the way round "
+        "or over a set angle. The parts stay where they are.",
         "do_circular_pattern",
     ),
     ExpertTool(
@@ -185,8 +186,9 @@ TOOLS: tuple[ExpertTool, ...] = (
     ),
     ExpertTool(
         "plane_angle", "construct", "Plane at an &Angle...",
-        "Add a construction plane through one of the left/right, forward/back or upright "
-        "lines through 0, turned around it by the angle you type.",
+        "Add a construction plane through a selected construction axis or one of the "
+        "left/right, forward/back or upright lines through 0, turned around it by the angle "
+        "you type.",
         "do_plane_at_angle",
     ),
     ExpertTool(
@@ -201,6 +203,31 @@ TOOLS: tuple[ExpertTool, ...] = (
         "Click three points on parts for the plane through them. A click near a corner of "
         "the face lands exactly on the corner.",
         "do_plane_through_points",
+    ),
+    ExpertTool(
+        "axis_round", "construct", "Axis Through a &Round Part",
+        "Add a construction axis along the middle of each selected round part: a cylinder, "
+        "cone, tube, ring, ball, round hardware hole or revolved part. Turn a pattern or a "
+        "plane around it.",
+        "do_axis_round_part",
+    ),
+    ExpertTool(
+        "axis_points", "construct", "Axis Through Two &Points",
+        "Click two points on parts for the axis through them, pointing from the first to the "
+        "second. A click near a corner of the face lands exactly on the corner.",
+        "do_axis_two_points",
+    ),
+    ExpertTool(
+        "axis_face", "construct", "Axis &Square to a Face",
+        "Click a point on a flat face for the axis through it, square to the face and "
+        "pointing out of it.",
+        "do_axis_square_to_face",
+    ),
+    ExpertTool(
+        "axis_planes", "construct", "Axis Where Two Planes &Meet",
+        "Select two sketches or construction planes at an angle for the axis along the line "
+        "where they meet.",
+        "do_axis_two_planes",
     ),
 )
 

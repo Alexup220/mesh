@@ -423,6 +423,9 @@ def split_body(part, tool, clearances: dict | None = None) -> list:
         return fresh_ids(copy.deepcopy(shape))
 
     if is_reference(tool):
+        if tool.params.get("primitive") not in ("sketch", "plane"):
+            raise BuildError("Split Body cuts along a sketch's plane or a construction plane, not "
+                             f"along {tool.name}. Select a sketch, a plane or a part to split with.")
         frame = np.asarray(tool.transform, dtype=np.float64)
         normal = frame[:3, 2] / np.linalg.norm(frame[:3, 2])
         offset = float(normal @ frame[:3, 3])

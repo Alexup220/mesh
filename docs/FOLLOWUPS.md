@@ -178,9 +178,9 @@ reflected. What differs from Fusion is how the pattern is chosen.
 
 - **Directions are the world's.** Pattern in Rows goes along left/right,
   forward/back or up/down, and Pattern Around a Line turns round a line
-  along one of those three, through a point typed in millimetres. Fusion
-  also lets an edge, a sloping face or a construction axis set the
-  direction; picking one is not offered (construction axes come in Phase 4).
+  along one of those three, through a point typed in millimetres, or round
+  a construction axis selected with the parts (Phase 4). Fusion also lets
+  an edge or a sloping face set the direction; picking one is not offered.
 - **No suppressing single copies**, no "symmetric" (both ways from the
   part) option, and no spacing by total extent in Rows: spacing is from one
   copy to the next.
@@ -201,9 +201,9 @@ reflected. What differs from Fusion is how the pattern is chosen.
 ## Expert mode, Phase 4 (Construct and Inspect): approximations and limits
 
 - **Guides don't follow what they were made from.** A construction plane
-  is placed by the numbers worked out when it is made; moving the part or
-  sketch afterwards leaves the plane where it was (Fusion keeps them
-  linked). Move or turn it in the Details panel, or make it again.
+  or axis is placed by the numbers worked out when it is made; moving the
+  part or sketch afterwards leaves the guide where it was (Fusion keeps
+  them linked). Move or turn it in the Details panel, or make it again.
 - **Construction planes** are drawn as a square (60 mm across, or sized
   round the face they came from) but go on without end. Offered: a plane a
   distance from a flat face, a sketch, another plane or the workplane's
@@ -212,6 +212,15 @@ reflected. What differs from Fusion is how the pattern is chosen.
   three clicked points, where a click within 2 mm of a corner of the
   clicked face lands on the corner. Fusion's plane touching a round surface
   and plane along a path are not offered.
+- **Construction axes** are drawn as a line (120 mm, or longer for a long
+  part) with an arrow showing the way it points, but go on without end.
+  Offered: along the middle of a round part (a cylinder, cone, tube, ring,
+  ball, round hardware hole or revolved part, read from its own numbers, so
+  an Extrusion of a circle doesn't count); through two clicked points;
+  square to a flat face at a clicked point; and where two planes meet.
+  Fusion's axis along a clicked edge is not offered. Pattern Around a Line
+  and Plane at an Angle turn around a selected axis; Revolve still turns
+  around a line in its sketch.
 
 ## Platform notes
 

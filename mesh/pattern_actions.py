@@ -62,6 +62,19 @@ def ask_circular(parent, centre) -> dict | None:
     return run_form(parent, "Pattern Around a Line", circular_fields(centre), note=CIRCULAR_NOTE)
 
 
+def circular_axis_fields():
+    return circular_fields((0.0, 0.0, 0.0))[:2]
+
+
+def circular_axis_note(name: str) -> str:
+    return (f"Copies the selected parts round {name}, turning each copy with it, anticlockwise "
+            "seen from the end its arrow points to. The count includes the parts themselves.")
+
+
+def ask_circular_axis(parent, name: str) -> dict | None:
+    return run_form(parent, "Pattern Around a Line", circular_axis_fields(), note=circular_axis_note(name))
+
+
 def path_fields():
     return [
         ("count", "How many in total", 5, {"min": 2, "max": MAX_COPIES}),
@@ -159,19 +172,35 @@ class PatternActions:
 
     # --- Around a line ------------------------------------------------------------
 
+    def _selected_axis(self):
+        """The one construction axis selected with the parts, or None."""
+        axes = [s for s in self._picked() if construct.is_guide(s, "axis")]
+        return axes[0] if len(axes) == 1 else None
+
     def circular_pattern_selected(self, count: int = 6, axis: str = "z", centre=(0.0, 0.0, 0.0),
                                   angle: float = 360.0) -> bool:
+        """Copies round the selected construction axis, or else round the
+        line along `axis` through `centre`."""
         parts = self._pattern_parts()
         if parts is None:
             return False
-        return self._add_pattern(
-            "pattern around a line", parts,
-            lambda: patterns.circular(parts, count, axis, centre, angle),
-        )
+        guide = self._selected_axis()
+        if guide is None:
+            return self._add_pattern("pattern around a line", parts,
+                                     lambda: patterns.circular(parts, count, axis, centre, angle))
+        point, direction = construct.axis_of(guide)
+        return self._add_pattern("pattern around a line", parts,
+                                 lambda: patterns.circular_about(parts, count, point, direction, angle))
 
     def do_circular_pattern(self) -> None:
         parts = self._pattern_parts()
         if parts is None:
+            return
+        guide = self._selected_axis()
+        if guide is not None:
+            values = ask_circular_axis(self, guide.name)
+            if values is not None:
+                self.circular_pattern_selected(values["count"], angle=values["angle"])
             return
         # As Repeat in a Circle does: the line starts 30 mm to the left.
         middle = _bounds(parts).mean(axis=0) - (30.0, 0.0, 0.0)

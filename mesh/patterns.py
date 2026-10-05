@@ -11,7 +11,7 @@ that can't be met raises BuildError with a plain message.
     circular     round a line through a point, along one of the world's
                  directions (Repeat in a Circle, extended: any of the three
                  lines, several parts at once, and the parts stay where
-                 they are)
+                 they are), or round a construction axis (circular_about)
     along_path   along the one path a sketch draws, keeping the parts'
                  place relative to the path's start, and optionally turning
                  with it
@@ -29,7 +29,7 @@ import numpy as np
 
 from mesh import create, sketch
 from mesh.builders import GUIDES_ARE_NOT_PARTS, MAX_COPIES, BuildError, _check_count, _copy
-from mesh.modify import MOVE_LIMIT, _axis_turn, _bounds, flat_face
+from mesh.modify import MOVE_LIMIT, _bounds, flat_face
 from mesh.ops import AXES, _canonical
 from mesh.shapes import is_reference
 
@@ -112,24 +112,37 @@ def circular(shapes, count: int, axis: str = "z", centre=(0.0, 0.0, 0.0), angle:
     degrees spaces them evenly all the way round; a smaller angle puts the
     first and last exactly that far apart. The parts stay where they are,
     and `count` includes them."""
-    parts = _parts(shapes)
     if axis not in AXES:
         raise ValueError(f"unknown direction {axis!r}")
+    direction = np.zeros(3)
+    direction[AXES[axis]] = 1.0
+    return circular_about(shapes, count, centre, direction, angle)
+
+
+def circular_about(shapes, count: int, point, direction, angle: float = 360.0) -> list:
+    """As circular, round the line through `point` along `direction` (a
+    construction axis, say), anticlockwise seen from its tip."""
+    parts = _parts(shapes)
     count = _check_count(count)
     _check_total(count, parts)
     angle = float(angle)
     if not math.isfinite(angle) or not 0.0 < angle <= 360.0:
         raise BuildError("The angle must be more than 0 and at most 360 degrees.")
-    centre = np.asarray([float(v) for v in centre], dtype=np.float64)
+    centre = np.asarray([float(v) for v in point], dtype=np.float64)
     if centre.shape != (3,) or not np.isfinite(centre).all():
         raise BuildError("Type ordinary numbers for the centre.")
+    k = np.asarray(direction, dtype=np.float64)
+    k = k / np.linalg.norm(k)
     full = angle >= 360.0 - 1e-9
     step = angle / count if full else angle / (count - 1)
     out = []
     for i in range(1, count):
+        a = math.radians(i * step)
+        cross = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
+        turn = np.eye(3) * math.cos(a) + math.sin(a) * cross + (1.0 - math.cos(a)) * np.outer(k, k)
         matrix = np.eye(4)
-        matrix[:3, :3] = _axis_turn(axis, i * step)
-        matrix[:3, 3] = centre - matrix[:3, :3] @ centre
+        matrix[:3, :3] = turn
+        matrix[:3, 3] = centre - turn @ centre
         out += _moved(parts, matrix)
     return out
 
