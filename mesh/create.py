@@ -291,24 +291,43 @@ def make_sweep(outline: Shape, path: Shape, hole: bool = False, twist: float = 0
     return shape
 
 
+LOFT_PICKS = ("Select two or more sketches, in the order to join them. A construction point "
+              "may come first or last, to close the loft to that point.")
+
+
+def loft_picks_fit(shapes) -> bool:
+    """Whether `shapes`, in order, can be lofted: two or more, sketches
+    except that the first or last may be a construction point, and at least
+    one sketch."""
+    shapes = list(shapes)
+    ends = (0, len(shapes) - 1)
+    return (len(shapes) >= 2 and any(is_sketch(s) for s in shapes)
+            and all(is_sketch(s) or (k in ends and construct.is_guide(s, "point"))
+                    for k, s in enumerate(shapes)))
+
+
 def make_loft(sketches, hole: bool = False, sides: str = "straight") -> Shape:
     """A skin through the closed outline of each sketch, in the order given,
-    its sides straight or smooth (features.LOFT_SIDES). Like a sweep, its
-    own coordinates are the world's."""
+    its sides straight or smooth (features.LOFT_SIDES). A construction point
+    first or last closes it to that point (kept as where the point is now).
+    Like a sweep, its own coordinates are the world's."""
     sketches = list(sketches)
-    if len(sketches) < 2 or not all(is_sketch(s) for s in sketches):
-        raise BuildError("Select two or more sketches, in the order to join them.")
+    if not loft_picks_fit(sketches):
+        raise BuildError(LOFT_PICKS)
+
+    def section(s) -> dict:
+        if not is_sketch(s):
+            return {"point": construct.point_of(s).tolist()}
+        return {"entities": copy.deepcopy(s.params["entities"]),
+                "frame": np.asarray(s.transform, dtype=np.float64).tolist()}
+
     shape = Shape(
         id=uuid.uuid4().hex,
         name=f"Loft of {sketches[0].name} to {sketches[-1].name}",
         kind="primitive",
         params={
             "primitive": "loft",
-            "sections": [
-                {"entities": copy.deepcopy(s.params["entities"]),
-                 "frame": np.asarray(s.transform, dtype=np.float64).tolist()}
-                for s in sketches
-            ],
+            "sections": [section(s) for s in sketches],
         },
         transform=np.eye(4),
         is_hole=bool(hole),

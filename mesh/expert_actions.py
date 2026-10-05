@@ -157,7 +157,8 @@ def ask_loft(parent, sketches) -> dict | None:
              "Each sketch needs one closed outline with no holes. The sides run straight from "
              "one outline to the next, or along a smooth curve through all of them (with three "
              "or more outlines; with two, both are the same). Smooth sides are made of narrow "
-             "flat strips, like a cylinder's.",
+             "flat strips, like a cylinder's. A construction point picked first or last closes "
+             "the loft to that point, where the point is now.",
     )
 
 
@@ -470,11 +471,13 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
             self.sweep_selected(values["path"], values["result"] == "hole", values["keep_sketch"],
                                 values.get("twist", 0.0), values.get("end_scale", 100.0))
 
-    LOFT_HINT = "Select two or more sketches, in the order to join them."
+    LOFT_HINT = create.LOFT_PICKS
 
     def _sketches_in_order(self):
+        """The selected sketches in the order picked, perhaps with a
+        construction point first or last; or None and a hint."""
         chosen = self._picked()
-        if len(chosen) < 2 or not all(create.is_sketch(s) for s in chosen):
+        if not create.loft_picks_fit(chosen):
             self.statusBar().showMessage(self.LOFT_HINT)
             return None
         return chosen
@@ -489,7 +492,8 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         shape = self._attempt("Cannot loft", lambda: create.make_loft(sketches, hole, sides))
         if shape is None:
             return False
-        self._add_from_sketches("loft", sketches, shape, keep_sketch)
+        # A construction point it closes to stays, as guides do.
+        self._add_from_sketches("loft", [s for s in sketches if create.is_sketch(s)], shape, keep_sketch)
         return True
 
     def do_loft(self) -> None:

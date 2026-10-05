@@ -27,10 +27,11 @@ sketch's: the shape's transform is the sketch's plane.
              the far end; missing in older files, where they are 0 and 100.
     loft     sections: [{entities, frame}, ...], sides
              A skin through two or more outlines, in order, each placed by
-             its frame like a sweep's sketches. Its sides run straight from
-             one outline to the next ("straight"), or along a smooth curve
-             through all of them ("smooth"); missing in older files, where
-             they are straight.
+             its frame like a sweep's sketches. The first or last section
+             may instead be {point: [x, y, z]}, closing the loft to that
+             point. Its sides run straight from one outline to the next
+             ("straight"), or along a smooth curve through all of them
+             ("smooth"); missing in older files, where they are straight.
 
 A shape with no sketch of its own (a new primitive) uses a small built-in
 one (DEFAULT_*), so every kind has a sensible default, standing on the
@@ -644,10 +645,19 @@ def sweep(entities, profile_frame, path_entities, path_frame, clearance: float =
 # --- Loft ---------------------------------------------------------------------------
 
 
-def _section(section) -> tuple[np.ndarray, np.ndarray]:
-    """One loft outline: (its 2D points, its frame)."""
+def _section(section) -> tuple[np.ndarray | None, np.ndarray]:
+    """One loft outline: (its 2D points, its frame); or a point the loft
+    closes to: (None, the point)."""
     if not isinstance(section, dict):
         raise SketchError("A loft outline is damaged.")
+    if "point" in section:
+        try:
+            point = np.asarray(section["point"], dtype=np.float64)
+        except (TypeError, ValueError) as exc:
+            raise SketchError("A loft's point is damaged.") from exc
+        if point.shape != (3,) or not np.isfinite(point).all():
+            raise SketchError("A loft's point is damaged.")
+        return None, point
     frame = _frame(section.get("frame"))
     polygons = profile(section.get("entities", [])).to_polygons()
     if len(polygons) != 1:
@@ -767,12 +777,14 @@ def _smoothed(rings: list) -> tuple[list, list]:
 def _slopes(rings: list, normals: list, where: list) -> list[float]:
     """For each outline (rings[where[k]], in the plane facing normals[k]),
     how square to its plane the sides are at their steepest, from the
-    outline before it to the one after, as a cosine (1 for sides straight
-    out of the plane)."""
+    outline (or point) before it to the one after, as a cosine (1 for sides
+    straight out of the plane)."""
     cosines = []
     for k, normal in enumerate(normals):
         cosine = 1.0
-        for i in range(where[max(k - 1, 0)], where[min(k + 1, len(where) - 1)]):
+        low = where[k - 1] if k > 0 else 0
+        high = where[k + 1] if k + 1 < len(where) else len(rings) - 1
+        for i in range(low, high):
             edges = rings[i + 1] - rings[i]
             lengths = np.maximum(np.linalg.norm(edges, axis=1), 1e-12)
             cosine = min(cosine, float((np.abs(edges @ normal) / lengths).min()))
@@ -780,25 +792,48 @@ def _slopes(rings: list, normals: list, where: list) -> list[float]:
     return cosines
 
 
+def _tip_reach(tip: np.ndarray, beside: np.ndarray, clearance: float) -> np.ndarray:
+    """Where a fitted Hole's tip goes: out along the way the sides arrive
+    at it (from the ring `beside` it), far enough that each flat side
+    meeting at the tip moves out by `clearance` there (but the tip moves no
+    more than MOST_LOFT_GROWTH times it)."""
+    way = _unit(tip - beside.mean(axis=0))
+    across = np.cross(beside - tip, np.roll(beside, -1, axis=0) - tip)
+    lengths = np.linalg.norm(across, axis=1)
+    sines = np.abs(across @ way)[lengths > 1e-12] / lengths[lengths > 1e-12]
+    sine = float(sines.min()) if len(sines) else 1.0
+    return tip + way * clearance / max(sine, 1.0 / MOST_LOFT_GROWTH)
+
+
 def loft(sections, clearance: float = 0.0, sides: str = "straight") -> trimesh.Trimesh:
     """A skin through two or more outlines, in order, closed at both ends
-    (see _lined_up for how the outlines are joined). Its sides run straight
-    from one outline to the next, or (`sides` "smooth", with three or more
-    outlines) along a smooth curve through them all (see _smoothed).
+    (see _lined_up for how the outlines are joined): flat across an end
+    outline, or to a point where the first or last section is one. Its sides
+    run straight from one outline to the next, or (`sides` "smooth", with
+    three or more outlines and points) along a smooth curve through them all
+    (see _smoothed).
 
     A fitted Hole (`clearance` > 0) grows each outline within its plane, by
     more where the sides slope, so the gap square to the sides is at least
     `clearance` (up to MOST_LOFT_GROWTH times it); and reaches `clearance`
-    past each end. With smooth sides, the slope is the steepest anywhere
-    from the outline before to the one after, and the sides in between
-    follow the grown outlines, so their gap is about `clearance` or more.
+    past each end (a point moves out along the sides, see _tip_reach). With
+    smooth sides, the slope is the steepest anywhere from the outline before
+    to the one after, and the sides in between follow the grown outlines, so
+    their gap is about `clearance` or more.
     """
     if sides not in dict(LOFT_SIDES):
         raise SketchError("A loft's sides must be straight or smooth.")
     if not isinstance(sections, (list, tuple)) or len(sections) < 2:
         raise SketchError("A loft needs at least two sketches, each with one closed outline.")
     parsed = [_section(s) for s in sections]
-    centres = [to_world(frame, points).mean(axis=0) for points, frame in parsed]
+    if any(points is None for points, _f in parsed[1:-1]):
+        raise SketchError("A loft can close to a point only at its first or last end, not between outlines.")
+    outlines = [(points, frame) for points, frame in parsed if points is not None]
+    if not outlines:
+        raise SketchError("A loft needs at least one sketch with a closed outline, not only points.")
+    tips = [parsed[0][1] if parsed[0][0] is None else None,
+            parsed[-1][1] if parsed[-1][0] is None else None]
+    centres = [place if points is None else to_world(place, points).mean(axis=0) for points, place in parsed]
     heading = centres[-1] - centres[0]
     if np.linalg.norm(heading) < 1e-6:
         raise SketchError("The first and last outlines are in the same place, so there is nothing to join.")
@@ -808,7 +843,13 @@ def loft(sections, clearance: float = 0.0, sides: str = "straight") -> trimesh.T
         raise SketchError(
             "The loft would fold back on itself. Pick the sketches in order, from one end to the other."
         )
-    normals = [_unit(np.cross(frame[:3, 0], frame[:3, 1])) for _p, frame in parsed]
+    normals = [_unit(np.cross(frame[:3, 0], frame[:3, 1])) for _p, frame in outlines]
+    for tip, outline, normal in ((tips[0], outlines[0], normals[0]), (tips[1], outlines[-1], normals[-1])):
+        if tip is not None and abs(np.dot(tip - to_world(outline[1], outline[0]).mean(axis=0), normal)) < 1e-6:
+            raise SketchError(
+                "The point lies on the plane of the outline next to it, so the loft would be flat there. "
+                "Move the point off that plane."
+            )
 
     def facing_on(outlines):
         """Every outline running anticlockwise seen from behind, looking
@@ -820,22 +861,26 @@ def loft(sections, clearance: float = 0.0, sides: str = "straight") -> trimesh.T
             turned.append((points, frame))
         return turned
 
-    def skin_through(outlines):
+    def skin_through(outlines, tips):
         """(the end outlines' flat points, every ring of the skin, where
-        each outline's ring is among them)."""
+        each outline's ring is among them). A point is a ring of copies of
+        itself, first or last."""
         flats, rings = _lined_up(facing_on(outlines), heading)
+        count = len(rings[0])
+        rings = ([np.repeat(tips[0][None], count, axis=0)] if tips[0] is not None else []) + rings \
+            + ([np.repeat(tips[1][None], count, axis=0)] if tips[1] is not None else [])
         if sides == "smooth" and len(rings) > 2:
             rings, where = _smoothed(rings)
         else:
             where = list(range(len(rings)))
         _check_skin(rings)
-        return (flats[0], flats[-1]), rings, where
+        return (flats[0], flats[-1]), rings, where[(tips[0] is not None):len(where) - (tips[1] is not None)]
 
-    ends, rings, where = skin_through(parsed)
+    ends, rings, where = skin_through(outlines, tips)
 
     if clearance > 0.0:
         grown = []
-        for (points, frame), cosine in zip(parsed, _slopes(rings, normals, where)):
+        for (points, frame), cosine in zip(outlines, _slopes(rings, normals, where)):
             distance = clearance / max(cosine, 1.0 / MOST_LOFT_GROWTH)
             polygons = _grow(m3.CrossSection([np.ascontiguousarray(points)]), distance).to_polygons()
             if len(polygons) != 1:
@@ -844,18 +889,36 @@ def loft(sections, clearance: float = 0.0, sides: str = "straight") -> trimesh.T
                     "Choose a tighter fit, or widen the gap."
                 )
             grown.append((np.asarray(polygons[0], dtype=np.float64), frame))
-        ends, rings, _where = skin_through(grown)
-        # Reaching `clearance` past each end: the end outlines again, that
-        # far out of their planes, joined to them by straight sides.
-        first = normals[0] * np.sign(np.dot(normals[0], steps[0])) * clearance
-        last = normals[-1] * np.sign(np.dot(normals[-1], steps[-1])) * clearance
-        rings = [rings[0] - first] + rings + [rings[-1] + last]
+        tips = [None if tips[0] is None else _tip_reach(tips[0], rings[1], clearance),
+                None if tips[1] is None else _tip_reach(tips[1], rings[-2], clearance)]
+        ends, rings, _where = skin_through(grown, tips)
+        # Reaching `clearance` past each flat end: the end outline again,
+        # that far out of its plane, joined to it by straight sides.
+        if tips[0] is None:
+            rings = [rings[0] - normals[0] * np.sign(np.dot(normals[0], steps[0])) * clearance] + rings
+        if tips[-1] is None:
+            rings = rings + [rings[-1] + normals[-1] * np.sign(np.dot(normals[-1], steps[-1])) * clearance]
 
-    count = len(ends[0])
-    vertices = np.vstack(rings)
-    faces = [
-        _skin([[r] for r in rings], closed=False),
-        _cap([ends[0]], rings[0], 0, -heading),
-        _cap([ends[1]], rings[-1], count * (len(rings) - 1), heading),
-    ]
-    return _solid_from(vertices, np.vstack(faces), "loft")
+    # A point's ring of copies becomes the one point, joined to the ring
+    # beside it by a fan of triangles.
+    first = 1 if tips[0] is not None else 0
+    last = len(rings) - 1 if tips[1] is not None else len(rings)
+    body = rings[first:last]
+    count = len(body[0])
+    vertices = [np.vstack(body)]
+    faces = [_skin([[r] for r in body], closed=False)] if len(body) > 1 else []
+    around = np.arange(count)
+    if tips[0] is None:
+        faces.append(_cap([ends[0]], body[0], 0, -heading))
+    else:
+        apex = count * len(body)
+        vertices.append(rings[0][:1])
+        faces.append(np.column_stack([np.full(count, apex), (around + 1) % count, around]))
+    if tips[1] is None:
+        faces.append(_cap([ends[1]], body[-1], count * (len(body) - 1), heading))
+    else:
+        apex = count * len(body) + (tips[0] is not None)
+        vertices.append(rings[-1][:1])
+        low = count * (len(body) - 1)
+        faces.append(np.column_stack([low + around, low + (around + 1) % count, np.full(count, apex)]))
+    return _solid_from(np.vstack(vertices), np.vstack(faces), "loft")

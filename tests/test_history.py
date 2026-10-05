@@ -325,6 +325,14 @@ def scenario_loft_smooth(window):
     window.loft_selected(sides="smooth")
 
 
+def scenario_loft_to_point(window):
+    box = add(window)
+    window.point_at(box.id, face_towards(box, (0, 0, 1)), (1.0, 2.0, 20.0))
+    point = window.document.scene.selected()[0]
+    pick(window, add_sketch(window, BIG, sketch.named_plane_frame("xy", -10.0)), point)
+    window.loft_selected()
+
+
 def scenario_thread(window):
     add(window, "cylinder")
     window.thread_selected(1.5, 10.0)

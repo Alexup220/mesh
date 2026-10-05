@@ -106,9 +106,14 @@ tools do the closest honest version of their Fusion counterparts:
   A path that crosses itself is refused, but one that only passes closer to
   itself than the outline's size is not caught, and makes a part that overlaps
   itself. Change Sketch redraws a sweep's outline, not its path.
-- **Loft**: each sketch must hold one closed outline with no holes; no rails
-  and no single point at an end. A loft's outlines can't be redrawn after it
-  is made (undo, change the sketches, loft again). Its sides run straight
+- **Loft**: each sketch must hold one closed outline with no holes; no
+  rails. A construction point picked first or last closes the loft to that
+  point (a sketch point can't be used); where the point is is kept as
+  numbers when the loft is made, so moving the point later leaves the tip
+  where it was, until the History is worked out again. The point can't lie
+  on the plane of the outline next to it. A loft's outlines can't be
+  redrawn after it is made (undo, change the sketches, loft again). Its
+  sides run straight
   from one outline to the next, or, as a choice, along a smooth curve through
   all of them: each matched point of the outlines follows a natural spline
   (the curve a sketch's spline uses), spaced by the distance between the
@@ -123,8 +128,10 @@ tools do the closest honest version of their Fusion counterparts:
   less. With smooth sides the slope is the steepest anywhere between the
   outline before and the one after, and the sides in between follow the
   grown outlines, so their gap is about the clearance or more, not exactly
-  at least it. Growing it exactly in 3D took 5 to 10 seconds for curved
-  outlines, too slow to redraw.
+  at least it. A point the loft closes to moves out along the sides, far
+  enough for the flat sides meeting there (also capped at three times the
+  clearance, so a sharp tip's gap is less). Growing it exactly in 3D took 5
+  to 10 seconds for curved outlines, too slow to redraw.
 - **Size handles** do nothing on a part made from a sketch (they spring
   back): its size comes from the sketch and the Details panel numbers. Moving
   and turning it by its handles work as for any part.
