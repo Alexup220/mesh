@@ -22,7 +22,7 @@ from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtQml import QQmlEngine
 from PySide6.QtQuick import QQuickView
 from PySide6.QtQuickWidgets import QQuickWidget
-from PySide6.QtWidgets import QApplication, QDockWidget, QSizePolicy, QToolBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDockWidget, QSizePolicy, QToolBar, QVBoxLayout, QWidget
 
 from mesh import themes
 from mesh.app import MeshWindow
@@ -292,9 +292,10 @@ class QmlWindow(MeshWindow):
         theme = self.engine.singletonInstance("Mesh", "Theme")
         if theme is not None:
             theme.setProperty("tokens", dict(tokens))
-        app = QApplication.instance()
-        if app is not None:
-            app.setStyleSheet(stylesheet_for(tokens))
+        # On this window only (its dialogs and message boxes inherit it):
+        # an application-wide style sheet would restyle every widget in
+        # the program each time the theme changes.
+        self.setStyleSheet(stylesheet_for(tokens))
         self.viewport.set_colors(tokens["viewport"], tokens["grid"], tokens["selection"])
 
     # --- layout ----------------------------------------------------------------

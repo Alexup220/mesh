@@ -447,12 +447,13 @@ def test_a_tool_asks_its_numbers_in_the_qml_form(window, qapp):
     window.bridge.insert("shape:cube")
 
     def answer():
-        view = window.views[-1]
-        assert view.title() == "Repeat in a row"
-        root = view.rootObject()
-        root.property("session").accept({"count": 4, "spacing": 30.0, "axis": "y"})
+        forms = [v for v in window.views if v.title() == "Repeat in a row"]
+        if not forms:  # not open yet
+            QTimer.singleShot(20, answer)
+            return
+        forms[-1].rootObject().property("session").accept({"count": 4, "spacing": 30.0, "axis": "y"})
 
-    QTimer.singleShot(50, answer)
+    QTimer.singleShot(0, answer)
     window.do_repeat_row()
     assert len(window.document.scene.shapes) == 4
     assert window.document.undo_labels == ["add", "repeat in a row"]
