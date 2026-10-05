@@ -85,6 +85,10 @@ FIELD_LABELS = {
     "side": "Direction",
     "angle": "Angle (degrees)",
     "taper": "Sides slope in (degrees)",
+    "pitch": "Thread pitch (mm per turn)",
+    "thread_length": "Threaded length (mm)",
+    "end": "Thread starts",
+    "hand": "Thread turns",
 }
 
 

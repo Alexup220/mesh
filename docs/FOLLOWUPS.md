@@ -245,6 +245,15 @@ reflected. What differs from Fusion is how the pattern is chosen.
 - **Volume and Area** measures the selected parts as they would print
   together (overlaps once, selected Holes cut out). Fusion's mass and
   centre of gravity are not offered.
+- **Thread** goes on a plain cylinder only (Fusion threads any round
+  face): a threaded hole is a cylinder Hole with a thread, grouped with
+  the part. Only the ISO metric shape is offered (no inch, pipe, tapered
+  or several-start threads), always modeled, never just drawn on. The
+  sloped sides are narrow flat strips, 36 to a turn, so the thread is
+  about 0.5% thinner than the true shape. A fitted thread Hole grows by
+  its fit straight out from the middle, which leaves about half the fit
+  as room on the sloped sides. The ends are cut square, with no lead-in
+  bevel, and a thread makes at most 150 turns.
 
 ## Platform notes
 

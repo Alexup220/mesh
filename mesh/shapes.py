@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 from shapely.geometry import Polygon
 
-from mesh import features, guides, hardware, sketch, solids, text
+from mesh import features, guides, hardware, sketch, solids, text, threads
 from mesh.blobs import decode_mesh
 
 PRIMITIVES: dict[str, dict] = {
@@ -120,6 +120,14 @@ PRIMITIVES: dict[str, dict] = {
         "defaults": {},
         "shelf": False,
     },
+    # A cylinder with a modeled screw thread (Expert mode's Thread tool;
+    # see mesh/threads.py). As a Hole it cuts a threaded hole.
+    "thread": {
+        "label": "Thread",
+        "defaults": dict(threads.DEFAULTS),
+        "choices": {"end": threads.ENDS, "hand": threads.HANDS},
+        "shelf": False,
+    },
 }
 
 HARDWARE_PRIMITIVES = ("screw_hole", "nut_trap", "insert_pocket", "magnet_pocket")
@@ -210,6 +218,10 @@ def primitive_mesh(kind: str, params: dict, clearance: float = 0.0) -> trimesh.T
         # Placed by their sketch's plane, so not moved onto the workplane;
         # a fitted Hole grows along the outline, not by scaling.
         return features.build(kind, p, clearance)
+    if kind == "thread":
+        # Grows across and at the ends, but keeps its pitch and its turns
+        # where they are, so a bolt fits the threaded Hole.
+        return threads.thread_mesh(p, clearance)
     if kind == "text":
         # Letters grow outward along their own outline, not by scaling.
         return text.text_mesh(str(p["text"]), float(p["letter_height"]), float(p["depth"]), clearance)

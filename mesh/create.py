@@ -11,7 +11,7 @@ import uuid
 
 import numpy as np
 
-from mesh import features, sketch
+from mesh import features, sketch, threads
 from mesh.builders import BuildError
 from mesh.ops import face_direction
 from mesh.scene import Shape
@@ -21,10 +21,11 @@ SKETCH_COLOR = "#e8a33d"
 
 
 def _checked(build):
-    """Run `build`, turning a sketch's complaint into a BuildError."""
+    """Run `build`, turning a sketch's or thread's complaint into a
+    BuildError."""
     try:
         return build()
-    except sketch.SketchError as exc:
+    except (sketch.SketchError, threads.ThreadError) as exc:
         raise BuildError(str(exc)) from exc
 
 
@@ -126,16 +127,18 @@ def fit_refusal(shapes, clearances: dict | None) -> str | None:
 
 
 def edit_refusal(shape, field: str, value, clearances: dict | None) -> str | None:
-    """Why `shape`, a part made from a sketch, can't take `value` for its
-    number or choice `field` (typed in the Details panel, say: sloped sides
-    can meet); None if it can, or if `shape` is not made from a sketch."""
-    if shape.kind != "primitive" or shape.params.get("primitive") not in features.SOLIDS:
+    """Why `shape`, a part made from a sketch or a thread, can't take
+    `value` for its number or choice `field` (typed in the Details panel,
+    say: sloped sides can meet, or a pitch too deep for the diameter); None
+    if it can, or if `shape` is neither."""
+    kind = shape.params.get("primitive") if shape.kind == "primitive" else None
+    if kind not in features.SOLIDS and kind != "thread":
         return None
     trial = copy.deepcopy(shape)
     trial.params[field] = value if isinstance(value, str) else float(value)
     try:
         shape_geometry(trial, clearances)
-    except sketch.SketchError as exc:
+    except (sketch.SketchError, threads.ThreadError) as exc:
         return str(exc)
     return None
 
@@ -332,3 +335,39 @@ def outline_entities(outlines) -> list[dict]:
                 entities.append({"type": "line", "start": [float(a[0]), float(a[1])],
                                  "end": [float(b[0]), float(b[1])]})
     return entities
+
+
+# --- Threads ------------------------------------------------------------------------
+
+
+NOT_A_CYLINDER = "Select one cylinder (a part, or a Hole for a threaded hole) to put a thread on."
+
+
+def thread_choice(shape) -> tuple[str, float]:
+    """The standard size nearest the cylinder's diameter: (name, pitch)."""
+    return threads.standard_size(float(shape.params.get("diameter", 20.0)))
+
+
+def threaded(shape: Shape, pitch: float, length: float, end: str = "top", hand: str = "right",
+             clearances: dict | None = None) -> Shape:
+    """A copy of the cylinder `shape` with a thread along `length` mm of
+    it, starting at `end`. Its diameter is the thread's full diameter;
+    everything else about it (where it is, its colour, Solid or Hole) is
+    kept. As a Hole it cuts a threaded hole a bolt of the same sizes fits."""
+    if shape.kind != "primitive" or shape.params.get("primitive") != "cylinder":
+        raise BuildError(NOT_A_CYLINDER)
+    if float(shape.params.get("chamfer", 0.0)) > 0.0:
+        raise BuildError(f"{shape.name} has a bottom chamfer, which a thread can't keep. Set its "
+                         "bottom chamfer to 0 in the Details panel first.")
+    changed = copy.deepcopy(shape)
+    changed.params = {
+        "primitive": "thread",
+        "diameter": float(shape.params.get("diameter", 20.0)),
+        "height": float(shape.params.get("height", 20.0)),
+        "pitch": float(pitch),
+        "thread_length": float(min(length, float(shape.params.get("height", 20.0)))),
+        "end": end,
+        "hand": hand,
+    }
+    _checked(lambda: shape_geometry(changed, clearances))
+    return changed

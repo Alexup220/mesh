@@ -107,6 +107,14 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_mirror_copy",
     ),
     ExpertTool(
+        "thread", "create", "&Thread...",
+        "Put a screw thread on the selected cylinder, along all or part of its height, with "
+        "the standard pitch for its size filled in. On a cylinder Hole it makes a threaded "
+        "hole that a thread of the same size screws into. The thread's sloped sides are made "
+        "of narrow flat strips.",
+        "do_thread",
+    ),
+    ExpertTool(
         "move_copy", "modify", "&Move or Copy...",
         "Move or turn the selected parts by exact amounts, or make moved copies of them. "
         "A turn goes around a line through their middle.",

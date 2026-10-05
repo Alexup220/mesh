@@ -188,6 +188,7 @@ _FOLLOWS = {
     "rounded_cylinder": {"diameter": "across", "height": "z", "radius": "detail", "chamfer": "detail"},
     "text": {"letter_height": "across", "depth": "z"},
     "extrude": {"distance": "z"},
+    "thread": {"diameter": "across", "height": "z", "thread_length": "z", "pitch": "detail"},
 }
 
 

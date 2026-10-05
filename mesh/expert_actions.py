@@ -12,7 +12,7 @@ on success.
 
 from PySide6.QtCore import QTimer
 
-from mesh import construct, create, features, sketch, sketch_editor
+from mesh import construct, create, features, sketch, sketch_editor, threads
 from mesh.construct_actions import ConstructActions
 from mesh.inspect_actions import InspectActions
 from mesh.modify_actions import ModifyActions
@@ -90,6 +90,26 @@ def ask_loft(parent, sketches) -> dict | None:
              f"them: {order}. Each sketch needs one closed outline with no holes. The sides "
              "are straight from one outline to the next.",
     )
+
+
+def thread_fields(height: float, pitch: float):
+    return [
+        ("pitch", "Thread pitch (mm per turn)", float(pitch), {"min": 0.2, "max": 100.0, "step": 0.05}),
+        ("length", "Threaded length (mm)", float(height), {"min": 0.1, "max": 10000.0}),
+        ("end", "Thread starts", "top", {"choices": threads.ENDS}),
+        ("hand", "Thread turns", "right", {"choices": threads.HANDS}),
+    ]
+
+
+def thread_note(standard: str, pitch: float) -> str:
+    return (f"Puts a screw thread on the cylinder; its diameter is the thread's full size. The "
+            f"nearest standard size is {standard}, whose pitch ({pitch:g} mm) is filled in. On a "
+            "cylinder Hole it makes a threaded hole: with a fit chosen, a thread of the same size "
+            "screws into it.")
+
+
+def ask_thread(parent, height: float, standard: str, pitch: float) -> dict | None:
+    return run_form(parent, "Thread", thread_fields(height, pitch), note=thread_note(standard, pitch))
 
 
 class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActions):
@@ -360,3 +380,37 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         if values is not None:
             self.extrude_selected(values["distance"], values["side"], values["result"] == "hole",
                                   values["keep_sketch"])
+
+    # --- Thread ----------------------------------------------------------------------
+
+    def _thread_target(self):
+        """The one selected cylinder, or None (and a message)."""
+        chosen = [s for s in self._picked() if not is_reference(s)]
+        if len(chosen) != 1 or chosen[0].kind != "primitive" or chosen[0].params.get("primitive") != "cylinder":
+            self.statusBar().showMessage(create.NOT_A_CYLINDER)
+            return None
+        return chosen[0]
+
+    def thread_selected(self, pitch: float, length: float, end: str = "top", hand: str = "right") -> bool:
+        """Put a thread on the selected cylinder. One undo step on success."""
+        shape = self._thread_target()
+        if shape is None:
+            return False
+        scene = self.document.scene
+        changed = self._attempt("Cannot add the thread", lambda: create.threaded(
+            shape, pitch, length, end, hand, scene.fit_clearances))
+        if changed is None:
+            return False
+        self.document.snapshot("thread")
+        shape.params = changed.params
+        self.sync()
+        return True
+
+    def do_thread(self) -> None:
+        shape = self._thread_target()
+        if shape is None:
+            return
+        standard, pitch = create.thread_choice(shape)
+        values = ask_thread(self, float(shape.params.get("height", 20.0)), standard, pitch)
+        if values is not None:
+            self.thread_selected(values["pitch"], values["length"], values["end"], values["hand"])
