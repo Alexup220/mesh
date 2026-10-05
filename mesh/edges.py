@@ -8,7 +8,9 @@ meets it.
 
 Along the run, the corner between the two faces is cut away (an outside
 edge) or filled in (an inside edge), leaving a round of the given radius or
-a flat bevel set back the given distance on both faces. The piece is built
+a flat bevel: set back the given distance on both faces, a different
+distance on each (the first along the face clicked), or a distance along
+the face clicked and an angle from it. The piece is built
 as a ring of points at every point of the run, square to the run there,
 skinned from one ring to the next; a round's arc is narrow straight pieces,
 as many per turn as a circle has. The result is an ordinary group of the
@@ -170,11 +172,18 @@ class _Corner:
         """How far along each face a round of `radius` starts."""
         return radius / math.tan(self.angle / 2.0)
 
-    def ring(self, set_back: float, radius: float | None, pieces: int) -> np.ndarray:
+    def far_set_back(self, near: float, angle: float) -> float:
+        """How far along the other face a bevel reaches that starts `near`
+        along one face and leaves it at `angle` (radians) to it."""
+        if self.angle + angle >= math.pi - 1e-6:
+            raise BuildError(BEVEL_TOO_STEEP)
+        return near * math.sin(angle) / math.sin(self.angle + angle)
+
+    def ring(self, back_a: float, back_b: float, radius: float | None, pieces: int) -> np.ndarray:
         """The piece's cross-section here: a round of `radius` (or a flat
-        bevel, for None) starting `set_back` along each face, closed off
-        just outside the wedge."""
-        ta, tb = self.p + set_back * self.a, self.p + set_back * self.b
+        bevel, for None) starting `back_a` along face A and `back_b` along
+        face B (the same, for a round), closed off just outside the wedge."""
+        ta, tb = self.p + back_a * self.a, self.p + back_b * self.b
         if radius is None:
             arc = [ta, tb]
         else:
@@ -238,35 +247,94 @@ def _round_down(value: float) -> float:
     return math.floor(value * 10.0 + 1e-9) / 10.0
 
 
-def _edge_piece(shape, face_index: int, point, size: float, rounded: bool, clearances):
-    """(the part's surface, the run, the piece to cut away or add)."""
+BEVEL_TOO_STEEP = (
+    "That angle is too steep for this edge: the bevel would never reach the other face. "
+    "Try a smaller angle."
+)
+
+
+def _clicked_faces(tm, face_index: int) -> set[int]:
+    """The triangles of the flat face holding `face_index`."""
+    for facet in tm.facets:
+        if face_index in facet:
+            return set(int(f) for f in facet)
+    return {int(face_index)}
+
+
+def _clicked_is_b(run: Run, clicked: set[int]) -> bool:
+    """Whether the face clicked is on the run's side B (else side A)."""
+    for a, b in run.sides:
+        if a in clicked:
+            return False
+        if b in clicked:
+            return True
+    return False
+
+
+def _positive(value, what: str) -> float:
+    value = float(value)
+    if not math.isfinite(value) or value <= 0.0:
+        raise BuildError(f"The {what} must be more than 0 mm.")
+    return value
+
+
+def _edge_piece(shape, face_index: int, point, size: float, rounded: bool, clearances,
+                other: float | None = None, angle: float | None = None):
+    """(the part's surface, the run, the piece to cut away or add). A
+    bevel is set back `size` along the face clicked and, along the other
+    face, `other` mm, or as far as leaving the face clicked at `angle`
+    degrees reaches, or (neither) `size` too."""
     what = "rounding" if rounded else "bevel"
-    size = float(size)
-    if not math.isfinite(size) or size <= 0.0:
-        raise BuildError(f"The {what} size must be more than 0 mm.")
+    size = _positive(size, f"{what} size")
+    if other is not None:
+        other = _positive(other, "set back along the other face")
+    if angle is not None:
+        angle = float(angle)
+        if not math.isfinite(angle) or not 0.0 < angle < 180.0:
+            raise BuildError("The bevel's angle must be more than 0 and less than 180 degrees.")
+        angle = math.radians(angle)
     tm = _part_surface(shape, clearances)
     run = find_run(tm, face_index, point)
     corners = _corners(tm, run)
+    flip = _clicked_is_b(run, _clicked_faces(tm, face_index))
+
+    backs = []
+    for corner in corners:
+        if rounded:
+            backs.append((corner.set_back(size),) * 2)
+            continue
+        far = corner.far_set_back(size, angle) if angle is not None else (size if other is None else other)
+        backs.append((far, size) if flip else (size, far))
 
     cache: dict = {}
     count = len(run.vertices)
     pieces = count if run.closed else count - 1
-    largest = math.inf
+    largest, scale = math.inf, math.inf
     for k, corner in enumerate(corners):
         side = run.sides[min(k, pieces - 1)]
-        room = min(_space(tm, side[0], corner.p, corner.a, cache),
-                   _space(tm, side[1], corner.p, corner.b, cache))
-        largest = min(largest, room * math.tan(corner.angle / 2.0) if rounded else room)
+        room_a = _space(tm, side[0], corner.p, corner.a, cache)
+        room_b = _space(tm, side[1], corner.p, corner.b, cache)
+        if rounded:
+            largest = min(largest, min(room_a, room_b) * math.tan(corner.angle / 2.0))
+        else:
+            scale = min(scale, room_a / backs[k][0], room_b / backs[k][1])
+    if not rounded:
+        largest = size * scale
     if size > largest + 1e-9:
-        hint = (f"Try {_round_down(largest):.1f} mm or less." if largest >= 0.1
-                else "There is no room for one here.")
+        if rounded or (other is None and angle is None):
+            hint = (f"Try {_round_down(largest):.1f} mm or less." if largest >= 0.1
+                    else "There is no room for one here.")
+        elif largest >= 0.1:
+            hint = f"Try {_round_down(largest):.1f} mm or less along the face you clicked"
+            hint += f", and {_round_down(other * scale):.1f} mm along the other." if other is not None else "."
+        else:
+            hint = "There is no room for one here."
         raise BuildError(f"That {what} is too big for the faces next to the edge. {hint}")
 
     arc = max(2, max(math.ceil(ARC_SEGMENTS * (math.pi - c.angle) / (2.0 * math.pi)) for c in corners))
     rings = []
     for k, corner in enumerate(corners):
-        set_back = corner.set_back(size) if rounded else size
-        ring = corner.ring(set_back, size if rounded else None, arc)
+        ring = corner.ring(*backs[k], size if rounded else None, arc)
         if run.convex and not run.closed and k in (0, count - 1):
             # Reaching just past the ends of an outside edge cuts only air.
             ring = ring + (NUDGE if k else -NUDGE) * corner.t
@@ -295,8 +363,9 @@ def _edge_piece(shape, face_index: int, point, size: float, rounded: bool, clear
     return tm, run, piece
 
 
-def _edge_group(shape, face_index: int, point, size: float, rounded: bool, clearances):
-    tm, run, piece = _edge_piece(shape, face_index, point, size, rounded, clearances)
+def _edge_group(shape, face_index: int, point, size: float, rounded: bool, clearances,
+                other: float | None = None, angle: float | None = None):
+    tm, run, piece = _edge_piece(shape, face_index, point, size, rounded, clearances, other, angle)
     name = "Rounded edge" if rounded else "Bevelled edge"
     child = _baked_child(piece, name, shape.color, is_hole=run.convex)
     label = "rounded" if rounded else "chamfered"
@@ -316,8 +385,14 @@ def fillet(shape, face_index: int, point, radius: float, clearances: dict | None
     return _edge_group(shape, face_index, point, radius, True, clearances)
 
 
-def chamfer(shape, face_index: int, point, distance: float, clearances: dict | None = None):
-    """The edge next to the click bevelled flat, set back `distance` mm on
-    both faces, along its run (see the module notes). A group of the part
-    and the piece cut away (an outside edge) or added (an inside edge)."""
-    return _edge_group(shape, face_index, point, distance, False, clearances)
+def chamfer(shape, face_index: int, point, distance: float, clearances: dict | None = None,
+            distance2: float | None = None, angle: float | None = None):
+    """The edge next to the click bevelled flat, along its run (see the
+    module notes): set back `distance` mm on both faces; or `distance` along
+    the face clicked and `distance2` along the other; or `distance` along
+    the face clicked, leaving it at `angle` degrees. Exact for a straight
+    edge between flat faces. A group of the part and the piece cut away (an
+    outside edge) or added (an inside edge)."""
+    if distance2 is not None and angle is not None:
+        raise ValueError("give a second distance or an angle, not both")
+    return _edge_group(shape, face_index, point, distance, False, clearances, distance2, angle)

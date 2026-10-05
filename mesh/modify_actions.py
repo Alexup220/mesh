@@ -146,11 +146,26 @@ def ask_fillet(parent) -> dict | None:
     return run_form(parent, "Round an Edge", fillet_fields(), note=FILLET_NOTE)
 
 
+BEVEL_SET_BACKS = [
+    ("equal", "The same distance back on both faces"),
+    ("two", "That far along the face you clicked, and a second distance along the other"),
+    ("angle", "That far along the face you clicked, then sloping at an angle from it"),
+]
+
+
 def chamfer_fields():
-    return [("distance", "Set back along each face (mm)", 1.0, {"min": 0.01, "max": 1000.0})]
+    return [
+        ("distance", "Set back from the edge (mm)", 1.0, {"min": 0.01, "max": 1000.0}),
+        ("how", "Set back", "equal", {"choices": BEVEL_SET_BACKS}),
+        ("distance2", "Second distance, along the other face (mm)", 1.0, {"min": 0.01, "max": 1000.0}),
+        ("angle", "Angle from the face you clicked (degrees)", 45.0, {"min": 0.1, "max": 179.0}),
+    ]
 
 
-CHAMFER_NOTE = EDGE_NOTE.format(what="Bevels flat", done="bevelled")
+CHAMFER_NOTE = EDGE_NOTE.format(what="Bevels flat", done="bevelled") + (
+    " The bevel can be set back the same on both faces, a different distance on each, or a "
+    "distance along the face you clicked and an angle from it."
+)
 
 
 def ask_chamfer(parent) -> dict | None:
@@ -564,7 +579,8 @@ class ModifyActions:
         else:
             values = ask_chamfer(self)
             if values is not None:
-                self.bevel_edge(shape.id, face_index, point, values["distance"])
+                self.bevel_edge(shape.id, face_index, point, values["distance"], values.get("how", "equal"),
+                                values.get("distance2", 1.0), values.get("angle", 45.0))
 
     def _change_edge(self, label: str, title: str, shape_id: str, build) -> bool:
         scene = self.document.scene
@@ -588,12 +604,20 @@ class ModifyActions:
         )
 
     @replayable(("shape_id", "face_index"))
-    def bevel_edge(self, shape_id: str, face_index: int, point, distance: float) -> bool:
+    def bevel_edge(self, shape_id: str, face_index: int, point, distance: float, how: str = "equal",
+                   distance2: float = 1.0, angle: float = 45.0) -> bool:
         """Bevel the edge of the clicked face nearest `point`, and the run
-        it belongs to. One undo step on success."""
+        it belongs to: set back `distance` on both faces ("equal"), or along
+        the face clicked and `distance2` along the other ("two"), or along
+        the face clicked at `angle` degrees from it ("angle"). One undo
+        step on success."""
+        if how not in ("equal", "two", "angle"):
+            raise ValueError(f"unknown way to set a bevel back {how!r}")
+        second = distance2 if how == "two" else None
+        slope = angle if how == "angle" else None
         return self._change_edge(
             "chamfer edge", "Cannot bevel the edge", shape_id,
-            lambda shape, fits: edges.chamfer(shape, face_index, point, distance, fits),
+            lambda shape, fits: edges.chamfer(shape, face_index, point, distance, fits, second, slope),
         )
 
     # --- Draft: sloped sides -------------------------------------------------------------

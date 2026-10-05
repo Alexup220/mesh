@@ -156,9 +156,11 @@ tools do the closest honest version of their Fusion counterparts:
   with the largest that fits. Variable radius and setback corners are not
   offered.
 - **Bevel an Edge (Chamfer)** works the same way and has the same limits, with
-  the edge cut flat, set back the same distance on both faces. A bevel set
-  back a different distance on each face, or given by an angle, is not
-  offered.
+  the edge cut flat: set back the same distance on both faces, a different
+  distance on each (the first along the face clicked), or a distance along
+  the face clicked and an angle from it. Exact for a straight edge between
+  flat faces; along a curved run the second set back is worked out at each
+  point from the faces' angle there.
 - **Slope the Sides (Draft)** slopes every side of an Extrusion by one angle
   (at most 60 degrees), going away from its sketch's plane; a box, cylinder
   or tube becomes an Extrusion first (its base's outline pushed up its

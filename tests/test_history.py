@@ -343,6 +343,13 @@ def scenario_bevel_edge(window):
     window.bevel_edge(box.id, face_towards(box, (0, 0, 1)), (10.0, 0.0, 20.0), 2.0)
 
 
+def scenario_bevel_edge_unevenly(window):
+    box = add(window)
+    window.bevel_edge(box.id, face_towards(box, (0, 0, 1)), (10.0, 0.0, 20.0), 2.0, "two", 3.0)
+    group = window.document.scene.selected()[0]
+    window.bevel_edge(group.id, face_towards(group, (1, 0, 0)), (10.0, 5.0, 10.0), 1.5, "angle", angle=30.0)
+
+
 def scenario_draft(window):
     add(window)
     window.draft_selected(5.0)
@@ -740,6 +747,7 @@ SAMPLE_ARGS = {
     "radius": 2.0, "count": 3, "spacing": 10.0, "count2": 1, "spacing2": 30.0, "axis2": "y",
     "centre": [0.0, 0.0, 0.0], "follow": False, "plane": "x", "open_top": False, "drain": 0.0,
     "pegs": False, "peg_diameter": 4.0, "join": False, "extent": False, "symmetric": False, "skip": "",
+    "how": "equal", "distance2": 1.0,
 }
 
 

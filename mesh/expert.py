@@ -177,9 +177,10 @@ TOOLS: tuple[ExpertTool, ...] = (
     ),
     ExpertTool(
         "chamfer", "modify", "Be&vel an Edge (Chamfer)",
-        "Click a face of a part next to an edge, then type how far back to bevel it on both "
-        "faces. The edge is cut flat along with the edges it runs on into smoothly; an "
-        "inside edge is filled in flat.",
+        "Click a face of a part next to an edge, then type how far back to bevel it: the same "
+        "on both faces, a different distance on each, or a distance and an angle. The edge is "
+        "cut flat along with the edges it runs on into smoothly; an inside edge is filled in "
+        "flat. Corners where bevelled edges meet are not blended.",
         "do_chamfer",
     ),
     ExpertTool(
