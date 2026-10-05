@@ -9,6 +9,7 @@ from PySide6.QtCore import QTimer
 
 from mesh import construct, create, patterns
 from mesh.builders import MAX_COPIES, BuildError
+from mesh.history import replayable
 from mesh.modify import MOVE_LIMIT, _bounds
 from mesh.modify_actions import TURN_AXES
 from mesh.panels import run_form
@@ -153,6 +154,7 @@ class PatternActions:
 
     # --- In rows ------------------------------------------------------------------
 
+    @replayable()
     def rectangular_pattern_selected(self, count: int = 3, spacing: float = 30.0, axis: str = "x",
                                      count2: int = 1, spacing2: float = 30.0, axis2: str = "y") -> bool:
         parts = self._pattern_parts()
@@ -177,6 +179,7 @@ class PatternActions:
         axes = [s for s in self._picked() if construct.is_guide(s, "axis")]
         return axes[0] if len(axes) == 1 else None
 
+    @replayable()
     def circular_pattern_selected(self, count: int = 6, axis: str = "z", centre=(0.0, 0.0, 0.0),
                                   angle: float = 360.0) -> bool:
         """Copies round the selected construction axis, or else round the
@@ -224,6 +227,7 @@ class PatternActions:
             return None
         return parts, guides[0]
 
+    @replayable()
     def path_pattern_selected(self, count: int = 5, spacing: float | None = None,
                               follow: bool = False) -> bool:
         """Copies along the selected sketch's path: `spacing` mm apart, or
@@ -263,6 +267,7 @@ class PatternActions:
         origin, normal = plane
         return self._add_pattern("mirror", parts, lambda: patterns.mirrored(parts, origin, normal))
 
+    @replayable()
     def mirror_copy_selected(self, plane: str = "x") -> bool:
         """Mirrored copies of the selected parts across the selected
         sketch's plane or construction plane, or else the middle plane
@@ -306,8 +311,10 @@ class PatternActions:
             return
         self._clear_tool()
         self.sync()
-        QTimer.singleShot(0, lambda: self.mirror_across_face(shape_id, face_index))
+        ids = list(getattr(self, "_mirror_ids", []))
+        QTimer.singleShot(0, lambda: self.mirror_across_face(shape_id, face_index, ids))
 
+    @replayable(("shape_id", "face_index"))
     def mirror_across_face(self, shape_id: str, face_index: int, part_ids=None) -> bool:
         """Mirrored copies of the parts `part_ids` (those selected when
         Mirror started) across the flat face of `shape_id` holding

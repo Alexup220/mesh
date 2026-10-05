@@ -1,7 +1,8 @@
 """The window's Expert mode actions: the Sketch and Create menus.
 
 Create's patterns and Mirror are in mesh.pattern_actions, the Modify menu
-in mesh.modify_actions (its parameters in mesh.parameter_actions), the
+in mesh.modify_actions (its parameters in mesh.parameter_actions, its
+history list in mesh.history_actions), the
 Construct menu in mesh.construct_actions and the Inspect menu in
 mesh.inspect_actions; all are mixed in here.
 
@@ -15,6 +16,8 @@ from PySide6.QtCore import QTimer
 
 from mesh import construct, create, features, sketch, sketch_editor, threads
 from mesh.construct_actions import ConstructActions
+from mesh.history import replayable
+from mesh.history_actions import HistoryActions
 from mesh.inspect_actions import InspectActions
 from mesh.modify_actions import ModifyActions
 from mesh.parameter_actions import ParameterActions
@@ -114,7 +117,8 @@ def ask_thread(parent, height: float, standard: str, pitch: float) -> dict | Non
     return run_form(parent, "Thread", thread_fields(height, pitch), note=thread_note(standard, pitch))
 
 
-class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActions, ParameterActions):
+class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActions, ParameterActions,
+                    HistoryActions):
     """Mixed into MeshWindow (see mesh.expert for the menu items)."""
 
     # The click-on-a-part tools Expert mode adds; turning the mode off
@@ -277,6 +281,7 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         scene.select([shape.id])
         self.sync()
 
+    @replayable()
     def extrude_selected(self, distance: float, side: str = "one", hole: bool = False,
                          keep_sketch: bool = False) -> bool:
         source = self._chosen_sketch("extrude")
@@ -289,6 +294,7 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         self._add_from_sketches("extrude", [source], shape, keep_sketch)
         return True
 
+    @replayable()
     def revolve_selected(self, axis: str = "y", angle: float = 360.0, hole: bool = False,
                          keep_sketch: bool = False) -> bool:
         source = self._chosen_sketch("revolve")
@@ -325,6 +331,7 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
             return None
         return chosen
 
+    @replayable()
     def sweep_selected(self, path_id: str | None = None, hole: bool = False,
                        keep_sketch: bool = False) -> bool:
         """Sweep one selected sketch's outline along the other's path
@@ -357,6 +364,7 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
             return None
         return chosen
 
+    @replayable()
     def loft_selected(self, hole: bool = False, keep_sketch: bool = False) -> bool:
         sketches = self._sketches_in_order()
         if sketches is None:
@@ -393,6 +401,7 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
             return None
         return chosen[0]
 
+    @replayable()
     def thread_selected(self, pitch: float, length: float, end: str = "top", hand: str = "right") -> bool:
         """Put a thread on the selected cylinder. One undo step on success."""
         shape = self._thread_target()

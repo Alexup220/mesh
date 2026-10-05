@@ -11,6 +11,7 @@ from PySide6.QtCore import QTimer
 
 from mesh import construct, guides
 from mesh.builders import BuildError
+from mesh.history import replayable
 from mesh.panels import run_form
 from mesh.shapes import is_reference
 
@@ -150,6 +151,7 @@ class ConstructActions:
 
     # --- Plane at a distance ---------------------------------------------------------
 
+    @replayable()
     def plane_at_distance_selected(self, source: str = "xy", distance: float = 10.0) -> bool:
         """A plane `distance` mm from the selected sketch or plane
         ("selected") or one of the world's planes ("xy", "xz", "yz")."""
@@ -162,6 +164,7 @@ class ConstructActions:
             return self._add_guide("add plane", lambda: construct.plane_from_guide(chosen[0], distance, name))
         return self._add_guide("add plane", lambda: construct.plane_from_named(source, distance, name))
 
+    @replayable(("shape_id", "face_index"))
     def plane_from_face(self, shape_id: str, face_index: int, distance: float = 0.0) -> bool:
         scene = self.document.scene
         try:
@@ -194,6 +197,7 @@ class ConstructActions:
     def _selected_axes(self):
         return [s for s in self._picked() if construct.is_guide(s, "axis")]
 
+    @replayable()
     def plane_at_angle_selected(self, line: str = "z", angle: float = 45.0) -> bool:
         """A plane through the selected construction axis ("selected") or
         one of the world's lines through 0 ("x", "y", "z"), turned `angle`
@@ -220,6 +224,7 @@ class ConstructActions:
 
     MIDPLANE_HINT = "Select two sketches or planes, or click two flat faces, for the plane halfway between."
 
+    @replayable()
     def midplane_selected(self) -> bool:
         """The plane halfway between the two selected sketches or planes."""
         chosen = self._selected_flat_guides()
@@ -232,6 +237,7 @@ class ConstructActions:
         return self._add_guide("add plane", lambda: construct.midplane(
             construct.plane_of(a), construct.plane_of(b), size, name))
 
+    @replayable("first", "second")
     def midplane_of_faces(self, first, second) -> bool:
         """The plane halfway between two clicked faces, each (part id,
         triangle clicked)."""
@@ -298,6 +304,7 @@ class ConstructActions:
 
     AXIS_ROUND_HINT = "Select a round part (a cylinder, cone, tube, ring, ball or revolved part) first."
 
+    @replayable()
     def axis_of_round_parts(self) -> bool:
         """An axis along the middle of each selected round part, together
         as one undo step."""
@@ -347,6 +354,7 @@ class ConstructActions:
         points = list(self._construct_picks)
         self._finish_construct(lambda: self.axis_through_spots(points))
 
+    @replayable(("shape_id", "face_index"))
     def axis_square_to(self, shape_id: str, face_index: int, point) -> bool:
         scene = self.document.scene
         try:
@@ -367,6 +375,7 @@ class ConstructActions:
 
     AXIS_PLANES_HINT = "Select two sketches or planes at an angle; the axis runs where they meet."
 
+    @replayable()
     def axis_of_two_planes(self) -> bool:
         chosen = self._selected_flat_guides()
         if len(chosen) != 2:
@@ -381,6 +390,7 @@ class ConstructActions:
 
     # --- Points ----------------------------------------------------------------------
 
+    @replayable(("shape_id", "face_index"))
     def point_at(self, shape_id: str, face_index: int, point, middle: bool = False) -> bool:
         """A point where a click on a face landed, or at the face's middle."""
         scene = self.document.scene

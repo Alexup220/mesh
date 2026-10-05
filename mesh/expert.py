@@ -200,6 +200,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_link_sizes",
     ),
     ExpertTool(
+        "history", "modify", "Histor&y...",
+        "Keep a list of every change to the project. Change a step's settings (an extrusion's "
+        "distance, a rounding's radius) or remove a step, and the project is worked out again "
+        "so later steps follow.",
+        "do_history",
+    ),
+    ExpertTool(
         "plane_distance", "construct", "Plane at a &Distance...",
         "Add a construction plane parallel to a flat face you click, a selected sketch or "
         "plane, or one of the workplane's planes, the distance you type away from it. Sketch "

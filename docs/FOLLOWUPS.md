@@ -266,6 +266,21 @@ reflected. What differs from Fusion is how the pattern is chosen.
   A turn read back from a part is worked out from the part's turned
   position, so a linked turn keeps the other two turns as they come out
   of that working (the same numbers the Details panel shows).
+- **History** starts when you ask (Modify > History > Start Keeping a
+  History) and lists the changes from then on; it can't recover what
+  happened before. Steps can be changed or removed but not reordered or
+  rolled back to (Fusion's timeline marker); Undo goes back instead.
+  Only the tools' own settings can be changed (an extrusion's distance, a
+  rounding's radius, a pattern's count); which parts a tool was used on,
+  and a sketch's curves, can't be changed in a step. Steps that are not
+  tools (adding a shape, moving or dragging, typing in the Details panel,
+  drawing a sketch, Lay Flat, Align Face to Face) do again what they did:
+  a move moves the part by the same amount from wherever it is by then,
+  and a typed size is set again as typed. A clicked face is found again
+  by the way it faces and where it was, so a change that turns or
+  reshapes a part a lot can make a later tool land on a different face,
+  or refuse. The whole project is worked out again after every change,
+  which can take a while on a long history.
 
 ## Platform notes
 

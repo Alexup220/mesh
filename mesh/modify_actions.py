@@ -9,6 +9,7 @@ from PySide6.QtCore import QTimer
 
 from mesh import edges, features, modify
 from mesh.builders import GUIDES_ARE_NOT_PARTS, BuildError
+from mesh.history import replayable
 from mesh.panels import run_form
 from mesh.shapes import is_reference
 
@@ -217,6 +218,7 @@ class ModifyActions:
     NOTHING_SELECTED = "Select the parts to move first."
     NOTHING_TO_MOVE = "Nothing moved: every amount was 0."
 
+    @replayable()
     def move_copy_selected(self, dx: float = 0.0, dy: float = 0.0, dz: float = 0.0,
                            axis: str = "z", angle: float = 0.0, make_copy: bool = False) -> bool:
         """Move or turn the selected shapes by exact amounts, or copies of
@@ -301,6 +303,7 @@ class ModifyActions:
 
     NOTHING_TO_SCALE = "Select the parts to scale first."
 
+    @replayable()
     def scale_selected(self, size: float = 100.0, stretch_x: float = 100.0,
                        stretch_y: float = 100.0, stretch_z: float = 100.0,
                        about: str = "base") -> bool:
@@ -349,6 +352,7 @@ class ModifyActions:
             return None
         return parts
 
+    @replayable()
     def combine_selected(self, target_id: str | None = None, op: str = "union",
                          keep_tools: bool = False) -> bool:
         """Join, cut or keep the overlap of the selected parts, changing the
@@ -395,6 +399,7 @@ class ModifyActions:
             return None
         return parts, (guides[0] if guides else None)
 
+    @replayable()
     def split_body_selected(self, part_id: str | None = None, keep_tool: bool = False) -> bool:
         """Split the selected part by the selected sketch's plane, or one
         selected part by the other (`part_id`, or the first picked). One
@@ -473,6 +478,7 @@ class ModifyActions:
         if values is not None:
             self.shell_face(shape.id, face_index, values["wall"], values["far_side"])
 
+    @replayable(("shape_id", "face_index"))
     def shell_face(self, shape_id: str, face_index: int, wall: float, far_side: bool = False) -> bool:
         """Hollow out a part, leaving the face `face_index` open (and the
         one across from it, with `far_side`). One undo step on success."""
@@ -505,6 +511,7 @@ class ModifyActions:
         if values is not None:
             self.push_pull_face(shape.id, face_index, values["distance"])
 
+    @replayable(("shape_id", "face_index"))
     def push_pull_face(self, shape_id: str, face_index: int, distance: float) -> bool:
         """Move a part's flat face out (`distance` > 0) or in. One undo step
         on success."""
@@ -571,6 +578,7 @@ class ModifyActions:
         self._replace_with(label, shape, [group])
         return True
 
+    @replayable(("shape_id", "face_index"))
     def round_edge(self, shape_id: str, face_index: int, point, radius: float) -> bool:
         """Round the edge of the clicked face nearest `point`, and the run
         it belongs to. One undo step on success."""
@@ -579,6 +587,7 @@ class ModifyActions:
             lambda shape, fits: edges.fillet(shape, face_index, point, radius, fits),
         )
 
+    @replayable(("shape_id", "face_index"))
     def bevel_edge(self, shape_id: str, face_index: int, point, distance: float) -> bool:
         """Bevel the edge of the clicked face nearest `point`, and the run
         it belongs to. One undo step on success."""
@@ -607,6 +616,7 @@ class ModifyActions:
         if values is not None:
             self.draft_selected(values["angle"] * (-1.0 if values["direction"] == "out" else 1.0))
 
+    @replayable()
     def draft_selected(self, angle: float) -> bool:
         """Slope the selected part's sides in by `angle` degrees (out, for
         less than 0). One undo step on success."""

@@ -127,6 +127,9 @@ class Scene:
     # Expert mode: the named parameters ({"name", "formula", "note"}; see
     # mesh.parameters). Saved only when there are some.
     parameters: list = field(default_factory=list)
+    # Expert mode: the history list, once the project keeps one (see
+    # mesh.history). Saved only then.
+    history: dict | None = None
 
     def add(self, shape: Shape) -> None:
         self.shapes.append(shape)
@@ -158,6 +161,7 @@ class Scene:
             "snap_mm": self.snap_mm,
             "fit_clearances": dict(self.fit_clearances),
             **({"parameters": [dict(p) for p in self.parameters]} if self.parameters else {}),
+            **({"history": self.history} if self.history is not None else {}),
         }
 
     @classmethod
@@ -170,7 +174,14 @@ class Scene:
             fit_clearances=_read_fit_clearances(d.get("fit_clearances")),
             parameters=[{"name": str(p["name"]), "formula": str(p["formula"]), "note": str(p.get("note", ""))}
                         for p in d.get("parameters") or []],
+            history=_read_history(d.get("history")),
         )
+
+
+def _read_history(raw):
+    from mesh import history
+
+    return history.read(raw)
 
 
 class Document:
@@ -191,12 +202,38 @@ class Document:
         # when nothing has changed can cache against this instead of
         # re-deriving a content hash of the whole scene themselves.
         self.revision = 0
+        # Expert mode's history list (see mesh.history): whether snapshots
+        # add steps to it (off while the history itself is changed or
+        # worked out again), the tool call the next step is made by, and
+        # the scene before the newest step, which settle() compares with
+        # the scene now to work out what that step changed.
+        self.recording = True
+        self.calling = False
+        self.pending_call = None
+        self._step_before = None
 
     def snapshot(self, label: str = "") -> None:
+        self.settle()
+        self._step_before = None
         self._undo.append(copy.deepcopy(self.scene))
         del self._undo[:-HISTORY_LIMIT]
         self._redo.clear()
         self.revision += 1
+        if self.recording and self.scene.history is not None:
+            self.scene.history["steps"].append({"label": label, "call": self.pending_call, "effect": None})
+            self.pending_call = None
+            self._step_before = self._undo[-1]
+
+    def settle(self) -> None:
+        """Work out what the newest history step has changed so far, from
+        the scene before it to the scene now. Done before the next step,
+        an undo or redo, saving, and showing the history."""
+        history = self.scene.history
+        if self._step_before is None or history is None or not history["steps"]:
+            return
+        from mesh.history import changes
+
+        history["steps"][-1]["effect"] = changes(self._step_before, self.scene)
 
     def can_undo(self) -> bool:
         return bool(self._undo)
@@ -207,6 +244,8 @@ class Document:
     def undo(self) -> bool:
         if not self._undo:
             return False
+        self.settle()
+        self._step_before = None
         self._redo.append(copy.deepcopy(self.scene))
         self.scene = self._undo.pop()
         self.revision += 1
@@ -215,6 +254,7 @@ class Document:
     def redo(self) -> bool:
         if not self._redo:
             return False
+        self._step_before = None
         self._undo.append(copy.deepcopy(self.scene))
         self.scene = self._redo.pop()
         self.revision += 1

@@ -25,6 +25,7 @@ from PySide6.QtCore import QTimer, Qt
 from mesh import builders, create, expert, hardware, ops, panels
 from mesh.expert_actions import ExpertActions
 from mesh.gizmo import Gizmo
+from mesh.history import replayable
 from mesh.io_formats import (
     EXPORT_EXTS,
     IMPORT_EXTS,
@@ -354,6 +355,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         self.document.scene.select([s.id for s in self.document.scene.shapes])
         self.sync()
 
+    @replayable()
     def do_delete(self) -> None:
         if not self.document.scene.selection:
             return
@@ -361,6 +363,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         self.document.scene.remove(list(self.document.scene.selection))
         self.sync()
 
+    @replayable()
     def do_duplicate(self) -> None:
         chosen = self.document.scene.selected()
         if not chosen:
@@ -372,6 +375,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         self.document.scene.select([c.id for c in clones])
         self.sync()
 
+    @replayable()
     def do_toggle_hole(self) -> None:
         # A guide (a sketch) is never printed, so it is never a hole.
         chosen = [s for s in self.document.scene.selected() if not is_reference(s)]
@@ -410,6 +414,7 @@ class MeshWindow(ExpertActions, QMainWindow):
             return None
         return chosen
 
+    @replayable()
     def do_group(self) -> None:
         chosen = self._parts_chosen()
         if not chosen:
@@ -425,6 +430,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         self.document.scene.select([group.id])
         self.sync()
 
+    @replayable()
     def do_boolean(self, op: str) -> None:
         """The explicit Join / Cut Out / Keep Overlap menu items: the
         secondary route to ops.boolean for a user who wants the operator
@@ -446,6 +452,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         self.document.scene.select([group.id])
         self.sync()
 
+    @replayable()
     def do_ungroup(self) -> None:
         chosen = [s for s in self.document.scene.selected() if s.kind == "group"]
         if not chosen:
@@ -495,6 +502,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         if values is not None:
             self.set_fit_clearances(values)
 
+    @replayable()
     def do_mirror(self, axis: str) -> None:
         chosen = self.document.scene.selected()
         if not chosen:
@@ -504,6 +512,7 @@ class MeshWindow(ExpertActions, QMainWindow):
             ops.mirror(shape, axis)
         self.sync()
 
+    @replayable()
     def do_align(self, axis: str, mode: str) -> None:
         chosen = self.document.scene.selected()
         if len(chosen) < 2:
@@ -541,6 +550,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         self._warn(title, error)
         return None
 
+    @replayable()
     def hollow_selected(self, wall: float, open_top: bool = False, drain: float = 0.0) -> bool:
         shape = self._one_selected("hollow out")
         if shape is None:
@@ -563,6 +573,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         if values is not None:
             self.hollow_selected(values["wall"], values.get("open_top", False), values["drain"])
 
+    @replayable()
     def split_selected(
         self, axis: str, distance: float, pegs: bool = False, peg_diameter: float = 4.0
     ) -> bool:
@@ -605,6 +616,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         self.document.scene.select([shape.id] + [c.id for c in copies])
         self.sync()
 
+    @replayable()
     def repeat_row_selected(self, count: int, spacing: float, axis: str = "x") -> bool:
         shape = self._one_selected("repeat")
         if shape is None:
@@ -617,6 +629,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         self._add_copies("repeat in a row", shape, copies)
         return True
 
+    @replayable()
     def repeat_circle_selected(self, count: int, radius: float, centre, angle: float = 360.0) -> bool:
         shape = self._one_selected("repeat")
         if shape is None:
@@ -927,6 +940,7 @@ class MeshWindow(ExpertActions, QMainWindow):
         export_scene(self.document.scene, path)
 
     def save_to(self, path) -> None:
+        self.document.settle()
         save_project(self.document.scene, path)
 
     def open_from(self, path) -> None:

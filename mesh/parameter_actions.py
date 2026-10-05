@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from mesh import parameters
 from mesh.builders import BuildError
+from mesh.history import replayable
 from mesh.panels import FIELD_LABELS, run_form
 from mesh.shapes import shape_geometry
 from mesh.sketch import SketchError
@@ -197,6 +198,9 @@ class ParameterActions:
         except parameters.ParameterError as exc:
             self._warn("Cannot use these parameters", str(exc))
             return False
+        if scene.history is not None:
+            # The parameters hold for the whole history: work it all out again.
+            return self._rework("Cannot use these parameters", "parameters", self.history_steps(), rows)
         problem = self._links_problem(scene.shapes, known)
         if problem is not None:
             self._warn("Cannot use these parameters", problem)
@@ -212,6 +216,7 @@ class ParameterActions:
         if rows is not None:
             self.set_parameters(rows)
 
+    @replayable()
     def set_links(self, shape_id: str, links: dict) -> bool:
         """Link numbers of one shape to formulas (field -> formula; an empty
         formula ends that link). One undo step."""
