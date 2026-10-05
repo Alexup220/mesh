@@ -8,6 +8,11 @@ wide, 5H/8 deep, where P is the pitch and H = 0.866 P. It is built as one
 cross-section turned steadily as it rises, so the flanks are made of
 narrow flat strips, STEPS to a turn. Built resting on the workplane, about
 the Z axis, like a cylinder.
+
+With several starts, that many threads run side by side, evenly round: the
+pitch is still the distance from one ridge to the next, and each thread
+rises the pitch times the number of starts in a turn (its lead). "starts"
+is missing in older files, where it is 1.
 """
 
 import numpy as np
@@ -30,12 +35,13 @@ ISO_COARSE = {
 ENDS = [("top", "At the top"), ("bottom", "At the bottom")]
 HANDS = [("right", "Right-hand (tightens clockwise)"), ("left", "Left-hand (tightens anticlockwise)")]
 
-STEPS = 36  # flat strips to a turn
-MAX_TURNS = 150
+STEPS = 36  # flat strips to a turn, for each start
+MAX_TURNS = 150  # turns of a one-start thread (fewer with more starts)
+MAX_STARTS = 4
 SEGMENTS = 64  # round the unthreaded part, as a cylinder
 
 DEFAULTS = {"diameter": 10.0, "height": 20.0, "pitch": 1.5, "thread_length": 20.0,
-            "end": "top", "hand": "right"}
+            "end": "top", "hand": "right", "starts": 1}
 
 
 def standard_size(diameter: float) -> tuple[str, float]:
@@ -49,16 +55,27 @@ def depth(pitch: float) -> float:
     return 5.0 / 8.0 * np.sqrt(3.0) / 2.0 * float(pitch)
 
 
+def starts_of(p: dict) -> int:
+    """How many threads run side by side (see refusal for the allowed ones)."""
+    return int(round(float(p.get("starts", 1))))
+
+
 def refusal(p: dict) -> str | None:
     """Why these sizes can't make a thread, or None."""
     diameter, height = float(p["diameter"]), float(p["height"])
     pitch, length = float(p["pitch"]), float(p["thread_length"])
+    starts = float(p.get("starts", 1))
     if pitch < 0.2:
         return "The pitch (how far the thread rises in one turn) must be at least 0.2 mm."
     if depth(pitch) > 0.4 * diameter:
         return (f"A {pitch:g} mm pitch cuts too deep for a {diameter:g} mm diameter. Use a pitch of "
                 f"at most {0.4 * diameter / depth(1.0):.2f} mm, or a wider part.")
-    if min(length, height) / pitch > MAX_TURNS:
+    if starts != round(starts) or not 1 <= starts <= MAX_STARTS:
+        return f"A thread can have 1 to {MAX_STARTS} starts (threads side by side), as a whole number."
+    if min(length, height) / pitch * starts > MAX_TURNS:
+        if starts > 1:
+            return (f"That thread would make more than {MAX_TURNS} turns, counting each start. Thread "
+                    "less of the part, use a bigger pitch, or use fewer starts.")
         return (f"That thread would make more than {MAX_TURNS} turns. Thread less of the part, or use "
                 "a bigger pitch.")
     if p.get("end", "top") not in dict(ENDS) or p.get("hand", "right") not in dict(HANDS):
@@ -75,15 +92,18 @@ def _profile(u: np.ndarray, pitch: float, outer: float, inner: float) -> np.ndar
     return np.interp(u, corners, radii)
 
 
-def _section(pitch: float, outer: float, inner: float, start: float) -> "m3.CrossSection":
+def _section(pitch: float, outer: float, inner: float, start: float, starts: int = 1) -> "m3.CrossSection":
     """A right-hand thread across at height `start` (so every piece of a
-    thread lines up, whatever height it starts at)."""
-    turns = np.linspace(0.0, 1.0, STEPS, endpoint=False)
+    thread lines up, whatever height it starts at), with `starts` threads
+    side by side."""
+    turns = np.linspace(0.0, 1.0, STEPS * starts, endpoint=False)
     corners = np.array([0.0, 1.0 / 8.0, 7.0 / 16.0, 11.0 / 16.0])
-    # The angle at which each corner of the profile is reached.
-    turns = np.unique(np.round(np.concatenate([turns, np.mod(start / pitch - corners, 1.0)]), 12))
+    # The angle at which each corner of the profile is reached, on each
+    # thread.
+    reached = [np.mod((start / pitch - corners - k) / starts, 1.0) for k in range(starts)]
+    turns = np.unique(np.round(np.concatenate([turns, *reached]), 12))
     theta = 2.0 * np.pi * turns
-    radius = _profile(start - pitch * turns, pitch, outer, inner)
+    radius = _profile(start - pitch * starts * turns, pitch, outer, inner)
     points = np.column_stack([radius * np.cos(theta), radius * np.sin(theta)])
     return m3.CrossSection([points])
 
@@ -111,10 +131,13 @@ def thread_mesh(p: dict, clearance: float = 0.0) -> trimesh.Trimesh:
     else:
         threaded, plain = (height - length, high), (low, height - length)
     start, stop = threaded
+    starts = starts_of(p)
+    # A layer every 1/STEPS of the pitch, so each turns 1/STEPS of a turn
+    # divided by the number of starts: as fine as the cross-section.
     solid = m3.Manifold.extrude(
-        _section(pitch, outer, inner, start), stop - start,
+        _section(pitch, outer, inner, start, starts), stop - start,
         n_divisions=max(int(np.ceil((stop - start) / pitch * STEPS)), 1),
-        twist_degrees=360.0 * (stop - start) / pitch,
+        twist_degrees=360.0 * (stop - start) / (pitch * starts),
     ).translate((0.0, 0.0, start))
     if p["hand"] == "left":
         # The mirror image of a right-hand thread. Twisting the other way

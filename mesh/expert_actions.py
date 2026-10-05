@@ -168,6 +168,7 @@ def thread_fields(height: float, pitch: float):
         ("length", "Threaded length (mm)", float(height), {"min": 0.1, "max": 10000.0}),
         ("end", "Thread starts", "top", {"choices": threads.ENDS}),
         ("hand", "Thread turns", "right", {"choices": threads.HANDS}),
+        ("starts", "Starts (threads side by side)", 1, {"min": 1, "max": threads.MAX_STARTS}),
     ]
 
 
@@ -175,7 +176,9 @@ def thread_note(standard: str, pitch: float) -> str:
     return (f"Puts a screw thread on the cylinder; its diameter is the thread's full size. The "
             f"nearest standard size is {standard}, whose pitch ({pitch:g} mm) is filled in. On a "
             "cylinder Hole it makes a threaded hole: with a fit chosen, a thread of the same size "
-            "screws into it.")
+            "screws into it. With more than one start, that many threads run side by side: the "
+            "pitch is still from one ridge to the next, and a nut goes that many times further "
+            "in each turn.")
 
 
 def ask_thread(parent, height: float, standard: str, pitch: float) -> dict | None:
@@ -530,14 +533,16 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         return chosen[0]
 
     @replayable()
-    def thread_selected(self, pitch: float, length: float, end: str = "top", hand: str = "right") -> bool:
-        """Put a thread on the selected cylinder. One undo step on success."""
+    def thread_selected(self, pitch: float, length: float, end: str = "top", hand: str = "right",
+                        starts: int = 1) -> bool:
+        """Put a thread on the selected cylinder, with `starts` threads side
+        by side. One undo step on success."""
         shape = self._thread_target()
         if shape is None:
             return False
         scene = self.document.scene
         changed = self._attempt("Cannot add the thread", lambda: create.threaded(
-            shape, pitch, length, end, hand, scene.fit_clearances))
+            shape, pitch, length, end, hand, scene.fit_clearances, starts))
         if changed is None:
             return False
         self.document.snapshot("thread")
@@ -552,4 +557,5 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         standard, pitch = create.thread_choice(shape)
         values = ask_thread(self, float(shape.params.get("height", 20.0)), standard, pitch)
         if values is not None:
-            self.thread_selected(values["pitch"], values["length"], values["end"], values["hand"])
+            self.thread_selected(values["pitch"], values["length"], values["end"], values["hand"],
+                                 values.get("starts", 1))

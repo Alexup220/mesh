@@ -255,3 +255,105 @@ def test_thread_text_is_plain_language(qapp, close_qt_widget):
                  *(label for _, label in threads.ENDS + threads.HANDS),
                  *(t.tip for t in TOOLS if t.key == "thread")):
         assert_plain(text)
+
+
+# --- Several starts ---------------------------------------------------------------------
+
+
+def crest_angles(tm, z):
+    points, radius = radii_at(tm, z)
+    crest = points[radius > radius.max() - 1e-3]
+    return np.degrees(np.arctan2(crest[:, 1], crest[:, 0])) % 360
+
+
+@pytest.mark.parametrize("starts", [2, 3, 4])
+def test_several_starts_run_side_by_side_evenly_round(starts):
+    tm = threads.thread_mesh({**M10, "starts": starts})
+    assert tm.is_watertight and tm.bounds[:, 2].tolist() == pytest.approx([0, 20])
+    # The same ridges, as much thread: the pitch is still ridge to ridge.
+    assert tm.volume == pytest.approx(threads.thread_mesh(M10).volume, rel=0.01)
+    # A crest every 1/starts of a turn round.
+    angles = crest_angles(tm, 7.3)
+    for k in range(starts):
+        target = (angles[0] + 360.0 * k / starts) % 360
+        assert np.min(np.abs((angles - target + 180) % 360 - 180)) < 6
+    # Each thread rises the pitch times the starts in one turn (its lead):
+    # a quarter of the pitch higher, the crests have turned anticlockwise
+    # by a quarter turn divided by the starts.
+    shifted = (crest_angles(tm, 5.0) + 90.0 / starts) % 360
+    high = crest_angles(tm, 5.0 + 1.5 / 4)
+    for a in shifted:
+        assert np.min(np.abs((high - a + 180) % 360 - 180)) < 3
+
+
+def test_a_two_start_bolt_screws_into_a_two_start_hole_but_not_a_one_start_one():
+    bolt = threads.thread_mesh({**M10, "starts": 2})
+    for fit in (0.0, 0.2):
+        assert outside(bolt, threads.thread_mesh({**M10, "starts": 2}, fit)) == pytest.approx(0, abs=1e-6)
+    assert outside(threads.thread_mesh(M10), threads.thread_mesh({**M10, "starts": 2}, 0.2)) > 1.0
+    part = threads.thread_mesh({**M10, "starts": 2, "thread_length": 12.0, "end": "bottom"}, 0.1)
+    short = threads.thread_mesh({**M10, "starts": 2, "height": 12.0, "thread_length": 12.0})
+    assert outside(short, part) == pytest.approx(0, abs=1e-6)
+
+
+@pytest.mark.parametrize("starts, words", [
+    (0, "1 to 4 starts"), (5, "1 to 4 starts"), (1.5, "whole number"),
+])
+def test_starts_that_cannot_make_a_thread_are_refused(starts, words):
+    with pytest.raises(threads.ThreadError) as err:
+        threads.thread_mesh({**M10, "starts": starts})
+    assert words in str(err.value)
+    assert_plain(str(err.value))
+
+
+def test_several_starts_count_towards_the_most_turns():
+    long = {"diameter": 10.0, "pitch": 1.0, "height": 100.0, "thread_length": 100.0}
+    assert threads.thread_mesh(long).is_watertight
+    with pytest.raises(threads.ThreadError) as err:
+        threads.thread_mesh({**long, "starts": 2})
+    assert "counting each start" in str(err.value)
+    assert_plain(str(err.value))
+
+
+def test_a_thread_made_before_starts_existed_has_one():
+    assert threads.thread_mesh(M10).volume == pytest.approx(threads.thread_mesh({**M10, "starts": 1}).volume)
+    assert "starts" not in create.threaded(new_primitive("cylinder"), 2.5, 20.0).params
+    made = create.threaded(new_primitive("cylinder"), 2.5, 20.0, starts=3)
+    assert made.params["starts"] == 3
+
+
+def test_a_several_start_thread_round_trips_through_a_project_file(tmp_path):
+    thread = create.threaded(new_primitive("cylinder"), 2.5, 12.0, starts=2)
+    file = tmp_path / "two.mesh"
+    save_project(Scene(shapes=[thread]), file)
+    loaded = load_project(file).shapes[0]
+    assert loaded.params == thread.params
+    assert shape_geometry(loaded).volume == pytest.approx(shape_geometry(thread).volume)
+
+
+def test_starts_in_the_form_and_the_details_panel(window, monkeypatch, warnings):
+    monkeypatch.setattr(expert_actions, "ask_thread", lambda parent, height, standard, pitch: {
+        "pitch": pitch, "length": 20.0, "end": "top", "hand": "right", "starts": 2})
+    window.add_primitive("cylinder")
+    thread = window.document.scene.shapes[0]
+    steps = len(window.document._undo)
+    window.do_thread()
+    assert thread.params["starts"] == 2 and len(window.document._undo) == steps + 1
+    assert "starts" in window.inspector.visible_param_fields()
+    assert window.inspector.field_value("starts") == 2
+    window._on_edited(thread.id, "starts", 4.0)
+    window._finish_edit()
+    assert thread.params["starts"] == 4
+    window._on_edited(thread.id, "starts", 2.5)
+    assert thread.params["starts"] == 4 and warnings and "whole number" in warnings[0]
+    window.do_undo()
+    assert window.document.scene.shapes[0].params["starts"] == 2
+    window.do_undo()
+    assert window.document.scene.shapes[0].params["primitive"] == "cylinder"
+
+
+def test_a_one_start_thread_shows_one_start_in_the_details_panel(window):
+    window.add_primitive("cylinder")
+    window.thread_selected(2.5, 20.0)
+    assert window.inspector.field_value("starts") == 1
+    assert_plain(FIELD_LABELS["starts"])

@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from mesh.features import END_SCALE_LIMITS, TAPER_LIMIT, TWIST_LIMIT
+from mesh.threads import MAX_STARTS
 from mesh.scene import DEFAULT_COLOR, DEFAULT_FIT, FITS, Shape, euler_from_transform
 from mesh.shapes import PRIMITIVES, is_reference, shelf_primitives
 from mesh.text import has_letters
@@ -92,6 +93,7 @@ FIELD_LABELS = {
     "thread_length": "Threaded length (mm)",
     "end": "Thread starts",
     "hand": "Thread turns",
+    "starts": "Starts (threads side by side)",
 }
 
 
@@ -142,6 +144,10 @@ class Inspector(QWidget):
                 box.setRange(-TWIST_LIMIT, TWIST_LIMIT)
             elif field == "end_scale":
                 box.setRange(*END_SCALE_LIMITS)
+            elif field == "starts":
+                # How many threads run side by side: a whole number.
+                box.setDecimals(0)
+                box.setRange(1.0, float(MAX_STARTS))
             elif field in SIZE_FIELDS:
                 box.setRange(0.0 if field in ZERO_ALLOWED else 0.1, 10000.0)
             else:

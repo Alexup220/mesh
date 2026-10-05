@@ -279,10 +279,12 @@ reflected. What differs from Fusion is how the pattern is chosen.
   centre of gravity are not offered.
 - **Thread** goes on a plain cylinder only (Fusion threads any round
   face): a threaded hole is a cylinder Hole with a thread, grouped with
-  the part. Only the ISO metric shape is offered (no inch, pipe, tapered
-  or several-start threads), always modeled, never just drawn on. The
-  sloped sides are narrow flat strips, 36 to a turn, so the thread is
-  about 0.5% thinner than the true shape. A fitted thread Hole grows by
+  the part. Only the ISO metric shape is offered (no inch, pipe or
+  tapered threads), always modeled, never just drawn on. One to four
+  threads can run side by side (several starts); the pitch stays the
+  distance from one ridge to the next. The sloped sides are narrow flat
+  strips, 36 to a turn for each start, so the thread is about 0.5% thinner
+  than the true shape. A fitted thread Hole grows by
   its fit straight out from the middle, which leaves about half the fit
   as room on the sloped sides. The ends are cut square, with no lead-in
   bevel, and a thread makes at most 150 turns.

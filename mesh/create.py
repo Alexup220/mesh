@@ -410,11 +410,12 @@ def thread_choice(shape) -> tuple[str, float]:
 
 
 def threaded(shape: Shape, pitch: float, length: float, end: str = "top", hand: str = "right",
-             clearances: dict | None = None) -> Shape:
+             clearances: dict | None = None, starts: int = 1) -> Shape:
     """A copy of the cylinder `shape` with a thread along `length` mm of
-    it, starting at `end`. Its diameter is the thread's full diameter;
-    everything else about it (where it is, its colour, Solid or Hole) is
-    kept. As a Hole it cuts a threaded hole a bolt of the same sizes fits."""
+    it, starting at `end`, with `starts` threads side by side. Its diameter
+    is the thread's full diameter; everything else about it (where it is,
+    its colour, Solid or Hole) is kept. As a Hole it cuts a threaded hole a
+    bolt of the same sizes fits."""
     if shape.kind != "primitive" or shape.params.get("primitive") != "cylinder":
         raise BuildError(NOT_A_CYLINDER)
     if float(shape.params.get("chamfer", 0.0)) > 0.0:
@@ -430,5 +431,8 @@ def threaded(shape: Shape, pitch: float, length: float, end: str = "top", hand: 
         "end": end,
         "hand": hand,
     }
+    # Kept only when used, so a one-start thread's settings are as before.
+    if float(starts) != 1.0:
+        changed.params["starts"] = int(starts) if float(starts) == int(starts) else float(starts)
     _checked(lambda: shape_geometry(changed, clearances))
     return changed
