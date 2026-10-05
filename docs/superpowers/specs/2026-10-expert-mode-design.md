@@ -259,6 +259,43 @@ user's choice).
   show or hide, copy and save for printing work on that whole set, while a
   part's own `component` stays its direct one (so `carry_over` is
   unchanged). `components.read` drops a parent that is missing or loops.
+- **Create.** Extrude takes its side slope in its form, can go up to a
+  construction plane (the distance is worked out once, by
+  `create.distance_to_plane`), and can join to, cut from or keep the
+  overlap with a part selected with it (`modify.combine`, one step).
+  Sweep has `twist` and `end_scale`. Loft has `sides` ("smooth": a smooth
+  curve through three or more outlines) and a `{point}` section at either
+  end. Thread has `starts` (1 to 4), `thread_shape` ("round": the 55
+  degree Whitworth shape of British pipe threads; inch threads are the 60
+  degree shape with the pitch 25.4 mm over the threads per inch) and
+  `lead_in` ("bevel": a 45 degree cone at the starting end, which on a
+  Hole becomes a countersink, so `primitive_mesh` now passes whether the
+  shape is a Hole). Coil is a new primitive (`mesh/coils.py`, in the
+  purity test's CORE list): its wire's outline in an upright plane through
+  the middle line, extruded as a straight bar and bent round into the
+  turns with manifold3d's `warp_batch`. Pipe is a new sketch solid in
+  `features.SOLIDS`, a sweep of one circle (two for a hollow pipe).
+- **Modify, patterns and Mirror.** Mirror can join each image to its part.
+  Patterns go both ways, over a whole length, along a construction axis,
+  and leave copies out by number; Pattern Along a Path can follow a
+  clicked edge run. Bevel an Edge takes two distances or a distance and
+  an angle, Round and Bevel take several edges in one go, Shell leaves
+  several faces open with walls inside, outside or both, and Push/Pull can
+  carry sloping sides on along their slope (`follow_sides`).
+- **Construct and Inspect.** A plane touching a round part (worked out
+  from the part's own sizes, `construct.round_spot`), a plane along a
+  path, an axis along an edge, a point at an edge's end, and points where
+  three planes or an axis and a plane meet. Inspect adds the shortest
+  distance between parts (manifold3d's `min_gap`), a round face's radius,
+  an edge's length, and the centre of gravity and weight (by a chosen
+  material's density) in Volume and Area. The sketch window pans (right
+  or middle drag) and fits the whole drawing.
+- **Left as they are**, each with its reason in FOLLOWUPS: Draft on chosen
+  faces (a part's sides are not kept as named faces, so a choice of sides
+  could not be recorded to survive later changes), a thread on a tube (a
+  threaded cylinder grouped with a cylinder Hole already makes it, with
+  the Hole's fit), tapered pipe threads, joints, motion, linked copies,
+  sketch constraints and true curved surfaces.
 
 ## Project files
 

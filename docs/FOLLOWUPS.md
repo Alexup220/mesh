@@ -221,9 +221,11 @@ tools do the closest honest version of their Fusion counterparts:
   (at most 60 degrees), going away from its sketch's plane; a box, cylinder
   or tube becomes an Extrusion first (its base's outline pushed up its
   height), so a bottom chamfer is refused. Fusion's Draft slopes chosen faces
-  from any plane; here all the sides slope together from the sketch, and
-  other parts (a wedge, a group, a part with a pushed face) can't be sloped:
-  sketch the outline and extrude it instead. Each straight side moves in
+  from any plane; here all the sides slope together from the sketch (a
+  part's sides are not kept as named faces, so a choice of some of them
+  could not be kept through later changes to the sketch), and other parts
+  (a wedge, a group, a part with a pushed face) can't be sloped: sketch
+  the outline and extrude it instead. Each straight side moves in
   keeping its direction, so corners stay sharp and a round outline slopes as
   its many narrow flat sides. A sloped fitted Hole grows square to its sides
   with sharp corners (a straight one's corners are rounded). Stretching a
