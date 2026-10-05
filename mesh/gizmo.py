@@ -28,6 +28,15 @@ _PRIMITIVE_SCALE_TARGETS = {
     "sphere": {"diameter": "average"},
     "torus": {"diameter": "radial", "thickness": "average"},
     "tube": {"diameter": "radial", "wall": "radial", "height": "z"},
+    # The rounding radius keeps its size: it is a detail, not a dimension.
+    "rounded_box": {"width": "x", "depth": "y", "height": "z"},
+    "rounded_cylinder": {"diameter": "radial", "height": "z"},
+    "text": {"letter_height": "radial", "depth": "z"},
+    # Hardware holes keep their standard sizes; only how deep they go (and
+    # a magnet pocket's size, which is the magnet's own) follows a drag.
+    "screw_hole": {"depth": "z"},
+    "nut_trap": {"depth": "z"},
+    "magnet_pocket": {"diameter": "radial", "depth": "z"},
 }
 
 

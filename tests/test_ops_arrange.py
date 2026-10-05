@@ -106,3 +106,14 @@ def test_mirror_survives_a_rotation_read_write_round_trip():
     # The mirror must still be a mirror, not undone: the reflected
     # transform keeps a negative determinant on its rotation block.
     assert np.linalg.det(s.transform[:3, :3]) < 0.0
+
+
+def test_duplicate_of_a_group_gives_its_parts_new_ids():
+    from mesh.ops import make_group, ungroup
+
+    group = make_group([new_primitive("cube"), new_primitive("sphere")])
+    clone = duplicate(group)
+    original_ids = {c.id for c in ungroup(group)}
+    clone_ids = {c.id for c in ungroup(clone)}
+    assert len(clone_ids) == 2
+    assert not original_ids & clone_ids

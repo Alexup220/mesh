@@ -126,7 +126,7 @@ def _box_missing_one_triangle() -> trimesh.Trimesh:
 def test_export_refuses_an_unrepairable_open_mesh(tmp_path, monkeypatch):
     import mesh.ops
 
-    monkeypatch.setattr(mesh.ops, "evaluate", lambda shapes: _open_sheet())
+    monkeypatch.setattr(mesh.ops, "evaluate", lambda shapes, **_kw: _open_sheet())
 
     scene = Scene()
     scene.add(cube())
@@ -148,7 +148,7 @@ def test_export_refuses_an_unrepairable_open_mesh(tmp_path, monkeypatch):
 def test_export_repairs_a_mesh_with_one_missing_triangle(tmp_path, monkeypatch):
     import mesh.ops
 
-    monkeypatch.setattr(mesh.ops, "evaluate", lambda shapes: _box_missing_one_triangle())
+    monkeypatch.setattr(mesh.ops, "evaluate", lambda shapes, **_kw: _box_missing_one_triangle())
 
     scene = Scene()
     scene.add(cube())

@@ -6,6 +6,7 @@ save/load, and the numeric inspector correct by construction.
 """
 
 import copy
+import math
 import uuid
 from dataclasses import dataclass, field
 
@@ -18,6 +19,38 @@ DEFAULT_BUILD_VOLUME = (220.0, 220.0, 250.0)
 DEFAULT_SNAP_MM = 1.0
 DEFAULT_COLOR = "#4a90d9"
 
+# How snugly a Hole fits whatever goes into it. The clearance (mm) is added
+# on every side of the hole when its geometry is evaluated, so a 10 mm hole
+# with a 0.2 mm "snug" clearance comes out 10.4 mm across. "exact" adds
+# nothing and is what every shape -- and every project saved before fits
+# existed -- starts as.
+FITS = {
+    "exact": "Exact",
+    "press": "Press fit",
+    "snug": "Snug fit",
+    "loose": "Loose fit",
+}
+DEFAULT_FIT = "exact"
+DEFAULT_FIT_CLEARANCES = {"press": 0.1, "snug": 0.2, "loose": 0.4}
+MAX_FIT_CLEARANCE = 2.0  # mm per side; the Fit clearances dialog allows no more
+
+
+def _read_fit_clearances(raw) -> dict:
+    """The fit clearances from a project file. Anything missing, damaged or
+    out of range falls back to the default for that fit, so a hand-edited
+    file still opens and never gives a hole a negative or endless size."""
+    clearances = dict(DEFAULT_FIT_CLEARANCES)
+    if not isinstance(raw, dict):
+        return clearances
+    for key in DEFAULT_FIT_CLEARANCES:
+        try:
+            value = float(raw[key])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(value) and 0.0 <= value <= MAX_FIT_CLEARANCE:
+            clearances[key] = value
+    return clearances
+
 
 @dataclass
 class Shape:
@@ -29,6 +62,7 @@ class Shape:
     color: str = DEFAULT_COLOR
     is_hole: bool = False
     visible: bool = True
+    fit: str = DEFAULT_FIT
 
     def to_dict(self) -> dict:
         return {
@@ -40,6 +74,7 @@ class Shape:
             "color": self.color,
             "is_hole": self.is_hole,
             "visible": self.visible,
+            "fit": self.fit,
         }
 
     @classmethod
@@ -53,6 +88,7 @@ class Shape:
             color=d.get("color", DEFAULT_COLOR),
             is_hole=d.get("is_hole", False),
             visible=d.get("visible", True),
+            fit=d.get("fit", DEFAULT_FIT) if d.get("fit") in FITS else DEFAULT_FIT,
         )
 
 
@@ -74,6 +110,7 @@ class Scene:
     selection: list[str] = field(default_factory=list)
     build_volume: tuple[float, float, float] = DEFAULT_BUILD_VOLUME
     snap_mm: float = DEFAULT_SNAP_MM
+    fit_clearances: dict = field(default_factory=lambda: dict(DEFAULT_FIT_CLEARANCES))
 
     def add(self, shape: Shape) -> None:
         self.shapes.append(shape)
@@ -103,6 +140,7 @@ class Scene:
             "selection": list(self.selection),
             "build_volume": list(self.build_volume),
             "snap_mm": self.snap_mm,
+            "fit_clearances": dict(self.fit_clearances),
         }
 
     @classmethod
@@ -112,6 +150,7 @@ class Scene:
             selection=list(d.get("selection", [])),
             build_volume=tuple(d.get("build_volume", DEFAULT_BUILD_VOLUME)),
             snap_mm=d.get("snap_mm", DEFAULT_SNAP_MM),
+            fit_clearances=_read_fit_clearances(d.get("fit_clearances")),
         )
 
 

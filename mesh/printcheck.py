@@ -6,8 +6,11 @@ and deliberately avoid modeling jargon.
 
 from dataclasses import dataclass
 
-from mesh.ops import NothingToCombineError, evaluate
+import numpy as np
+
+from mesh.ops import HasGapsError, NothingLeftError, NothingToCombineError, evaluate
 from mesh.scene import Scene
+from mesh.shapes import shape_geometry
 
 
 @dataclass
@@ -50,15 +53,35 @@ def check(scene: Scene, revision: object = None) -> Report:
 def _check(scene: Scene) -> Report:
     visible = [s for s in scene.shapes if s.visible]
     try:
-        result = evaluate(visible)
-    except NothingToCombineError:
+        result = evaluate(visible, clearances=scene.fit_clearances)
+    except HasGapsError:
+        # A part that isn't closed can't be combined with the rest; say so
+        # with the overall size rather than fail.
+        bounds = np.array([shape_geometry(s, scene.fit_clearances).bounds for s in visible])
+        size = tuple(float(v) for v in bounds[:, 1].max(axis=0) - bounds[:, 0].min(axis=0))
+        return Report(
+            empty=False,
+            watertight=False,
+            size_mm=size,
+            volume_mm3=0.0,
+            fits=all(s <= b for s, b in zip(size, scene.build_volume)),
+            message=(
+                f"{size[0]:.1f} x {size[1]:.1f} x {size[2]:.1f} mm — this model has gaps "
+                "and may not print correctly."
+            ),
+        )
+    except NothingToCombineError as exc:
+        if isinstance(exc, NothingLeftError):
+            message = "The holes cut away everything — nothing is left to print."
+        else:
+            message = "Nothing to print yet — add a shape."
         return Report(
             empty=True,
             watertight=True,
             size_mm=(0.0, 0.0, 0.0),
             volume_mm3=0.0,
             fits=True,
-            message="Nothing to print yet — add a shape.",
+            message=message,
         )
 
     size = tuple(float(v) for v in (result.bounds[1] - result.bounds[0]))

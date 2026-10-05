@@ -4,6 +4,7 @@ Every mutating action snapshots the document first, mutates, then syncs.
 Keeping that order uniform is what makes undo trustworthy.
 """
 
+import copy
 import sys
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QTimer, Qt
 
-from mesh import ops
+from mesh import builders, hardware, ops, panels
 from mesh.gizmo import Gizmo
 from mesh.io_formats import (
     EXPORT_EXTS,
@@ -34,8 +35,9 @@ from mesh.io_formats import (
 )
 from mesh.panels import Inspector, ShapeShelf
 from mesh.printcheck import check
-from mesh.scene import Document, new_primitive, transform_with_euler
+from mesh.scene import MAX_FIT_CLEARANCE, Document, new_primitive, transform_with_euler
 from mesh.shapes import shape_geometry
+from mesh.text import has_letters
 from mesh.viewport import Viewport
 
 
@@ -52,6 +54,15 @@ class MeshWindow(QMainWindow):
         self.setCentralWidget(self.viewport)
         self.viewport.set_scene(self.document.scene)
         self.viewport.picked.connect(self._on_picked)
+        self.viewport.surface_picked.connect(self._on_surface_picked)
+        # Which click-on-a-part tool is active: None, "lay_flat", "place"
+        # or "measure". See start_tool / stop_tool.
+        self.tool: str | None = None
+        # Where "Place on face" will put the next added shape:
+        # (world point, face direction), or None until a face is clicked.
+        self._place_target = None
+        # The Measure tool's clicked points (0, 1 or 2 world points).
+        self._measure_points: list = []
 
         self.gizmo = Gizmo(self.viewport, self)
         self.gizmo.changing.connect(lambda: self.document.snapshot("move"))
@@ -112,6 +123,7 @@ class MeshWindow(QMainWindow):
         edit = self.menuBar().addMenu("&Edit")
         self.act_undo = self._act(edit, "&Undo", "Ctrl+Z", self.do_undo)
         self.act_redo = self._act(edit, "&Redo", "Ctrl+Shift+Z", self.do_redo)
+        self.act_stop_tool = self._act(edit, "Stop Current Tool", "Esc", self.stop_tool)
         edit.addSeparator()
         self.act_duplicate = self._act(edit, "&Duplicate", "Ctrl+D", self.do_duplicate)
         self.act_delete = self._act(edit, "De&lete", "Delete", self.do_delete)
@@ -121,6 +133,20 @@ class MeshWindow(QMainWindow):
         self.act_group = self._act(shape, "&Group", "Ctrl+G", self.do_group)
         self.act_ungroup = self._act(shape, "&Ungroup", "Ctrl+Shift+G", self.do_ungroup)
         self._act(shape, "Make &Hole / Solid", "H", self.do_toggle_hole)
+        self._act(shape, "Fit clearances...", None, self.do_edit_fit_clearances)
+        shape.addSeparator()
+        self.act_lay_flat = self._act(shape, "&Lay Flat on a Face", "L", self.start_lay_flat)
+        self.act_place = self._act(shape, "&Place Next Shape on a Face", "P", self.toggle_place_on_face)
+        self.act_place.setCheckable(True)
+        shape.addSeparator()
+        self._act(shape, "Hollow &Out...", None, self.do_hollow)
+        self._act(shape, "S&plit Part...", None, self.do_split)
+        shape.addSeparator()
+        self._act(shape, "Repeat in a &Row...", None, self.do_repeat_row)
+        self._act(shape, "Repeat in a &Circle...", None, self.do_repeat_circle)
+        shape.addSeparator()
+        self._act(shape, "Box with &Lid...", None, self.do_box_with_lid)
+        self._act(shape, "Add &Text...", "T", self.do_add_text)
         shape.addSeparator()
         # Explicit Union/Subtract/Intersect: the secondary route to
         # ops.boolean, for a user who wants the operator directly instead
@@ -136,6 +162,18 @@ class MeshWindow(QMainWindow):
             for mode in ("min", "center", "max"):
                 self._act(shape, f"Align {axis.upper()} {mode}", None,
                           lambda _c=False, a=axis, m=mode: self.do_align(a, m))
+
+        holes = self.menuBar().addMenu("Add hard&ware hole")
+        self.hardware_menu = holes
+        for submenu_label, items in hardware.menu_presets():
+            submenu = holes.addMenu(submenu_label)
+            for label, primitive, params in items:
+                self._act(submenu, label, None,
+                          lambda _c=False, k=primitive, p=params: self.add_hardware(k, dict(p)))
+
+        tools = self.menuBar().addMenu("&Tools")
+        self.act_measure = self._act(tools, "&Measure", "M", self.toggle_measure)
+        self.act_measure.setCheckable(True)
 
         view = self.menuBar().addMenu("&View")
         self.act_view_home = self._act(view, "&Home", "Home", lambda: self.viewport.view_preset("home"))
@@ -181,9 +219,14 @@ class MeshWindow(QMainWindow):
         chosen = self.document.scene.selected()
         self.inspector.show_shape(chosen[0] if len(chosen) == 1 else None)
         if not keep_gizmo:
-            self.gizmo.attach(chosen[0] if len(chosen) == 1 else None)
+            # While a click tool waits, the drag handles stay away, or they
+            # would catch the click meant for the part.
+            self.gizmo.attach(chosen[0] if len(chosen) == 1 and self.tool is None else None)
         self.gizmo.snap_mm = self.document.scene.snap_mm
         self.update_status()
+        if self.tool is not None:
+            self.statusBar().setStyleSheet("")
+            self.statusBar().showMessage(self._tool_prompt())
 
     # Warm coral, readable on the dark theme's status bar background
     # (#1b1e22 -- see mesh/theme.py) without being alarm-red.
@@ -204,18 +247,40 @@ class MeshWindow(QMainWindow):
     # --- actions -------------------------------------------------------
 
     def add_primitive(self, kind: str) -> None:
+        self.add_shape(new_primitive(kind))
+
+    def add_shape(self, shape) -> None:
+        """Add one new shape as one undo step and select it. Every "add"
+        (shelf, hardware holes, text) comes through here."""
+        if self.tool == "place" and self._place_target is not None:
+            point, direction = self._place_target
+            # The new shape isn't in the scene yet, so placing it first
+            # changes nothing if it fails.
+            ops.place_on_face(shape, point, direction)
+            # One placement, then back to landing on the workplane.
+            self._clear_tool()
         self.document.snapshot("add")
-        shape = new_primitive(kind)
         self.document.scene.add(shape)
         self.document.scene.select([shape.id])
         self.sync()
 
+    def add_hardware(self, primitive: str, params: dict) -> None:
+        """Add a ready-made hardware Hole (see mesh/hardware.py)."""
+        shape = new_primitive(primitive, name=hardware.preset_name(primitive, params))
+        shape.params.update(params)
+        shape.is_hole = True
+        shape.fit = hardware.DEFAULT_FIT[primitive]
+        self.add_shape(shape)
+
     def do_undo(self) -> None:
         if self.document.undo():
+            # A clicked face or point belongs to the scene as it was.
+            self._clear_tool()
             self.sync()
 
     def do_redo(self) -> None:
         if self.document.redo():
+            self._clear_tool()
             self.sync()
 
     def do_select_all(self) -> None:
@@ -255,7 +320,7 @@ class MeshWindow(QMainWindow):
         if len(chosen) < 1:
             return
         try:
-            group = ops.make_group(chosen)
+            group = ops.make_group(chosen, clearances=self.document.scene.fit_clearances)
         except ops.NothingToCombineError as exc:
             self._warn("Cannot group", str(exc))
             return
@@ -274,7 +339,9 @@ class MeshWindow(QMainWindow):
         if len(chosen) < 1:
             return
         try:
-            group = ops.make_boolean_group(chosen, op)
+            group = ops.make_boolean_group(
+                chosen, op, clearances=self.document.scene.fit_clearances
+            )
         except ops.NothingToCombineError as exc:
             self._warn("Cannot combine", str(exc))
             return
@@ -299,6 +366,35 @@ class MeshWindow(QMainWindow):
         self.document.scene.select([s.id for s in restored])
         self.sync()
 
+    def set_fit_clearances(self, values: dict) -> bool:
+        """Change how much room Press / Snug / Loose fits add (mm per side).
+
+        One undo step. Returns False (and changes nothing, adds no undo
+        step) if a value is not a sensible clearance.
+        """
+        current = self.document.scene.fit_clearances
+        cleaned = {}
+        for key in current:
+            value = float(values.get(key, current[key]))
+            if not 0.0 <= value <= MAX_FIT_CLEARANCE:
+                self._warn(
+                    "Cannot change fits",
+                    f"A fit's clearance must be between 0 and {MAX_FIT_CLEARANCE:g} mm.",
+                )
+                return False
+            cleaned[key] = value
+        if cleaned == current:
+            return False
+        self.document.snapshot("fit clearances")
+        self.document.scene.fit_clearances = cleaned
+        self.sync()
+        return True
+
+    def do_edit_fit_clearances(self) -> None:
+        values = panels.ask_fit_clearances(self, self.document.scene.fit_clearances)
+        if values is not None:
+            self.set_fit_clearances(values)
+
     def do_mirror(self, axis: str) -> None:
         chosen = self.document.scene.selected()
         if not chosen:
@@ -314,6 +410,313 @@ class MeshWindow(QMainWindow):
             return
         self.document.snapshot("align")
         ops.align(chosen, axis, mode)
+        self.sync()
+
+    def _one_selected(self, what: str):
+        chosen = self.document.scene.selected()
+        if len(chosen) != 1:
+            self.statusBar().showMessage(f"Select one part to {what}.")
+            return None
+        return chosen[0]
+
+    def _replace_with(self, label: str, old, new_shapes) -> None:
+        """One undo step: swap `old` for the shapes a tool built."""
+        self.document.snapshot(label)
+        self.document.scene.remove([old.id])
+        for shape in new_shapes:
+            self.document.scene.add(shape)
+        self.document.scene.select([s.id for s in new_shapes])
+        self.sync()
+
+    def _attempt(self, title: str, build):
+        """Run a tool that might refuse. On refusal, say why and return None
+        -- before any snapshot, so a failure leaves no undo step behind."""
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            return build()
+        except (builders.BuildError, ops.NothingToCombineError) as exc:
+            error = str(exc)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._warn(title, error)
+        return None
+
+    def hollow_selected(self, wall: float, open_top: bool = False, drain: float = 0.0) -> bool:
+        shape = self._one_selected("hollow out")
+        if shape is None:
+            return False
+        scene = self.document.scene
+        group = self._attempt(
+            "Cannot hollow out",
+            lambda: builders.hollow(shape, wall, open_top, drain, scene.fit_clearances),
+        )
+        if group is None:
+            return False
+        self._replace_with("hollow out", shape, [group])
+        return True
+
+    def do_hollow(self) -> None:
+        shape = self._one_selected("hollow out")
+        if shape is None:
+            return
+        values = panels.ask_hollow(self, exact=builders.hollows_exactly(shape))
+        if values is not None:
+            self.hollow_selected(values["wall"], values.get("open_top", False), values["drain"])
+
+    def split_selected(
+        self, axis: str, distance: float, pegs: bool = False, peg_diameter: float = 4.0
+    ) -> bool:
+        """Cut the selected part `distance` mm in from its bottom (axis "z"),
+        left ("x") or front ("y") edge. One undo step on success."""
+        shape = self._one_selected("split")
+        if shape is None:
+            return False
+        scene = self.document.scene
+        low = shape_geometry(shape, scene.fit_clearances).bounds[0]["xyz".index(axis)]
+        halves = self._attempt(
+            "Cannot split",
+            lambda: builders.split(
+                shape, axis, low + float(distance), pegs, peg_diameter, scene.fit_clearances
+            ),
+        )
+        if halves is None:
+            return False
+        self._replace_with("split", shape, list(halves))
+        return True
+
+    def do_split(self) -> None:
+        shape = self._one_selected("split")
+        if shape is None:
+            return
+        tm = shape_geometry(shape, self.document.scene.fit_clearances)
+        values = panels.ask_split(self, tuple(float(v) for v in tm.bounds[1] - tm.bounds[0]))
+        if values is not None:
+            self.split_selected(
+                values["axis"], values["distance"], values["pegs"], values["peg_diameter"]
+            )
+
+    def _add_copies(self, label: str, shape, copies, new_transform=None) -> None:
+        """One undo step for a whole pattern."""
+        self.document.snapshot(label)
+        if new_transform is not None:
+            shape.transform = new_transform
+        for clone in copies:
+            self.document.scene.add(clone)
+        self.document.scene.select([shape.id] + [c.id for c in copies])
+        self.sync()
+
+    def repeat_row_selected(self, count: int, spacing: float, axis: str = "x") -> bool:
+        shape = self._one_selected("repeat")
+        if shape is None:
+            return False
+        copies = self._attempt(
+            "Cannot repeat", lambda: builders.repeat_row(shape, count, spacing, axis)
+        )
+        if copies is None:
+            return False
+        self._add_copies("repeat in a row", shape, copies)
+        return True
+
+    def repeat_circle_selected(self, count: int, radius: float, centre, angle: float = 360.0) -> bool:
+        shape = self._one_selected("repeat")
+        if shape is None:
+            return False
+        result = self._attempt(
+            "Cannot repeat",
+            lambda: builders.repeat_circle(shape, count, radius, centre, angle),
+        )
+        if result is None:
+            return False
+        transform, copies = result
+        self._add_copies("repeat in a circle", shape, copies, transform)
+        return True
+
+    def do_repeat_row(self) -> None:
+        if self._one_selected("repeat") is None:
+            return
+        values = panels.ask_repeat_row(self)
+        if values is not None:
+            self.repeat_row_selected(values["count"], values["spacing"], values["axis"])
+
+    def do_repeat_circle(self) -> None:
+        shape = self._one_selected("repeat")
+        if shape is None:
+            return
+        centre = shape_geometry(shape).bounds.mean(axis=0)
+        values = panels.ask_repeat_circle(self, (float(centre[0]), float(centre[1])))
+        if values is not None:
+            self.repeat_circle_selected(
+                values["count"], values["radius"],
+                (values["centre_x"], values["centre_y"]), values["angle"],
+            )
+
+    def make_box_with_lid(self, width, depth, height, wall, lid_height, fit="snug") -> bool:
+        """Add a box and its lid as one undo step."""
+        scene = self.document.scene
+        parts = self._attempt(
+            "Cannot make the box",
+            lambda: builders.box_with_lid(
+                width, depth, height, wall, lid_height, fit, scene.fit_clearances
+            ),
+        )
+        if parts is None:
+            return False
+        self.document.snapshot("box with lid")
+        for part in parts:
+            scene.add(part)
+        scene.select([p.id for p in parts])
+        self.sync()
+        return True
+
+    def add_text(self, text: str, letter_height: float = 10.0, depth: float = 2.0,
+                 engraved: bool = False) -> bool:
+        """Raised text is a solid; engraved text is a Hole. One undo step."""
+        if not has_letters(text):
+            self._warn("Cannot add text", "Type some text first.")
+            return False
+        shape = new_primitive("text", name=f"Text: {text}")
+        shape.params.update(text=text, letter_height=float(letter_height), depth=float(depth))
+        shape.is_hole = bool(engraved)
+        self.add_shape(shape)
+        return True
+
+    def do_add_text(self) -> None:
+        values = panels.ask_text(self)
+        if values is not None:
+            self.add_text(values["text"], values["letter_height"], values["depth"],
+                          values["style"] == "engraved")
+
+    def do_box_with_lid(self) -> None:
+        values = panels.ask_box_with_lid(self)
+        if values is not None:
+            self.make_box_with_lid(**values)
+
+    # --- click-on-a-part tools -----------------------------------------
+
+    TOOL_PROMPTS = {
+        "lay_flat": "Click the face of a part that should rest on the workplane. Esc cancels.",
+        "place": "Click a face of a part. The next shape you add will sit on it. Esc cancels.",
+        "place_ready": "Now add a shape. It will sit on the face you clicked. Esc cancels.",
+        "measure": "Click the first point on a part. Esc or Measure again to stop.",
+        "measure_second": "Now click the second point.",
+    }
+
+    def start_tool(self, tool: str) -> None:
+        """Wait for a click on a part. The gizmo is put away meanwhile so a
+        click on the selected part reaches the part, not the drag handles."""
+        self._clear_tool()
+        self.tool = tool
+        self.viewport.set_pick_mode(tool)
+        self.gizmo.attach(None)
+        self.statusBar().setStyleSheet("")
+        self.statusBar().showMessage(self.TOOL_PROMPTS[tool])
+
+    def _clear_tool(self) -> None:
+        self.tool = None
+        self._place_target = None
+        self._measure_points = []
+        self.viewport.set_pick_mode(None)
+        self.viewport.clear_measure_line()
+        for action in (self.act_place, self.act_measure):
+            action.blockSignals(True)
+            action.setChecked(False)
+            action.blockSignals(False)
+
+    def _tool_prompt(self) -> str:
+        if self.tool == "place" and self._place_target is not None:
+            return self.TOOL_PROMPTS["place_ready"]
+        if self.tool == "measure" and len(self._measure_points) == 1:
+            return self.TOOL_PROMPTS["measure_second"]
+        return self.TOOL_PROMPTS[self.tool]
+
+    def stop_tool(self) -> None:
+        if self.tool is None:
+            return
+        self._clear_tool()
+        self.sync()
+
+    def toggle_place_on_face(self, checked: bool = True) -> None:
+        if not checked:
+            self.stop_tool()
+            return
+        if not self.document.scene.shapes:
+            self.act_place.setChecked(False)
+            self.statusBar().showMessage("Add a part first, then place shapes on its faces.")
+            return
+        self.start_tool("place")
+        self.act_place.blockSignals(True)
+        self.act_place.setChecked(True)
+        self.act_place.blockSignals(False)
+
+    def toggle_measure(self, checked: bool = True) -> None:
+        """Measure never changes the scene: no snapshot, no edit."""
+        if not checked:
+            self.stop_tool()
+            return
+        self.start_tool("measure")
+        self.act_measure.blockSignals(True)
+        self.act_measure.setChecked(True)
+        self.act_measure.blockSignals(False)
+
+    def _measure_picked(self, shape_id: str, point) -> None:
+        if not shape_id:
+            return
+        point = np.asarray(point, dtype=np.float64)
+        if len(self._measure_points) != 1:
+            # First click, or a fresh measurement after a finished one.
+            self._measure_points = [point]
+            self.viewport.clear_measure_line()
+            self.statusBar().showMessage(self.TOOL_PROMPTS["measure_second"])
+            return
+        first = self._measure_points[0]
+        self._measure_points = [first, point]
+        self.viewport.set_measure_line(first, point)
+        self.statusBar().showMessage(
+            f"Distance: {ops.distance(first, point):.2f} mm. "
+            "Click again to measure something else, Esc to stop."
+        )
+
+    def start_lay_flat(self) -> None:
+        if not self.document.scene.shapes:
+            self.statusBar().showMessage("Add a part first, then lay it flat.")
+            return
+        self.start_tool("lay_flat")
+
+    def _on_surface_picked(self, shape_id: str, face_index: int, point) -> None:
+        if self.tool == "lay_flat":
+            self._lay_flat_picked(shape_id, face_index)
+        elif self.tool == "place":
+            self._place_picked(shape_id, face_index, point)
+        elif self.tool == "measure":
+            self._measure_picked(shape_id, point)
+
+    def _place_picked(self, shape_id: str, face_index: int, point) -> None:
+        """Remember the clicked face; nothing in the scene changes until a
+        shape is actually added, so this takes no undo step."""
+        scene = self.document.scene
+        try:
+            direction = ops.face_direction(scene.get(shape_id), face_index, scene.fit_clearances)
+        except (KeyError, IndexError):
+            self.statusBar().showMessage(self.TOOL_PROMPTS["place"])
+            return
+        self._place_target = (np.asarray(point, dtype=np.float64), direction)
+        self.statusBar().showMessage(self.TOOL_PROMPTS["place_ready"])
+
+    def _lay_flat_picked(self, shape_id: str, face_index: int) -> None:
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+            direction = ops.face_direction(shape, face_index, scene.fit_clearances)
+            # Attempt on a copy first: a failure leaves no undo step behind.
+            turned = copy.deepcopy(shape)
+            ops.lay_flat(turned, direction)
+        except (KeyError, IndexError, ValueError):
+            self.statusBar().showMessage("Click on a face of a part. Esc cancels.")
+            return
+        self.document.snapshot("lay flat")
+        shape.transform = turned.transform
+        scene.select([shape.id])
+        self._clear_tool()
         self.sync()
 
     # --- signals -------------------------------------------------------
@@ -344,6 +747,8 @@ class MeshWindow(QMainWindow):
 
         if field == "is_hole":
             shape.is_hole = bool(value)
+        elif field == "fit":
+            shape.fit = str(value)
         elif field == "color":
             shape.color = str(value)
         elif field in ("x", "y", "z"):
@@ -366,13 +771,32 @@ class MeshWindow(QMainWindow):
             shape.transform = transform_with_euler(
                 transform, angles["rx"], angles["ry"], angles["rz"]
             )
+        elif isinstance(value, str):
+            # A drop-down choice (screw size, head) or typed text.
+            shape.params[field] = value
         else:
+            if field == "depth" and self._opens_at_top(shape):
+                # A hardware hole or engraved text is measured down from its
+                # opening: keep the opening where it is (flush with the face
+                # it was placed on) and move the bottom instead.
+                old = float(shape.params.get("depth", value))
+                lift = np.eye(4, dtype=np.float64)
+                lift[2, 3] = old - float(value)
+                shape.transform = np.asarray(shape.transform, dtype=np.float64) @ lift
             shape.params[field] = float(value)
 
         # Defer the expensive part (snapshot already happened above, once
         # per burst) until typing pauses. Every keystroke restarts the
         # window instead of firing sync() itself.
         self._edit_timer.start()
+
+    OPENS_AT_TOP = ("screw_hole", "nut_trap", "magnet_pocket", "text")
+
+    def _opens_at_top(self, shape) -> bool:
+        return (
+            shape.is_hole and shape.kind == "primitive"
+            and shape.params.get("primitive") in self.OPENS_AT_TOP
+        )
 
     def _finish_edit(self) -> None:
         """Fires once, EDIT_COALESCE_MS after the last keystroke in a burst
@@ -400,6 +824,8 @@ class MeshWindow(QMainWindow):
         # empty document) was open before rather than leaving the window
         # half-switched to a document it couldn't actually display.
         previous_document = self.document
+        # A clicked face or measured point belongs to the old project.
+        self._clear_tool()
         self.document = new_document
         try:
             self.sync()

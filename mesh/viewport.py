@@ -28,21 +28,24 @@ from PySide6.QtWidgets import QApplication, QSizePolicy, QVBoxLayout, QWidget
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtkmodules.vtkCommonCore import vtkPoints
 from vtkmodules.vtkCommonDataModel import vtkCellArray, vtkPolyData
-from vtkmodules.vtkFiltersSources import vtkPlaneSource
+from vtkmodules.vtkFiltersSources import vtkLineSource, vtkPlaneSource
 from vtkmodules.vtkInteractionStyle import vtkInteractorStyleTrackballCamera
 from vtkmodules.vtkRenderingCore import (
     vtkActor,
+    vtkCellPicker,
     vtkPolyDataMapper,
     vtkPropPicker,
     vtkRenderer,
 )
 
 from mesh.scene import Scene
-from mesh.shapes import shape_geometry
+from mesh.shapes import hole_clearance, shape_geometry
 
 HOLE_OPACITY = 0.35
 BACKGROUND = (0.16, 0.17, 0.20)
 GRID_COLOR = (0.50, 0.53, 0.58)
+MEASURE_COLOR = (1.0, 0.85, 0.2)
+MEASURE_LINE_WIDTH = 4.0  # pixels
 
 VIEW_PRESETS = {
     "home": ((1.0, -1.0, 0.8), (0.0, 0.0, 1.0)),
@@ -90,6 +93,10 @@ def _headless() -> bool:
 
 class Viewport(QWidget):
     picked = Signal(str, bool)
+    # (shape id or "", triangle index or -1, world point (x, y, z)) -- sent
+    # instead of `picked` while a surface tool (Lay flat, Place on face,
+    # Measure) is waiting for a click on a part.
+    surface_picked = Signal(str, int, object)
 
     def _render(self) -> None:
         if _headless():
@@ -127,11 +134,31 @@ class Viewport(QWidget):
         self.renderer.SetBackground(*BACKGROUND)
         self._widget.GetRenderWindow().AddRenderer(self.renderer)
 
+        # A second layer drawn on top of the parts, sharing their camera,
+        # for the Measure line. Its two points are on a part's surface, so
+        # the line lies on or inside the part: in the parts' own layer it
+        # was hidden inside them or fought with the surface down to a 1 px
+        # sliver.
+        window = self._widget.GetRenderWindow()
+        window.SetNumberOfLayers(2)
+        self.overlay = vtkRenderer()
+        self.overlay.SetLayer(1)
+        self.overlay.InteractiveOff()
+        self.overlay.SetActiveCamera(self.renderer.GetActiveCamera())
+        window.AddRenderer(self.overlay)
+
         self.interactor = self._widget.GetRenderWindow().GetInteractor()
         self.interactor.SetInteractorStyle(vtkInteractorStyleTrackballCamera())
         self.interactor.AddObserver("LeftButtonPressEvent", self._on_click)
 
         self._picker = vtkPropPicker()
+        self._cell_picker = vtkCellPicker()
+        self._cell_picker.SetTolerance(0.0005)
+        # None for normal click-to-select; any other value means the next
+        # click on a part is reported through surface_picked instead.
+        self.pick_mode: str | None = None
+        # The Measure tool's line between its two clicked points, or None.
+        self.measure_actor: vtkActor | None = None
         self._add_grid()
         # Position the camera now, but do NOT call Render() here: the
         # widget's native window is not mapped yet (this runs during
@@ -179,7 +206,11 @@ class Viewport(QWidget):
         triangles: its kind, its params, and its transform. Two calls with
         an equal key are guaranteed to produce the same polydata."""
         transform = np.asarray(shape.transform, dtype=np.float64)
-        return (shape.kind, repr(shape.params), transform.tobytes())
+        clearance = hole_clearance(shape, self._clearances())
+        return (shape.kind, repr(shape.params), transform.tobytes(), clearance)
+
+    def _clearances(self) -> dict | None:
+        return getattr(self._scene, "fit_clearances", None)
 
     def refresh(self) -> None:
         if self._scene is None:
@@ -204,7 +235,9 @@ class Viewport(QWidget):
 
             key = self._geometry_key(shape)
             if self._geometry_keys.get(shape.id) != key:
-                actor.GetMapper().SetInputData(_to_polydata(shape_geometry(shape)))
+                actor.GetMapper().SetInputData(
+                    _to_polydata(shape_geometry(shape, self._clearances()))
+                )
                 self._geometry_keys[shape.id] = key
 
             prop = actor.GetProperty()
@@ -216,8 +249,14 @@ class Viewport(QWidget):
 
         self._render()
 
+    def set_pick_mode(self, mode: str | None) -> None:
+        self.pick_mode = mode
+
     def _on_click(self, interactor, _event) -> None:
         x, y = interactor.GetEventPosition()
+        if self.pick_mode is not None:
+            self._on_surface_click(x, y)
+            return
         self._picker.Pick(x, y, 0, self.renderer)
         hit = self._picker.GetActor()
         additive = bool(interactor.GetShiftKey())
@@ -226,6 +265,45 @@ class Viewport(QWidget):
                 self.picked.emit(shape_id, additive)
                 return
         self.picked.emit("", additive)
+
+    def _on_surface_click(self, x: int, y: int) -> None:
+        self._cell_picker.Pick(x, y, 0, self.renderer)
+        hit = self._cell_picker.GetActor()
+        point = tuple(float(v) for v in self._cell_picker.GetPickPosition())
+        for shape_id, actor in self._actors.items():
+            if actor is hit:
+                self.surface_picked.emit(shape_id, int(self._cell_picker.GetCellId()), point)
+                return
+        self.surface_picked.emit("", -1, point)
+
+    def set_measure_line(self, a, b) -> None:
+        """Draw (or move) the Measure tool's line from a to b."""
+        if self.measure_actor is None:
+            self._measure_source = vtkLineSource()
+            mapper = vtkPolyDataMapper()
+            mapper.SetInputConnection(self._measure_source.GetOutputPort())
+            actor = vtkActor()
+            actor.SetMapper(mapper)
+            prop = actor.GetProperty()
+            prop.SetColor(*MEASURE_COLOR)
+            # Drawn as a flat-coloured tube a few pixels wide: plain wide
+            # lines are not supported by every graphics driver.
+            prop.SetLineWidth(MEASURE_LINE_WIDTH)
+            prop.SetRenderLinesAsTubes(True)
+            prop.LightingOff()
+            actor.PickableOff()
+            self.overlay.AddActor(actor)
+            self.measure_actor = actor
+        self._measure_source.SetPoint1(*(float(v) for v in a))
+        self._measure_source.SetPoint2(*(float(v) for v in b))
+        self._measure_source.Update()
+        self._render()
+
+    def clear_measure_line(self) -> None:
+        if self.measure_actor is not None:
+            self.overlay.RemoveActor(self.measure_actor)
+            self.measure_actor = None
+            self._render()
 
     def view_preset(self, name: str) -> None:
         if name not in VIEW_PRESETS:

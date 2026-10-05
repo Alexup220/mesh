@@ -135,6 +135,7 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/bd/4e/e59e889dc225f5656915f0c55f56bad6d924c11e38cbec04d66641dabd33/manifold3d-3.5.3-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:91fba34aa7eee993034888c4e1f9b0d377672fb857cdeb20613aee0f5f893de1", size = 1317925, upload-time = "2026-09-07T09:38:17.143Z" },
     { url = "https://files.pythonhosted.org/packages/8a/80/8d8711718b1203d722493c5b507d9bbf34c3fb116e4c32b9278287ae4bfd/manifold3d-3.5.3-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:1d7f8bfc3b04e383fa172dee648f8c98a1d11b3b758e999ab6c3a2af19711359", size = 1427176, upload-time = "2026-09-07T09:38:18.682Z" },
     { url = "https://files.pythonhosted.org/packages/11/67/1a7a9bf5f701fe1b93003be19ba0d2d4235ab6756ea98ef9c29967695483/manifold3d-3.5.3-cp312-cp312-win_amd64.whl", hash = "sha256:c0fabc63e2f3b96ab0a24b8583a7a5ef0e2b9a3feddbb65fe9d450a8b983f831", size = 1036097, upload-time = "2026-09-07T09:38:20.114Z" },
+    { url = "https://files.pythonhosted.org/packages/12/41/53b3e46ec994e9f5fdb2006dc9f51edc9bf45c2502753c40dcee13e0ffa7/manifold3d-3.5.3-cp312-cp312-win_arm64.whl", hash = "sha256:f5f9a9118bbe67eabe98cca18361575d1b391a137bcf202dae78211fc514c8d5", size = 1123419, upload-time = "2026-09-17T00:22:57.057Z" },
 ]
 
 [[package]]
@@ -168,6 +169,7 @@ name = "mesh"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fonttools" },
     { name = "lxml" },
     { name = "manifold3d" },
     { name = "networkx" },
@@ -187,6 +189,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fonttools", specifier = "==4.64.0" },
     { name = "lxml", specifier = ">=5.0" },
     { name = "manifold3d", specifier = ">=2.5" },
     { name = "networkx", specifier = ">=3.0" },
