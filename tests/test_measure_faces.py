@@ -223,10 +223,82 @@ def test_turning_expert_mode_off_puts_the_measurements_away(window, qapp):
     assert window.tool is None and not window.measure_window.isVisible()
 
 
+# --- The shortest distance between two parts ---------------------------------------------
+
+
+def at(kind, x=0.0, y=0.0, z=0.0):
+    shape = new_primitive(kind)
+    shape.transform[:3, 3] = (x, y, z)
+    return shape
+
+
+def test_the_shortest_distance_between_two_parts():
+    found = measure.gap(at("cube"), at("cube", 35.0))
+    assert found.distance == pytest.approx(15.0) and not found.overlap
+    corner = measure.gap(at("cube"), at("cube", 30.0, 30.0, 30.0))  # corner to corner
+    assert corner.distance == pytest.approx(np.sqrt(3 * 10.0 ** 2))
+    ball = measure.gap(at("cube"), at("sphere", 0.0, 0.0, 25.0))  # the ball's bottom is 5 above the box
+    assert ball.distance == pytest.approx(5.0, abs=0.05)
+
+
+def test_parts_that_touch_or_overlap_have_no_gap():
+    touching = measure.gap(at("cube"), at("cube", 20.0))
+    assert touching.distance == pytest.approx(0.0) and not touching.overlap
+    inside = at("cube", 0.0, 0.0, 5.0)
+    inside.params.update(width=4.0, depth=4.0, height=4.0)
+    for other in (at("cube", 10.0), inside):
+        found = measure.gap(at("cube"), other)
+        assert found.overlap and found.distance == 0.0
+
+
+def test_a_fitted_hole_is_measured_as_drawn():
+    hole = at("cube", 35.0)
+    hole.is_hole, hole.fit = True, "loose"
+    assert measure.gap(at("cube"), hole, {"press": 0.1, "snug": 0.2, "loose": 0.4}).distance == pytest.approx(14.6)
+
+
+def test_the_distance_needs_two_closed_parts(monkeypatch):
+    box = at("cube")
+    for other, expected in ((construct.new_point((50, 0, 0)), "is a guide, not a part"),
+                            (box, "two different parts")):
+        with pytest.raises(BuildError) as err:
+            measure.gap(box, other)
+        assert expected in str(err.value)
+        assert_plain(str(err.value))
+    tm = shape_geometry(box)
+    open_box = trimesh.Trimesh(vertices=tm.vertices, faces=tm.faces[:-2], process=False)
+    monkeypatch.setattr(measure, "shape_geometry", lambda shape, clearances=None: open_box)
+    with pytest.raises(BuildError) as err:
+        measure.gap(box, at("cube", 50.0))
+    assert str(err.value) == f"{box.name} has gaps in its surface, so the distance to it can't be measured."
+
+
+def test_describing_the_distance():
+    text = measure.describe_gap("Box 1", "Box 2", measure.Gap(15.0, False))
+    assert text.startswith("Shortest distance between Box 1 and Box 2: 15.00 mm.")
+    assert "touch" in measure.describe_gap("A", "B", measure.Gap(0.0, False))
+    assert "overlap" in measure.describe_gap("A", "B", measure.Gap(0.0, True))
+    for found in (measure.Gap(15.0, False), measure.Gap(0.0, False), measure.Gap(0.0, True)):
+        assert_plain(measure.describe_gap("Box 1", "Box 2", found))
+
+
+def test_the_shortest_distance_between_the_selected_parts(window, warnings):
+    a, b = add(window, "cube"), add(window, "cube", 32.0)
+    window.do_measure_gap()
+    assert window.statusBar().currentMessage() == window.GAP_HINT
+    window.document.scene.select([a.id, b.id])
+    steps, revision = len(window.document._undo), window.document.revision
+    window.do_measure_gap()
+    assert window.measure_window.text().startswith(f"Shortest distance between {a.name} and {b.name}: 12.00 mm.")
+    assert window.measure_window.windowTitle() == "Shortest Distance"
+    assert len(window.document._undo) == steps and window.document.revision == revision and not warnings
+
+
 def test_measure_text_is_plain_language():
     from mesh.inspect_actions import InspectActions
 
     for text in (*InspectActions.INSPECT_TOOL_PROMPTS.values(), InspectActions.MEASURE_AGAIN,
-                 InspectActions.VOLUME_HINT, *(t.tip for t in TOOLS if t.menu == "inspect"),
+                 InspectActions.VOLUME_HINT, InspectActions.GAP_HINT, measure.GAP_NOTE, measure.OPEN_SURFACE,
+                 *(t.tip for t in TOOLS if t.menu == "inspect"),
                  *(t.label for t in TOOLS if t.menu == "inspect")):
         assert_plain(text)

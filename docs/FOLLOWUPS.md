@@ -263,9 +263,14 @@ reflected. What differs from Fusion is how the pattern is chosen.
   faces (within 2 mm of a corner, from the corner). A click on a round
   surface lands on one of its narrow flat strips, so the "face area" is
   that strip's and the angle is the strip's. The angle is between the
-  faces' planes (0 to 90 degrees). Fusion's measuring of edges, of a round
-  face's radius and of the shortest distance between two parts is not
-  offered.
+  faces' planes (0 to 90 degrees). Fusion's measuring of edges and of a
+  round face's radius is not offered.
+- **Shortest Distance Between Parts** measures two selected parts as they
+  are drawn (a Hole at its fit), so next to a round surface, made of flat
+  strips, it can be slightly off the true distance. It gives the distance
+  only: the two nearest points are not shown, and parts that touch or
+  overlap are said to (Fusion draws the nearest points). A part with gaps
+  in its surface can't be measured.
 - **Volume and Area** measures the selected parts as they would print
   together (overlaps once, selected Holes cut out). Fusion's mass and
   centre of gravity are not offered.

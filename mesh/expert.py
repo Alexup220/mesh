@@ -363,6 +363,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "print together.",
         "do_measure_volume",
     ),
+    ExpertTool(
+        "measure_gap", "inspect", "Shortest &Distance Between Parts",
+        "Select two parts to see the shortest distance between them, or whether they touch or "
+        "overlap. It is measured on the parts as drawn, so near round surfaces, made of narrow "
+        "flat strips, it can be slightly off.",
+        "do_measure_gap",
+    ),
 )
 
 

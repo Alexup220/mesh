@@ -1,6 +1,6 @@
 """Measuring for Expert mode's Inspect menu: between two clicked faces
-(distance, angle, gap and each face's area) and the selected parts'
-volume, surface area and size.
+(distance, angle, gap and each face's area), the shortest distance
+between two parts, and the selected parts' volume, surface area and size.
 
 Measuring never changes anything. The beginner Measure tool (distance
 between two clicks, in mesh.app) is unchanged.
@@ -13,7 +13,8 @@ import numpy as np
 from mesh import construct, ops
 from mesh.builders import BuildError
 from mesh.modify import flat_face
-from mesh.shapes import is_reference
+from mesh.shapes import is_reference, shape_geometry
+from mesh.solids import m3, to_manifold
 
 PARALLEL = 0.01  # degrees: faces this close to parallel are parallel
 
@@ -78,6 +79,51 @@ def describe(first: Clicked, second: Clicked) -> str:
 
 
 HAS_GAPS = "{name} has gaps, so it has no inside to measure."
+
+
+# --- The shortest distance between two parts -------------------------------------------
+
+
+@dataclass(frozen=True)
+class Gap:
+    distance: float  # the shortest distance between their surfaces (0 if they touch or overlap)
+    overlap: bool    # they share some space (or one is inside the other)
+
+
+GAP_NOTE = ("Measured on the parts as drawn: round surfaces are narrow flat strips, so near them "
+            "it can be slightly off.")
+OPEN_SURFACE = "{name} has gaps in its surface, so the distance to it can't be measured."
+
+
+def gap(first, second, clearances: dict | None = None) -> Gap:
+    """The shortest distance between two parts, as drawn (a Hole at its fit)."""
+    if first.id == second.id:
+        raise BuildError("Select two different parts.")
+    solids, bounds = [], []
+    for shape in (first, second):
+        if is_reference(shape):
+            raise BuildError(f"{shape.name} is a guide, not a part. Select two parts.")
+        tm = shape_geometry(shape, clearances)
+        solid = to_manifold(tm)
+        if solid.status() != m3.Error.NoError or solid.is_empty():
+            raise BuildError(OPEN_SURFACE.format(name=shape.name))
+        solids.append(solid)
+        bounds.append(tm.bounds)
+    both = np.vstack(bounds)
+    search = float(np.linalg.norm(both.max(axis=0) - both.min(axis=0))) + 1.0
+    if (solids[0] ^ solids[1]).volume() > 1e-6:
+        return Gap(0.0, True)
+    return Gap(float(solids[0].min_gap(solids[1], search)), False)
+
+
+def describe_gap(first_name: str, second_name: str, found: Gap) -> str:
+    if found.overlap:
+        head = f"{first_name} and {second_name} overlap: they share some space, so there is no gap between them."
+    elif found.distance < 1e-6:
+        head = f"{first_name} and {second_name} touch: the shortest distance between them is 0.00 mm."
+    else:
+        head = f"Shortest distance between {first_name} and {second_name}: {found.distance:.2f} mm."
+    return f"{head}\n{GAP_NOTE}"
 
 
 def amount(shapes, clearances: dict | None = None) -> Amount:

@@ -166,3 +166,21 @@ class InspectActions:
 
     def do_measure_volume(self) -> None:
         self.measure_selected()
+
+    GAP_HINT = "Select two parts to measure the shortest distance between them."
+
+    def measure_gap_selected(self) -> bool:
+        """The shortest distance between the two selected parts."""
+        parts = [s for s in self._picked() if not is_reference(s)]
+        if len(parts) != 2:
+            self.statusBar().showMessage(self.GAP_HINT)
+            return False
+        first, second = parts
+        found = self._attempt("Cannot measure", lambda: measure.gap(first, second, self.document.scene.fit_clearances))
+        if found is None:
+            return False
+        self._show_measurement("Shortest Distance", measure.describe_gap(first.name, second.name, found))
+        return True
+
+    def do_measure_gap(self) -> None:
+        self.measure_gap_selected()
