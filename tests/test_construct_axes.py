@@ -247,6 +247,73 @@ def test_an_axis_round_trips_through_a_project_file(tmp_path):
     assert loaded.params == guide.params
 
 
+# --- Along a clicked edge -----------------------------------------------------------------
+
+
+def test_an_axis_along_the_edge_nearest_the_click():
+    box = new_primitive("cube")
+    top = face_towards(box, (0, 0, 1))
+    made = construct.axis_along_edge(box, top, (3, -9.5, 20))  # by the front edge of the top
+    assert axis(made) == [[0, -10, 20], [1, 0, 0]] and made.params["length"] == 60.0
+    side = face_towards(box, (1, 0, 0))
+    assert axis(construct.axis_along_edge(box, side, (10, 9.5, 4)))[1] == [0, 0, 1]  # pointing up
+
+
+def test_an_edge_split_in_pieces_is_one_straight_edge():
+    from mesh import ops
+
+    left, right = new_primitive("cube"), new_primitive("cube")
+    right.transform[0, 3] = 20.0
+    joined = ops.make_group([left, right])  # one 40 mm long box, its long edges in two pieces
+    tm = shape_geometry(joined)
+    top = int(np.flatnonzero(tm.face_normals[:, 2] > 0.999)[0])
+    edge = construct.edge_at(joined, top, (25.0, -9.8, 20.0))
+    assert sorted([edge.start[0], edge.end[0]]) == [-10, 30] and edge.straight
+    assert axis(construct.axis_along_edge(joined, top, (25.0, -9.8, 20.0))) == [[10, -10, 20], [1, 0, 0]]
+
+
+def test_on_a_round_edge_the_axis_runs_along_the_piece_clicked():
+    cylinder = new_primitive("cylinder")
+    top = face_towards(cylinder, (0, 0, 1))
+    edge = construct.edge_at(cylinder, top, (9.9, 0.4, 20.0))
+    assert edge.closed and not edge.straight
+    assert edge.run_length == pytest.approx(2 * np.pi * 10, rel=1e-3)
+    point, direction = axis(construct.axis_along_edge(cylinder, top, (9.9, 0.4, 20.0)))
+    assert direction[2] == 0 and np.hypot(point[0], point[1]) == pytest.approx(10 * np.cos(np.pi / 64))
+    assert point[2] == 20
+
+
+def test_an_edge_needs_a_sharp_edge_on_a_part():
+    with pytest.raises(BuildError) as err:
+        construct.axis_along_edge(new_primitive("sphere"), 0, (0, 0, 0))
+    assert "no sharp edge" in str(err.value)
+    assert_plain(str(err.value))
+    with pytest.raises(BuildError):
+        construct.axis_along_edge(construct.new_point((0, 0, 0)), 0, (0, 0, 0))
+
+
+def test_an_axis_along_a_clicked_edge_is_one_undo_step(window, qapp, tmp_path):
+    box = add(window, "cube")
+    window.add_primitive("sphere")
+    ball = window.document.scene.shapes[-1]
+    window.do_axis_along_edge()
+    assert window.tool == "axis_edge"
+    steps = len(window.document._undo)
+    window._on_surface_picked(ball.id, 0, shape_geometry(ball).triangles_center[0])
+    assert window.tool == "axis_edge" and "no sharp edge" in window.statusBar().currentMessage()
+    window._on_surface_picked(box.id, face_towards(box, (0, -1, 0)), (-9.6, -10, 7))
+    assert window.tool is None and len(window.document._undo) == steps
+    qapp.processEvents()
+    made = window.document.scene.shapes[2]
+    assert made.name == "Axis 1" and axis(made) == [[-10, -10, 10], [0, 0, 1]]
+    assert len(window.document._undo) == steps + 1
+    file = tmp_path / "edge.mesh"
+    save_project(window.document.scene, file)
+    assert axis(load_project(file).shapes[2]) == axis(made)
+    window.do_undo()
+    assert len(window.document.scene.shapes) == 2
+
+
 def test_axis_text_is_plain_language(qapp, close_qt_widget):
     from mesh.panels import FormDialog
 

@@ -295,6 +295,14 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_axis_square_to_face",
     ),
     ExpertTool(
+        "axis_edge", "construct", "Axis Along an &Edge",
+        "Click a face of a part next to a straight edge for the axis along that edge (the edge "
+        "nearest the click, as Round an Edge picks it). A round edge is made of short straight "
+        "pieces, so there the axis runs along the piece clicked; for a round part's middle, use "
+        "Axis Through a Round Part.",
+        "do_axis_along_edge",
+    ),
+    ExpertTool(
         "axis_planes", "construct", "Axis Where Two Planes &Meet",
         "Select two sketches or construction planes at an angle for the axis along the line "
         "where they meet.",
@@ -311,6 +319,13 @@ TOOLS: tuple[ExpertTool, ...] = (
         "Click a flat face to add a construction point at the middle of its area, such as "
         "the centre of a cylinder's end.",
         "do_point_at_middle",
+    ),
+    ExpertTool(
+        "point_edge", "construct", "Point at the End of an Ed&ge",
+        "Click a face of a part next to an edge, nearer the end you want: the point goes on that "
+        "end of the straight edge. A round edge is made of short straight pieces, so there it "
+        "goes on an end of the piece clicked.",
+        "do_point_at_edge_end",
     ),
     ExpertTool(
         "section_view", "inspect", "&Section View...",

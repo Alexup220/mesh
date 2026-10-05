@@ -95,7 +95,7 @@ class ConstructActions:
     """Mixed into MeshWindow through ExpertActions."""
 
     CONSTRUCT_CLICK_TOOLS = ("plane_face", "midplane", "plane_points", "plane_round", "axis_points",
-                             "axis_face", "point_spot", "point_middle")
+                             "axis_face", "axis_edge", "point_spot", "point_middle", "point_edge")
     CONSTRUCT_TOOL_PROMPTS = {
         "plane_face": "Click a flat face of a part for the new plane. Esc cancels.",
         "plane_round": "Click the round side of a cylinder, cone, ball, ring or other round part; the "
@@ -108,8 +108,12 @@ class ConstructActions:
         "axis_points": "Click the first of two points on parts (near a corner, it lands on the corner). Esc cancels.",
         "axis_points_second": "Now click the second point; the axis points towards it.",
         "axis_face": "Click a point on a flat face of a part for the axis square to it. Esc cancels.",
+        "axis_edge": "Click a face of a part next to a straight edge; the axis runs along that edge. "
+                     "Esc cancels.",
         "point_spot": "Click a part where the point goes (near a corner, it lands on the corner). Esc cancels.",
         "point_middle": "Click a flat face of a part; the point goes at its middle. Esc cancels.",
+        "point_edge": "Click a face of a part next to an edge, nearer the end where the point goes. "
+                      "Esc cancels.",
     }
     CONSTRUCT_CLICK_HANDLERS = {
         "plane_face": "_plane_face_picked",
@@ -118,8 +122,10 @@ class ConstructActions:
         "plane_round": "_plane_round_picked",
         "axis_points": "_axis_point_picked",
         "axis_face": "_axis_face_picked",
+        "axis_edge": "_axis_edge_picked",
         "point_spot": "_point_spot_picked",
         "point_middle": "_point_middle_picked",
+        "point_edge": "_point_edge_picked",
     }
 
     # Which later prompt each click tool shows after each click so far.
@@ -183,6 +189,19 @@ class ConstructActions:
             construct.face_of(shape, face_index, scene.fit_clearances)
         except (KeyError, BuildError):
             self.statusBar().showMessage(self._tool_prompt())
+            return None
+        return shape
+
+    def _clicked_edge(self, shape_id: str, face_index: int, point):
+        """The part clicked, if the click was next to an edge of it; None
+        (and why, with the prompt again) otherwise."""
+        shape = self._clicked_part(shape_id, face_index)
+        if shape is None:
+            return None
+        try:
+            construct.edge_at(shape, face_index, point, self.document.scene.fit_clearances)
+        except BuildError as exc:
+            self.statusBar().showMessage(f"{exc} {self._tool_prompt()}")
             return None
         return shape
 
@@ -473,6 +492,26 @@ class ConstructActions:
             return
         self._finish_construct(lambda: self.axis_square_to(shape_id, face_index, point))
 
+    @replayable(("shape_id", "face_index"))
+    def axis_along_edge(self, shape_id: str, face_index: int, point) -> bool:
+        """The axis along the straight edge next to a click on a face."""
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+        except KeyError:
+            return False
+        name = self._next_name("Axis")
+        return self._add_guide("add axis", lambda: construct.axis_along_edge(
+            shape, face_index, point, scene.fit_clearances, name))
+
+    def do_axis_along_edge(self) -> None:
+        self._start_construct_tool("axis_edge")
+
+    def _axis_edge_picked(self, shape_id: str, face_index: int, point=None) -> None:
+        if self._clicked_edge(shape_id, face_index, point) is None:
+            return
+        self._finish_construct(lambda: self.axis_along_edge(shape_id, face_index, point))
+
     AXIS_PLANES_HINT = "Select two sketches or planes at an angle; the axis runs where they meet."
 
     @replayable()
@@ -520,3 +559,23 @@ class ConstructActions:
         if self._clicked_part(shape_id, face_index) is None:
             return
         self._finish_construct(lambda: self.point_at(shape_id, face_index, None, middle=True))
+
+    @replayable(("shape_id", "face_index"))
+    def point_at_edge_end(self, shape_id: str, face_index: int, point) -> bool:
+        """A point on the end of the edge next to a click that is nearer it."""
+        scene = self.document.scene
+        try:
+            shape = scene.get(shape_id)
+        except KeyError:
+            return False
+        name = self._next_name("Point")
+        return self._add_guide("add point", lambda: construct.point_at_edge_end(
+            shape, face_index, point, scene.fit_clearances, name))
+
+    def do_point_at_edge_end(self) -> None:
+        self._start_construct_tool("point_edge")
+
+    def _point_edge_picked(self, shape_id: str, face_index: int, point=None) -> None:
+        if self._clicked_edge(shape_id, face_index, point) is None:
+            return
+        self._finish_construct(lambda: self.point_at_edge_end(shape_id, face_index, point))

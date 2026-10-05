@@ -230,16 +230,21 @@ reflected. What differs from Fusion is how the pattern is chosen.
   Offered: along the middle of a round part (a cylinder, cone, tube, ring,
   ball, round hardware hole or revolved part, read from its own numbers, so
   an Extrusion of a circle doesn't count); through two clicked points;
-  square to a flat face at a clicked point; and where two planes meet.
-  Fusion's axis along a clicked edge is not offered. Pattern Around a Line
+  square to a flat face at a clicked point; where two planes meet; and
+  along a clicked edge. The edge is found as Round an Edge finds it (the
+  sharp edge of the clicked face nearest the click), and the axis runs
+  along the straight stretch of it clicked; a round edge is short straight
+  pieces, so there it runs along the one piece clicked. Pattern Around a Line
   and Plane at an Angle turn around a selected axis; Revolve still turns
   around a line in its sketch.
 - **Construction points** are drawn as a small cross. Offered: at a click
-  on a part (on the face's corner within 2 mm of it) and at the middle of a
-  flat face's area (a cylinder's end gives its centre). Fusion's point at
-  the end of an edge, where an edge meets a face, or where three planes
-  meet is not offered. Three selected points make a plane and two make an
-  axis; nothing else takes a point yet.
+  on a part (on the face's corner within 2 mm of it), at the middle of a
+  flat face's area (a cylinder's end gives its centre), and at the end of
+  a clicked edge nearer the click (the end of the straight stretch
+  clicked, so on a round edge an end of the short piece clicked). Fusion's
+  point where an edge meets a face, or where three planes meet, is not
+  offered. Three selected points make a plane and two make an axis;
+  nothing else takes a point yet.
 - **Section view** only changes the view, one plane at a time, and is
   not saved with the project (Fusion keeps section analyses in the
   browser). The plane is a selected sketch or construction plane, or a

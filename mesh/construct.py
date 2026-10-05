@@ -24,7 +24,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from mesh import features, guides, hardware, sketch, threads
+from mesh import edges, features, guides, hardware, sketch, threads
 from mesh.builders import BuildError
 from mesh.modify import MOVE_LIMIT, flat_face
 from mesh.scene import Shape
@@ -323,6 +323,83 @@ def _nearest_on(piece, q) -> tuple[np.ndarray, np.ndarray]:
     return centre + radius * out, out
 
 
+# --- Edges ------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ClickedEdge:
+    """The edge next to a click, found as Round an Edge finds it (the sharp
+    edge of the clicked face nearest the click, followed on round corners
+    of less than 30 degrees): the straight stretch of it the click is next
+    to, and the whole run of edges it is part of."""
+
+    start: np.ndarray
+    end: np.ndarray
+    run: np.ndarray  # the run's corner points, in order (world)
+    closed: bool     # the run goes all the way round
+
+    @property
+    def length(self) -> float:
+        return float(np.linalg.norm(self.end - self.start))
+
+    @property
+    def run_length(self) -> float:
+        ends = np.roll(self.run, -1, axis=0) if self.closed else self.run[1:]
+        return float(np.linalg.norm(ends - self.run[: len(ends)], axis=1).sum())
+
+    @property
+    def straight(self) -> bool:
+        """The whole run is this one straight stretch."""
+        return not self.closed and abs(self.run_length - self.length) < 1e-6
+
+
+def edge_at(shape, face_index: int, point, clearances: dict | None = None) -> ClickedEdge:
+    """The edge of a part next to a click on one of its faces (see
+    ClickedEdge). A round edge is made of short straight pieces, so its
+    straight stretch is the one piece clicked."""
+    if is_reference(shape):
+        raise BuildError("Click a part, not a sketch or guide.")
+    tm = shape_geometry(shape, clearances)
+    if len(tm.faces) > edges.FACE_LIMIT:
+        raise BuildError("This part is too detailed to find its edges.")
+    click = _point(point)
+    run = edges.find_run(tm, face_index, click)
+    points = tm.vertices[run.vertices]
+    count = len(points)
+    pieces = count if run.closed else count - 1
+    starts = points[:pieces]
+    ends = points[(np.arange(pieces) + 1) % count]
+    along = ends - starts
+    reach = np.clip(np.einsum("ij,ij->i", click - starts, along) / np.einsum("ij,ij->i", along, along), 0.0, 1.0)
+    first = int(np.argmin(np.linalg.norm(starts + reach[:, None] * along - click, axis=1)))
+    ways = along / np.linalg.norm(along, axis=1)[:, None]
+
+    def onward(k: int, step: int) -> int | None:
+        """The next piece along that goes on in the same straight line."""
+        nxt = k + step
+        if run.closed:
+            nxt %= pieces
+        elif not 0 <= nxt < pieces:
+            return None
+        return nxt if nxt != first and np.linalg.norm(np.cross(ways[k], ways[nxt])) < 1e-6 else None
+
+    low = high = first
+    while (step := onward(low, -1)) is not None:
+        low = step
+    while (step := onward(high, 1)) is not None and step != low:
+        high = step
+    return ClickedEdge(starts[low].copy(), ends[high].copy(), points.copy(), bool(run.closed))
+
+
+def _pointing_up(direction) -> np.ndarray:
+    """`direction` or its opposite: up where it can, else right, else back."""
+    d = _unit(direction, "The edge")
+    for axis in (2, 0, 1):
+        if abs(d[axis]) > 1e-9:
+            return d if d[axis] > 0 else -d
+    return d
+
+
 def round_spot(shape, face_index: int, point, clearances: dict | None = None) -> RoundSpot:
     """Where a click on a round part (a cylinder, cone, tube, ring, ball,
     thread, round hardware hole or revolved part) lands on its true round
@@ -618,6 +695,15 @@ def axis_where_planes_meet(a, b, label: str = "Axis") -> Shape:
     return new_axis(point, direction, guides.AXIS_LENGTH, label)
 
 
+def axis_along_edge(shape, face_index: int, point, clearances: dict | None = None,
+                    label: str = "Axis") -> Shape:
+    """The axis along the straight stretch of edge next to a click (see
+    edge_at), pointing up where it can (else right, else back)."""
+    edge = edge_at(shape, face_index, point, clearances)
+    return new_axis((edge.start + edge.end) / 2.0, _pointing_up(edge.end - edge.start),
+                    _length_for(edge.length), label)
+
+
 # --- Points -----------------------------------------------------------------------
 
 
@@ -639,3 +725,13 @@ def point_at_middle(shape, face_index: int, clearances: dict | None = None, labe
     cylinder's end, or of a box's side."""
     centre, _normal, _size = face_of(shape, face_index, clearances)
     return new_point(centre, label)
+
+
+def point_at_edge_end(shape, face_index: int, point, clearances: dict | None = None,
+                      label: str = "Point") -> Shape:
+    """A point on the end of the straight stretch of edge next to a click
+    (see edge_at) that is nearer the click."""
+    edge = edge_at(shape, face_index, point, clearances)
+    click = _point(point)
+    near_start = np.linalg.norm(edge.start - click) <= np.linalg.norm(edge.end - click)
+    return new_point(edge.start if near_start else edge.end, label)

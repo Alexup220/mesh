@@ -445,6 +445,16 @@ def scenario_point(window):
     window.point_at(box.id, face_towards(box, (0, 0, 1)), (1.0, 2.0, 20.0))
 
 
+def scenario_axis_along_edge(window):
+    box = add(window)
+    window.axis_along_edge(box.id, face_towards(box, (0, 0, 1)), (3.0, -9.5, 20.0))
+
+
+def scenario_point_at_edge_end(window):
+    box = add(window)
+    window.point_at_edge_end(box.id, face_towards(box, (0, 0, 1)), (7.0, -9.5, 20.0))
+
+
 def scenario_delete(window):
     first, _second = two_boxes(window)
     pick(window, first)
