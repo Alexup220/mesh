@@ -41,17 +41,24 @@ def _result_fields(sketches: int = 1):
 
 
 def extrude_fields():
+    slope = {"min": -features.TAPER_LIMIT, "max": features.TAPER_LIMIT}
     return [
         ("distance", "Distance (mm)", 20.0, {"min": 0.1, "max": 10000.0}),
         ("side", "Direction", "one", {"choices": features.SIDES}),
+        ("taper", "Sides slope in (degrees)", 0.0, slope),
     ] + _result_fields()
 
 
+EXTRUDE_NOTE = (
+    "Pushes the sketch's closed outlines straight out of its plane. A sketch on a face faces "
+    "out of the part: for a hole into that face, choose \"The other way\". With a slope, every "
+    f"side leans in by that angle going away from the sketch (out, for less than 0; at most "
+    f"{features.TAPER_LIMIT:g} degrees), and the corners stay sharp."
+)
+
+
 def ask_extrude(parent) -> dict | None:
-    return run_form(parent, "Extrude", extrude_fields(),
-                    note="Pushes the sketch's closed outlines straight out of its plane. A sketch "
-                         "on a face faces out of the part: for a hole into that face, choose "
-                         "\"The other way\".")
+    return run_form(parent, "Extrude", extrude_fields(), note=EXTRUDE_NOTE)
 
 
 def revolve_fields(axes):
@@ -285,12 +292,12 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
 
     @replayable()
     def extrude_selected(self, distance: float, side: str = "one", hole: bool = False,
-                         keep_sketch: bool = False) -> bool:
+                         keep_sketch: bool = False, taper: float = 0.0) -> bool:
         source = self._chosen_sketch("extrude")
         if source is None:
             return False
         shape = self._attempt("Cannot extrude",
-                              lambda: create.make_extrude(source, distance, side, hole))
+                              lambda: create.make_extrude(source, distance, side, hole, taper))
         if shape is None:
             return False
         self._add_from_sketches("extrude", [source], shape, keep_sketch)
@@ -391,7 +398,7 @@ class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActi
         values = ask_extrude(self)
         if values is not None:
             self.extrude_selected(values["distance"], values["side"], values["result"] == "hole",
-                                  values["keep_sketch"])
+                                  values["keep_sketch"], values.get("taper", 0.0))
 
     # --- Thread ----------------------------------------------------------------------
 

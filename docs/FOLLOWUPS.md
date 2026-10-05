@@ -79,7 +79,9 @@ tools do the closest honest version of their Fusion counterparts:
 - **Sketches are not dragged.** A flat sketch's handle box would have no
   thickness, so the drag handles are hidden for sketches; they are moved and
   turned with the Details panel.
-- **Extrude** has no taper angle and no "up to a face". Joining or cutting
+- **Extrude** has no "up to a face". Its sides slope by one angle (typed in
+  the form, or later with Slope the Sides), which "Both ways" uses on both
+  halves; Fusion can slope the two halves differently. Joining or cutting
   other parts goes through Make Hole + Group (or Join / Cut Out), not inside
   Extrude. Its direction starts at "The way the sketch faces" for a hole too;
   the form says to choose "The other way" for a hole into a face sketched on.

@@ -272,6 +272,11 @@ def scenario_extrude(window):
     window.extrude_selected(5.0, keep_sketch=True)
 
 
+def scenario_extrude_sloped(window):
+    add_sketch(window, RECT)
+    window.extrude_selected(5.0, taper=10.0)
+
+
 def scenario_revolve(window):
     add_sketch(window, BAND)
     window.revolve_selected("y", 270.0)
@@ -699,7 +704,8 @@ def test_the_history_window(window, monkeypatch):
 
 
 SAMPLE_ARGS = {
-    "distance": 5.0, "side": "one", "hole": False, "keep_sketch": False, "axis": "z", "angle": 30.0,
+    "distance": 5.0, "side": "one", "hole": False, "keep_sketch": False, "taper": 0.0, "axis": "z",
+    "angle": 30.0,
     "pitch": 1.5, "length": 10.0, "end": "top", "hand": "right", "dx": 1.0, "dy": 0.0, "dz": 0.0,
     "make_copy": False, "size": 100.0, "stretch_x": 100.0, "stretch_y": 100.0, "stretch_z": 100.0,
     "about": "base", "op": "union", "keep_tools": False, "keep_tool": False, "wall": 2.0, "far_side": False,

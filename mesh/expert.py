@@ -57,7 +57,8 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "extrude", "create", "&Extrude...",
         "Push the selected sketch's closed outlines straight out of its plane, into a "
-        "new part or a hole. The distance stays editable in the Details panel.",
+        "new part or a hole, with the sides sloping in by an angle if you like. The distance "
+        "and slope stay editable in the Details panel.",
         "do_extrude", "E",
     ),
     ExpertTool(

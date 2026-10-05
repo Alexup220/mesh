@@ -264,4 +264,74 @@ def test_extrude_form_is_plain_language(qapp, close_qt_widget):
     form = close_qt_widget(FormDialog(None, "Extrude", expert_actions.extrude_fields()))
     for text in form.labels():
         assert_plain(text)
-    assert form.values() == {"distance": 20.0, "side": "one", "result": "part", "keep_sketch": False}
+    assert form.values() == {"distance": 20.0, "side": "one", "taper": 0.0, "result": "part",
+                             "keep_sketch": False}
+
+
+# --- Sloped sides from the Extrude form ------------------------------------------------
+
+
+def test_make_extrude_can_slope_the_sides():
+    shape = create.make_extrude(sketch_on(), 10.0, taper=10.0)
+    assert shape.params["taper"] == 10.0
+    tm = shape_geometry(shape)
+    assert tm.is_watertight
+    step = 10.0 * math.tan(math.radians(10.0))
+    top = tm.vertices[np.isclose(tm.vertices[:, 2], 10.0)]
+    assert np.allclose([top[:, 0].min(), top[:, 1].min()], [step, step])
+    assert np.allclose([top[:, 0].max(), top[:, 1].max()], [20 - step, 10 - step])
+    bottom, middle, upper = 200.0, (20 - step) * (10 - step), (20 - 2 * step) * (10 - 2 * step)
+    assert tm.volume == pytest.approx(10.0 / 6.0 * (bottom + 4 * middle + upper))
+
+
+def test_straight_sides_add_no_slope_setting():
+    assert "taper" not in create.make_extrude(sketch_on(), 10.0).params
+    assert "taper" not in create.make_extrude(sketch_on(), 10.0, taper=0.0).params
+
+
+@pytest.mark.parametrize("taper, words", [(61.0, "between -60 and 60"), (45.0, "would meet")])
+def test_a_slope_the_extrusion_cannot_take_is_refused(taper, words):
+    with pytest.raises(BuildError) as err:
+        create.make_extrude(sketch_on(), 10.0, taper=taper)
+    assert words in str(err.value)
+    assert_plain(str(err.value))
+
+
+def test_a_sloped_extrusion_round_trips_through_a_project_file(tmp_path):
+    shape = create.make_extrude(sketch_on("xz"), 6.0, "other", taper=-5.0)
+    path = tmp_path / "sloped.mesh"
+    save_project(Scene(shapes=[shape]), path)
+    loaded = load_project(path).get(shape.id)
+    assert loaded.params["taper"] == -5.0
+    assert shape_geometry(loaded).volume == pytest.approx(shape_geometry(shape).volume)
+
+
+def test_the_extrude_form_slopes_the_sides_in_one_undo_step(window, monkeypatch):
+    add_sketch(window)
+    monkeypatch.setattr(expert_actions, "ask_extrude", lambda parent: {
+        "distance": 10.0, "side": "one", "taper": 10.0, "result": "part", "keep_sketch": False})
+    steps = len(window.document._undo)
+    window.do_extrude()
+    shape = window.document.scene.shapes[0]
+    assert shape.params["taper"] == 10.0 and len(window.document._undo) == steps + 1
+    assert window.inspector.field_value("taper") == pytest.approx(10.0)
+    sloped = shape_geometry(shape).volume
+    assert sloped < 200 * 10
+    window.do_undo()
+    assert window.document.scene.shapes[0].params["primitive"] == "sketch"
+    window.do_redo()
+    assert shape_geometry(window.document.scene.shapes[0]).volume == pytest.approx(sloped)
+
+
+def test_a_refused_slope_changes_nothing(window, warnings):
+    add_sketch(window)
+    steps = len(window.document._undo)
+    assert not window.extrude_selected(10.0, taper=45.0)
+    assert len(window.document._undo) == steps
+    assert window.document.scene.shapes[0].params["primitive"] == "sketch"
+    assert warnings and "would meet" in warnings[0]
+
+
+def test_the_extrude_note_says_how_the_sides_slope():
+    assert "at most 60 degrees" in expert_actions.EXTRUDE_NOTE
+    assert_plain(expert_actions.EXTRUDE_NOTE)

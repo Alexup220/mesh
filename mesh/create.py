@@ -166,12 +166,16 @@ def _from_sketch(source: Shape, primitive: str, label: str, params: dict, hole: 
     return shape
 
 
-def make_extrude(source: Shape, distance: float, side: str = "one", hole: bool = False) -> Shape:
-    """The sketch's closed outlines pushed `distance` mm out of its plane."""
+def make_extrude(source: Shape, distance: float, side: str = "one", hole: bool = False,
+                 taper: float = 0.0) -> Shape:
+    """The sketch's closed outlines pushed `distance` mm out of its plane,
+    their sides sloping in by `taper` degrees (out, for less than 0)."""
     if not is_sketch(source):
         raise BuildError("Select a sketch to extrude.")
-    return _from_sketch(source, "extrude", "Extrusion",
-                        {"distance": float(distance), "side": str(side)}, hole)
+    params = {"distance": float(distance), "side": str(side)}
+    if float(taper) != 0.0:
+        params["taper"] = float(taper)  # missing means straight sides, as before
+    return _from_sketch(source, "extrude", "Extrusion", params, hole)
 
 
 def revolve_axes(source: Shape) -> list[tuple[str, str]]:
