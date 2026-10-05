@@ -178,6 +178,14 @@ class Viewport(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._widget, 1)
 
+        # The theme's colours (see set_colors); these start as the dark
+        # theme's.
+        self.selected_color = SELECTED_COLOR
+        self.grid_actor: vtkActor | None = None
+        # The view cube in the corner (see start); None until then, and
+        # always None under the test suite's offscreen platform.
+        self.view_cube = None
+
         self.renderer = vtkRenderer()
         self.renderer.SetBackground(*BACKGROUND)
         self._widget.GetRenderWindow().AddRenderer(self.renderer)
@@ -245,6 +253,17 @@ class Viewport(QWidget):
         grid.GetProperty().SetLineWidth(1.25)
         grid.PickableOff()
         self.renderer.AddActor(grid)
+        self.grid_actor = grid
+
+    def set_colors(self, background: str, grid: str, selection: str) -> None:
+        """Take the theme's 3D view background, grid and selected-part
+        colours (#rrggbb)."""
+        self.renderer.SetBackground(*_hex_to_rgb(background))
+        if self.grid_actor is not None:
+            self.grid_actor.GetProperty().SetColor(*_hex_to_rgb(grid))
+        self.selected_color = _hex_to_rgb(selection)
+        self.refresh()
+        self._render()
 
     def set_scene(self, scene: Scene) -> None:
         self._scene = scene
@@ -314,7 +333,7 @@ class Viewport(QWidget):
             prop.SetColor(*_hex_to_rgb(shape.color))
             prop.SetOpacity(HOLE_OPACITY if shape.is_hole else 1.0)
             prop.SetEdgeVisibility(shape.id in selected)
-            prop.SetEdgeColor(1.0, 0.85, 0.2)
+            prop.SetEdgeColor(*self.selected_color)
             prop.SetLineWidth(2.0)
             cap = self._caps.get(shape.id)
             if cap is not None:
@@ -373,7 +392,7 @@ class Viewport(QWidget):
         if changed:
             outline.GetMapper().SetInputData(_lines_polydata(_guide_lines(shape)))
         line = outline.GetProperty()
-        line.SetColor(*(SELECTED_COLOR if selected else color))
+        line.SetColor(*(self.selected_color if selected else color))
         line.SetLineWidth(GUIDE_SELECTED_LINE_WIDTH if selected else GUIDE_LINE_WIDTH)
 
     def outline_for(self, shape_id: str):
@@ -488,6 +507,30 @@ class Viewport(QWidget):
             self.marked_actor = None
             self._render()
 
+    def workplane_point(self, x: float, y: float):
+        """Where the point (x, y) of this widget (in Qt's coordinates, top
+        left at 0, 0) lands on the workplane (Z = 0): (x, y) in mm, or None
+        if that line of sight never meets it."""
+        ratio = self._widget.devicePixelRatioF()
+        height = self._widget.height() * ratio
+        display = (x * ratio, height - y * ratio)
+        ends = []
+        for depth in (0.0, 1.0):
+            self.renderer.SetDisplayPoint(display[0], display[1], depth)
+            self.renderer.DisplayToWorld()
+            world = np.array(self.renderer.GetWorldPoint(), dtype=np.float64)
+            if world[3] == 0.0:
+                return None
+            ends.append(world[:3] / world[3])
+        near, far = ends
+        if abs(far[2] - near[2]) < 1e-12:
+            return None
+        t = -near[2] / (far[2] - near[2])
+        if t < 0.0:
+            return None
+        hit = near + t * (far - near)
+        return float(hit[0]), float(hit[1])
+
     def view_preset(self, name: str) -> None:
         if name not in VIEW_PRESETS:
             raise ValueError(f"unknown view {name!r}; expected one of {tuple(VIEW_PRESETS)}")
@@ -515,7 +558,19 @@ class Viewport(QWidget):
         if _headless():
             return
         self.interactor.Initialize()
+        self._add_view_cube()
         # First real Render(): the native window is mapped now, so VTK can
         # create a valid OpenGL context/framebuffer against it. See the
         # comment in __init__ for why this must not happen any earlier.
         self._render()
+
+    def _add_view_cube(self) -> None:
+        """The clickable orientation cube in the top right corner: click one
+        of its ends to look along that direction."""
+        from vtkmodules.vtkInteractionWidgets import vtkCameraOrientationWidget
+
+        cube = vtkCameraOrientationWidget()
+        cube.SetParentRenderer(self.renderer)
+        cube.SetInteractor(self.interactor)
+        cube.On()
+        self.view_cube = cube

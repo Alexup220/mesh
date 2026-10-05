@@ -1090,9 +1090,20 @@ def run(argv: list[str] | None = None) -> int:
     if platform in ("", "wayland") or ";" in platform:
         os.environ["QT_QPA_PLATFORM"] = "xcb"
 
-    app = QApplication(argv or sys.argv)
-    apply_theme(app)
-    window = make_window()
+    argv = list(argv or sys.argv)
+    # `mesh --classic` starts the original widget window; plain `mesh`
+    # starts the window with the QML front end (mesh/qml_app.py).
+    classic = "--classic" in argv
+    if classic:
+        argv.remove("--classic")
+    app = QApplication(argv)
+    if classic:
+        apply_theme(app)
+        window = make_window()
+    else:
+        from mesh.qml_app import make_qml_window
+
+        window = make_qml_window()
     window.show()
     window.viewport.start()
     return app.exec()

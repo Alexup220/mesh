@@ -455,7 +455,13 @@ class FormDialog(QDialog):
 
 
 def run_form(parent, title: str, fields, note: str | None = None) -> dict | None:
-    """Show a FormDialog; return its values, or None if cancelled."""
+    """Show a FormDialog; return its values, or None if cancelled.
+
+    A window with its own way of asking (the QML front end's ask_form)
+    asks the same fields its way instead."""
+    ask_form = getattr(parent, "ask_form", None)
+    if ask_form is not None:
+        return ask_form(title, fields, note)
     dialog = FormDialog(parent, title, fields, note)
     try:
         if dialog.exec() != QDialog.Accepted:
