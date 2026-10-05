@@ -186,6 +186,20 @@ TOOLS: tuple[ExpertTool, ...] = (
         "do_draft",
     ),
     ExpertTool(
+        "parameters", "modify", "Change Parame&ters...",
+        "Name the numbers your design is built from (a width, a wall) as parameters, with "
+        "formulas that can use each other. Parts whose sizes are linked to them follow "
+        "whenever you change them.",
+        "do_change_parameters",
+    ),
+    ExpertTool(
+        "link_sizes", "modify", "&Link Sizes to Parameters...",
+        "Make the selected part's sizes, position or turn follow formulas of your parameters, "
+        "such as width / 2. Typing a number in the Details panel ends that link. Sketch "
+        "curves can't be linked.",
+        "do_link_sizes",
+    ),
+    ExpertTool(
         "plane_distance", "construct", "Plane at a &Distance...",
         "Add a construction plane parallel to a flat face you click, a selected sketch or "
         "plane, or one of the workplane's planes, the distance you type away from it. Sketch "

@@ -1,8 +1,9 @@
 """The window's Expert mode actions: the Sketch and Create menus.
 
 Create's patterns and Mirror are in mesh.pattern_actions, the Modify menu
-in mesh.modify_actions, the Construct menu in mesh.construct_actions and
-the Inspect menu in mesh.inspect_actions; all are mixed in here.
+in mesh.modify_actions (its parameters in mesh.parameter_actions), the
+Construct menu in mesh.construct_actions and the Inspect menu in
+mesh.inspect_actions; all are mixed in here.
 
 MeshWindow inherits these, so they share its document, undo and click
 tools. Each tool's geometry lives in a core module (mesh.sketch,
@@ -16,6 +17,7 @@ from mesh import construct, create, features, sketch, sketch_editor, threads
 from mesh.construct_actions import ConstructActions
 from mesh.inspect_actions import InspectActions
 from mesh.modify_actions import ModifyActions
+from mesh.parameter_actions import ParameterActions
 from mesh.pattern_actions import PatternActions
 from mesh.panels import run_form
 from mesh.shapes import is_reference
@@ -112,7 +114,7 @@ def ask_thread(parent, height: float, standard: str, pitch: float) -> dict | Non
     return run_form(parent, "Thread", thread_fields(height, pitch), note=thread_note(standard, pitch))
 
 
-class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActions):
+class ExpertActions(ModifyActions, PatternActions, ConstructActions, InspectActions, ParameterActions):
     """Mixed into MeshWindow (see mesh.expert for the menu items)."""
 
     # The click-on-a-part tools Expert mode adds; turning the mode off

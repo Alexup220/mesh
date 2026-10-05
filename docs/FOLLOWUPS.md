@@ -255,6 +255,18 @@ reflected. What differs from Fusion is how the pattern is chosen.
   as room on the sloped sides. The ends are cut square, with no lead-in
   bevel, and a thread makes at most 150 turns.
 
+## Expert mode, Phase 5 (Parameters, History, Components): approximations and limits
+
+- **Parameters** link a part's position, turn and its own size numbers
+  (width, height, radius and so on) to formulas. Sketch curves, text,
+  hardware sizes, imported parts and the numbers inside a recorded tool
+  (an extrude's distance, a fillet's radius) can't be linked; Fusion lets
+  any dimension or feature number use a parameter. Units are always
+  millimetres and degrees (Fusion lets a parameter carry its own unit).
+  A turn read back from a part is worked out from the part's turned
+  position, so a linked turn keeps the other two turns as they come out
+  of that working (the same numbers the Details panel shows).
+
 ## Platform notes
 
 - The app forces Qt's `xcb` platform (XWayland) in `mesh/app.py:run`, because VTK's

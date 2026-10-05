@@ -3,7 +3,7 @@ import pathlib
 
 import pytest
 
-CORE = ["blobs", "shapes", "scene", "ops", "io_formats", "printcheck", "solids", "hardware", "builders", "text", "settings", "expert", "sketch", "create", "features", "modify", "edges", "patterns", "guides", "construct", "section", "measure", "threads"]
+CORE = ["blobs", "shapes", "scene", "ops", "io_formats", "printcheck", "solids", "hardware", "builders", "text", "settings", "expert", "sketch", "create", "features", "modify", "edges", "patterns", "guides", "construct", "section", "measure", "threads", "parameters"]
 FORBIDDEN = {"PySide6", "vtk", "vtkmodules", "PyQt5", "PyQt6"}
 ROOT = pathlib.Path(__file__).resolve().parents[1] / "mesh"
 

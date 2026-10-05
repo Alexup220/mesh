@@ -859,6 +859,8 @@ class MeshWindow(ExpertActions, QMainWindow):
         if not self._edit_active:
             self.document.snapshot("edit")
             self._edit_active = True
+        # A typed number replaces a formula (Expert mode's parameters).
+        self._end_link(shape, field)
 
         if field == "is_hole":
             shape.is_hole = bool(value)

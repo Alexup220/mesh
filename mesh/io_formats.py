@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 IMPORT_EXTS = (".stl", ".obj", ".3mf", ".ply", ".glb", ".gltf", ".off", ".dae")
 PROJECT_EXT = ".mesh"
 PROJECT_FORMAT_VERSION = 1
+# A project that uses Expert mode's named parameters, links, components or
+# history is saved as version 2: older builds of mesh would open it but
+# silently drop those. A project that uses none is still saved as 1.
+EXPERT_FORMAT_VERSION = 2
+EXPERT_KEYS = ("parameters", "components", "history")
 
 MAX_BODIES = 200
 
@@ -148,9 +153,17 @@ def export_scene(scene: Scene, path) -> None:
     result.export(path)
 
 
+def format_version(scene_dict: dict) -> int:
+    """The project file version a scene needs (see EXPERT_FORMAT_VERSION)."""
+    expert = any(key in scene_dict for key in EXPERT_KEYS) or any(
+        "links" in s or "component" in s for s in scene_dict.get("shapes", []))
+    return EXPERT_FORMAT_VERSION if expert else PROJECT_FORMAT_VERSION
+
+
 def save_project(scene: Scene, path) -> None:
     path = Path(path)
-    document = {"format_version": PROJECT_FORMAT_VERSION, "scene": scene.to_dict()}
+    data = scene.to_dict()
+    document = {"format_version": format_version(data), "scene": data}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document))
 
@@ -159,11 +172,15 @@ def load_project(path) -> Scene:
     path = Path(path)
     try:
         document = json.loads(path.read_text())
+        version = document.get("format_version", PROJECT_FORMAT_VERSION)
+        if isinstance(version, (int, float)) and version > EXPERT_FORMAT_VERSION:
+            raise ProjectError(f"{path.name} was saved by a newer version of mesh. Update mesh to open it.")
         return Scene.from_dict(document["scene"])
     except (
         json.JSONDecodeError,
         KeyError,
         TypeError,
+        AttributeError,  # a file whose top level is not an object
         OSError,
         ValueError,  # e.g. np.array() on a malformed "transform" entry
     ) as exc:

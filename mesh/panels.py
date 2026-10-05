@@ -119,6 +119,7 @@ class Inspector(QWidget):
 
         layout = QFormLayout(self)
         self.fields: dict[str, QDoubleSpinBox] = {}
+        self.field_labels: dict[str, QLabel] = {}
         self._rows: dict[str, int] = {}
 
         for field in POSITION_FIELDS + SIZE_FIELDS + ROTATION_FIELDS:
@@ -138,7 +139,9 @@ class Inspector(QWidget):
             else:
                 box.setRange(-10000.0, 10000.0)
             box.valueChanged.connect(lambda value, f=field: self._emit(f, value))
-            layout.addRow(QLabel(FIELD_LABELS[field]), box)
+            label = QLabel(FIELD_LABELS[field])
+            layout.addRow(label, box)
+            self.field_labels[field] = label
             self.fields[field] = box
             self._rows[field] = layout.rowCount() - 1
 
@@ -269,6 +272,7 @@ class Inspector(QWidget):
             self._layout.setRowVisible(self._fit_row, False)
             # Hidden while a sketch was shown; every part has it.
             self._layout.setRowVisible(self._hole_row, True)
+            self._show_links({})
             return
 
         self._loading = True
@@ -312,8 +316,24 @@ class Inspector(QWidget):
             index = self.fit_box.findData(getattr(shape, "fit", DEFAULT_FIT))
             self.fit_box.setCurrentIndex(max(index, 0))
             self._set_color_swatch(shape.color or DEFAULT_COLOR)
+            self._show_links(getattr(shape, "links", None) or {})
         finally:
             self._loading = False
+
+    LINKED_TIP = "Follows the formula {formula} (Modify > Change Parameters). Typing a number ends the link."
+
+    def _show_links(self, links: dict) -> None:
+        """A number that follows a parameter's formula is shown in italics,
+        with the formula in its tooltip (Expert mode)."""
+        for field, box in self.fields.items():
+            formula = links.get(field)
+            tip = self.LINKED_TIP.format(formula=formula) if formula else ""
+            box.setToolTip(tip)
+            label = self.field_labels[field]
+            label.setToolTip(tip)
+            font = label.font()
+            font.setItalic(bool(formula))
+            label.setFont(font)
 
 
 class FormDialog(QDialog):

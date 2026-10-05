@@ -63,9 +63,15 @@ class Shape:
     is_hole: bool = False
     visible: bool = True
     fit: str = DEFAULT_FIT
+    # Expert mode: numbers that follow a named parameter's formula (field
+    # -> formula; see mesh.parameters), and the component the part belongs
+    # to (see mesh.components). Saved only when used, so a project that
+    # uses neither is saved exactly as before.
+    links: dict = field(default_factory=dict)
+    component: str = ""
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "id": self.id,
             "name": self.name,
             "kind": self.kind,
@@ -76,6 +82,11 @@ class Shape:
             "visible": self.visible,
             "fit": self.fit,
         }
+        if self.links:
+            d["links"] = dict(self.links)
+        if self.component:
+            d["component"] = self.component
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Shape":
@@ -89,6 +100,8 @@ class Shape:
             is_hole=d.get("is_hole", False),
             visible=d.get("visible", True),
             fit=d.get("fit", DEFAULT_FIT) if d.get("fit") in FITS else DEFAULT_FIT,
+            links={str(k): str(v) for k, v in (d.get("links") or {}).items()},
+            component=str(d.get("component") or ""),
         )
 
 
@@ -111,6 +124,9 @@ class Scene:
     build_volume: tuple[float, float, float] = DEFAULT_BUILD_VOLUME
     snap_mm: float = DEFAULT_SNAP_MM
     fit_clearances: dict = field(default_factory=lambda: dict(DEFAULT_FIT_CLEARANCES))
+    # Expert mode: the named parameters ({"name", "formula", "note"}; see
+    # mesh.parameters). Saved only when there are some.
+    parameters: list = field(default_factory=list)
 
     def add(self, shape: Shape) -> None:
         self.shapes.append(shape)
@@ -141,6 +157,7 @@ class Scene:
             "build_volume": list(self.build_volume),
             "snap_mm": self.snap_mm,
             "fit_clearances": dict(self.fit_clearances),
+            **({"parameters": [dict(p) for p in self.parameters]} if self.parameters else {}),
         }
 
     @classmethod
@@ -151,6 +168,8 @@ class Scene:
             build_volume=tuple(d.get("build_volume", DEFAULT_BUILD_VOLUME)),
             snap_mm=d.get("snap_mm", DEFAULT_SNAP_MM),
             fit_clearances=_read_fit_clearances(d.get("fit_clearances")),
+            parameters=[{"name": str(p["name"]), "formula": str(p["formula"]), "note": str(p.get("note", ""))}
+                        for p in d.get("parameters") or []],
         )
 
 
