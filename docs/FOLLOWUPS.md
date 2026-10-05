@@ -207,12 +207,17 @@ reflected. What differs from Fusion is how the pattern is chosen.
   goes one way only, and its spacing is from one copy to the next or spread
   over the whole path. Rows' two directions share one choice of spacing
   and of both ways.
-- **Pattern Along a Path** needs a sketch as the path; a part's edge can't
-  be picked. Curves are followed in their straight pieces (64 per circle),
+- **Pattern Along a Path** takes a sketch as the path, or a part's edge
+  clicked after the form (with no sketch selected): the edge next to the
+  click and the edges it runs on into smoothly, as Round an Edge picks
+  them, so a run stops at a corner. An edge path must lie flat in one
+  plane (a run that goes round a corner and down a side is refused), and
+  Fusion's picking of several separate edges into one path is not offered.
+  Curves are followed in their straight pieces (64 per circle),
   so a copy sits on a piece, slightly inside the true curve. With "Turn the
   copies as the path turns", the turn is blended across pieces that meet
   at less than 10 degrees (a curve) and jumps at sharper corners; copies
-  turn only within the sketch's plane, never tilt out of it.
+  turn only within the path's plane, never tilt out of it.
 - **Copies are separate parts**, as Duplicate makes, not one feature.
   Changing the original later does not change the copies, and patterned
   Holes cut once grouped with the part, like any Hole.

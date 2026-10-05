@@ -128,6 +128,13 @@ def editors() -> dict:
                                                  "skip": _numbers(a.get("skip"))}),
             lambda v, _a: {"count": v["count"], "spacing": None if v["even"] else v["spacing"],
                            "follow": v["follow"], "skip": v["skip"]}),
+        "path_pattern_along_edge": (
+            "Pattern Along a Path",
+            lambda a: _filled(pa.path_fields(), {**a, "even": a["spacing"] is None,
+                                                 "spacing": a["spacing"] or 10.0,
+                                                 "skip": _numbers(a.get("skip"))}),
+            lambda v, _a: {"count": v["count"], "spacing": None if v["even"] else v["spacing"],
+                           "follow": v["follow"], "skip": v["skip"]}),
         "mirror_copy_selected": ("Mirror", lambda a: _filled(
             [("plane", "Mirror across", a["plane"], {"choices": pa.MIRROR_PLANES[1:]}), pa.JOIN_FIELD], a),
             _same),

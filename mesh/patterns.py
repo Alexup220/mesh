@@ -15,7 +15,8 @@ that can't be met raises BuildError with a plain message.
                  they are), or round a construction axis (circular_about)
     along_path   along the one path a sketch draws, keeping the parts'
                  place relative to the path's start, and optionally turning
-                 with it
+                 with it (along_edge: along a part's run of edges instead,
+                 when it lies flat in one plane)
     mirrored     reflected across a plane: a sketch's, a flat face's, or one
                  of the middle planes through 0 (mirrored_into_one also
                  joins each image to its part, as Combine's Join does)
@@ -32,11 +33,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from mesh import create, sketch
+from mesh import create, edges, sketch
 from mesh.builders import GUIDES_ARE_NOT_PARTS, MAX_COPIES, BuildError, _check_count, _copy
 from mesh.modify import MOVE_LIMIT, _bounds, combine, flat_face
 from mesh.ops import AXES, _canonical
-from mesh.shapes import is_reference
+from mesh.shapes import is_reference, shape_geometry
 
 PARTS_ONLY = "Select the parts to copy. Sketches are guides, so they are not copied."
 SMOOTH_DEGREES = 10.0  # a path turning less than this between pieces is a curve, not a corner
@@ -295,6 +296,13 @@ def _path(guide, near) -> tuple[_Path, np.ndarray]:
         points, closed = sketch.single_path(guide.params["entities"])
     except sketch.SketchError as exc:
         raise BuildError(str(exc)) from exc
+    return _path_through(points, closed, np.asarray(guide.transform, dtype=np.float64), near)
+
+
+def _path_through(points, closed: bool, frame, near) -> tuple[_Path, np.ndarray]:
+    """The path through `points` (in the plane `frame` places), starting
+    at the end nearest `near` (a world point), or round a closed path at
+    the point nearest it; and that plane."""
     points = np.asarray(points, dtype=np.float64)
     keep = np.concatenate([[True], np.linalg.norm(np.diff(points, axis=0), axis=1) > 1e-9])
     points = points[keep]
@@ -302,7 +310,7 @@ def _path(guide, near) -> tuple[_Path, np.ndarray]:
         points = points[:-1]
     if len(points) < (3 if closed else 2):
         raise BuildError("The path is too short to put copies along.")
-    frame = np.asarray(guide.transform, dtype=np.float64)
+    frame = np.asarray(frame, dtype=np.float64)
     target = (np.linalg.inv(frame) @ np.append(np.asarray(near, dtype=np.float64), 1.0))[:2]
     if not closed:
         if np.linalg.norm(points[-1] - target) < np.linalg.norm(points[0] - target):
@@ -343,6 +351,56 @@ def along_path(shapes, guide, count: int, spacing: float | None = None, follow: 
     _check_total(count, parts)
     left_out = _left_out(skip, count)
     path, frame = _path(guide, _bounds(parts).mean(axis=0))
+    return _along(parts, path, frame, count, spacing, follow, left_out)
+
+
+EDGE_NOT_FLAT = (
+    "That edge doesn't lie flat in one plane, so copies can't go along it. Draw the path in a "
+    "sketch instead."
+)
+
+
+def edge_path(part, face_index: int, point, clearances: dict | None = None):
+    """The run of edges next to a click on `part` (the edge nearest the
+    click and those it runs on into smoothly, as Round an Edge finds them)
+    as a path in the plane it lies flat in: (its points in that plane,
+    whether it goes all the way round, the plane as a 4x4 frame). Refused
+    if it doesn't lie flat in one plane."""
+    if is_reference(part):
+        raise BuildError("Click a face of a part next to the edge, not a sketch or guide.")
+    tm = shape_geometry(part, clearances)
+    run = edges.find_run(tm, face_index, point)
+    points = tm.vertices[run.vertices]
+    middle = points.mean(axis=0)
+    facing = tm.face_normals[face_index]
+    if len(points) == 2:
+        normal = facing  # a straight edge lies in the face clicked
+    else:
+        normal = np.linalg.svd(points - middle)[2][2]
+        size = max(1.0, float(np.ptp(points, axis=0).max()))
+        if np.abs((points - middle) @ normal).max() > 1e-6 * size:
+            raise BuildError(EDGE_NOT_FLAT)
+        if normal @ facing < 0.0:
+            normal = -normal
+    frame = sketch.plane_frame(normal, middle)
+    return sketch.to_sketch(frame, points), bool(run.closed), frame
+
+
+def along_edge(shapes, part, face_index: int, point, count: int, spacing: float | None = None,
+               follow: bool = False, skip=(), clearances: dict | None = None) -> list:
+    """Copies of the parts along a run of edges of `part` next to a click
+    (see edge_path), as along_path makes them along a sketch's path."""
+    parts = _parts(shapes)
+    count = _check_count(count)
+    _check_total(count, parts)
+    left_out = _left_out(skip, count)
+    points, closed, plane = edge_path(part, face_index, point, clearances)
+    path, frame = _path_through(points, closed, plane, _bounds(parts).mean(axis=0))
+    return _along(parts, path, frame, count, spacing, follow, left_out)
+
+
+def _along(parts, path: _Path, frame, count: int, spacing, follow: bool, left_out) -> list:
+    """The copies of along_path, along `path` in the plane `frame`."""
     total = path.length
     if spacing is None:
         spacing = total / (count if path.closed else count - 1)

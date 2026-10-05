@@ -450,6 +450,12 @@ def scenario_path_leaving_out(window):
     window.path_pattern_selected(4, 15.0, skip="3")
 
 
+def scenario_path_along_an_edge(window):
+    box = add(window)
+    peg = add(window, "cylinder", dx=40.0)
+    window.path_pattern_along_edge(box.id, face_towards(box, (0, 0, 1)), (0.0, -10.0, 20.0), [peg.id], 3, 10.0)
+
+
 def scenario_mirror_copy(window):
     add(window, dx=20.0)
     window.mirror_copy_selected("x")
