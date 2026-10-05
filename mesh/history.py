@@ -16,6 +16,10 @@ project and undone with it:
   selected, in the order picked, "faces": where each clicked face was}.
   Such a step runs the tool again; a clicked face is found again by the
   way it faces and where it was (find_face).
+- "formulas" (only when used) is in "call": the step's settings that
+  follow the parameters, {form field: formula}. Each time the project is
+  worked out again they are worked out from the parameters, and the
+  tool's form turns them into its settings (formula_values).
 - "off" (only when true) marks a step that is skipped: the project is
   worked out as if it weren't there, but it stays in the list, ready to
   be used again.
@@ -34,8 +38,11 @@ import copy
 import functools
 import inspect
 
+import re
+
 import numpy as np
 
+from mesh import parameters
 from mesh.scene import Shape
 from mesh.shapes import shape_geometry
 
@@ -318,6 +325,44 @@ def _call(scene, name: str, signature, faces, args, kwargs) -> dict | None:
     return {"method": name, "args": settings, "picked": list(scene.selection), "faces": hints}
 
 
+# --- Settings that follow the parameters -------------------------------------------------
+
+
+def number_fields(fields) -> list:
+    """The fields of a tool's form that hold a number."""
+    return [f for f in fields if isinstance(f[2], (int, float)) and not isinstance(f[2], bool)]
+
+
+def field_words(label: str) -> str:
+    """A form field's label without its units: "Radius (mm)" -> "Radius"."""
+    return re.sub(r"\s*\([^)]*\)", "", label).strip()
+
+
+def checked_number(field, number: float):
+    """`number` as form field `field` would take it: rounded to a whole
+    number for a count, and inside the field's limits (those the form's
+    number box has)."""
+    _key, label, default, options = field
+    options = options or {}
+    whole = isinstance(default, int)
+    if whole:
+        number = int(round(number))
+    low = options.get("min", 0 if whole else 0.0)
+    high = options.get("max", 1000 if whole else 10000.0)
+    if not low <= number <= high:
+        raise parameters.ParameterError(f"{field_words(label)} would be {number:g}, which it can't be.")
+    return number if whole else float(number)
+
+
+def formula_values(fields, formulas: dict, known: dict) -> dict:
+    """The numbers the step's formulas (form field -> formula) come to,
+    with the parameters' values `known`. A formula for a field the form no
+    longer has is left out."""
+    by_key = {f[0]: f for f in number_fields(fields)}
+    return {key: checked_number(by_key[key], parameters.evaluate(formula, known))
+            for key, formula in formulas.items() if key in by_key}
+
+
 # --- Showing a step ---------------------------------------------------------------------
 
 
@@ -351,6 +396,12 @@ def read(raw) -> dict | None:
         if call is not None and not (isinstance(call, dict) and isinstance(call.get("method"), str)
                                      and isinstance(call.get("args"), dict)):
             return None
+        if call is not None and "formulas" in call:
+            raw_formulas = call["formulas"] if isinstance(call["formulas"], dict) else {}
+            formulas = {k: v for k, v in raw_formulas.items() if isinstance(k, str) and isinstance(v, str)}
+            call = {k: v for k, v in call.items() if k != "formulas"}
+            if formulas:
+                call["formulas"] = formulas
         if effect is not None and not isinstance(effect, dict):
             return None
         kept = {"label": str(step.get("label", "")), "call": call, "effect": effect}

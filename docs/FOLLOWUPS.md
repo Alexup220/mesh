@@ -258,9 +258,12 @@ reflected. What differs from Fusion is how the pattern is chosen.
 ## Expert mode, Phase 5 (Parameters, History, Components): approximations and limits
 
 - **Parameters** link a part's position, turn and its own size numbers
-  (width, height, radius and so on) to formulas. Sketch curves, text,
-  hardware sizes, imported parts and the numbers inside a recorded tool
-  (an extrude's distance, a fillet's radius) can't be linked; Fusion lets
+  (width, height, radius and so on) to formulas. While the project keeps
+  a history, a tool's settings (an extrusion's distance, a rounding's
+  radius, a pattern's count) can use them too (History > Use
+  Parameters); a count is rounded to a whole number. Sketch curves, text,
+  hardware sizes and imported parts can't be linked, and a tool's
+  settings can't use a parameter when no history is kept; Fusion lets
   any dimension or feature number use a parameter. Units are always
   millimetres and degrees (Fusion lets a parameter carry its own unit).
   A turn read back from a part is worked out from the part's turned

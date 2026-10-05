@@ -190,7 +190,7 @@ TOOLS: tuple[ExpertTool, ...] = (
         "parameters", "modify", "Change Parame&ters...",
         "Name the numbers your design is built from (a width, a wall) as parameters, with "
         "formulas that can use each other. Parts whose sizes are linked to them follow "
-        "whenever you change them.",
+        "whenever you change them, and so do tools' settings that use them in the history.",
         "do_change_parameters",
     ),
     ExpertTool(
@@ -203,8 +203,8 @@ TOOLS: tuple[ExpertTool, ...] = (
     ExpertTool(
         "history", "modify", "Histor&y...",
         "Keep a list of every change to the project. Change a step's settings (an extrusion's "
-        "distance, a rounding's radius), skip, move or remove a step, and the project is "
-        "worked out again so later steps follow.",
+        "distance, a rounding's radius) or let them follow your parameters; skip, move or "
+        "remove a step. The project is worked out again so later steps follow.",
         "do_history",
     ),
     ExpertTool(

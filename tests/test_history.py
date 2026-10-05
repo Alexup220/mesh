@@ -694,6 +694,140 @@ def test_a_moved_step_is_saved_with_the_project(window, tmp_path):
     assert [s["effect"]["names"] for s in loaded.history["steps"]] == [["Sphere"], ["Box"]]
 
 
+FIELDS = [("radius", "Radius (mm)", 2.0, {"min": 0.1, "max": 100.0}), ("count", "Copies", 3, {"min": 2}),
+          ("keep", "Keep it", True, {}), ("axis", "Along", "x", {"choices": [("x", "x")]})]
+
+
+def test_formulas_in_a_steps_settings_are_worked_out_through_its_form():
+    assert [f[0] for f in history.number_fields(FIELDS)] == ["radius", "count"]
+    assert history.field_words("Radius (mm)") == "Radius"
+    worked = history.formula_values(FIELDS, {"radius": "w / 4", "count": "n + 0.6", "gone": "w"},
+                                     {"w": 20.0, "n": 2.0})
+    assert worked == {"radius": 5.0, "count": 3} and isinstance(worked["count"], int)
+    for formulas, words in (({"radius": "w * 10"}, "Radius would be 200, which it can't be."),
+                            ({"count": "1"}, "Copies would be 1, which it can't be."),
+                            ({"radius": "q"}, "which is not a parameter")):
+        with pytest.raises(history.parameters.ParameterError) as err:
+            history.formula_values(FIELDS, formulas, {"w": 20.0})
+        assert words in str(err.value)
+        assert_plain(str(err.value))
+
+
+def test_formulas_from_a_file_are_checked():
+    raw = {"base": {}, "steps": [{"label": "x", "call": {"method": "m", "args": {}, "formulas": {"a": "w", "b": 3}}},
+                                 {"label": "y", "call": {"method": "m", "args": {}, "formulas": "w"}}]}
+    steps = history.read(raw)["steps"]
+    assert steps[0]["call"]["formulas"] == {"a": "w"} and "formulas" not in steps[1]["call"]
+
+
+def rounded_box_with(window, formula="w / 4"):
+    window.set_parameters([{"name": "w", "formula": "8", "note": ""}])
+    window.start_history()
+    box = add(window)
+    window.round_edge(box.id, face_towards(box, (0, 0, 1)), (10.0, 0.0, 20.0), 1.0)
+    assert window.set_step_formulas(1, {"radius": formula})
+    return window.document.scene
+
+
+def test_a_steps_setting_can_follow_a_parameter(window, warnings):
+    scene = rounded_box_with(window)
+    call = window.history_steps()[1]["call"]
+    assert call["formulas"] == {"radius": "w / 4"} and call["args"]["radius"] == 2.0
+    volume = shape_geometry(scene.shapes[0]).volume
+    assert window.set_parameters([{"name": "w", "formula": "12", "note": ""}])
+    assert window.history_steps()[1]["call"]["args"]["radius"] == 3.0
+    assert shape_geometry(window.document.scene.shapes[0]).volume < volume - 1.0
+    assert not warnings
+    window.do_undo()
+    assert window.history_steps()[1]["call"]["args"]["radius"] == 2.0
+    window.do_undo()
+    assert "formulas" not in window.history_steps()[1]["call"]
+
+
+def test_a_count_and_a_point_can_follow_parameters(window):
+    window.set_parameters([{"name": "n", "formula": "4", "note": ""}, {"name": "c", "formula": "50", "note": ""}])
+    window.start_history()
+    add(window)
+    window.circular_pattern_selected(3, "z", (100.0, 0.0, 0.0))
+    assert window.set_step_formulas(1, {"count": "n", "centre_x": "c * 2 - 40"})
+    assert len(window.document.scene.shapes) == 4
+    assert window.history_steps()[1]["call"]["args"]["centre"] == [60.0, 0.0, 0.0]
+    assert window.set_parameters([{"name": "n", "formula": "2.4", "note": ""}, {"name": "c", "formula": "50", "note": ""}])
+    assert len(window.document.scene.shapes) == 2
+
+
+def test_formulas_that_cannot_be_used_change_nothing(window, warnings):
+    scene = rounded_box_with(window)
+    before = summary(scene)
+    assert not window.set_step_formulas(1, {"radius": "depth"})
+    assert "\"depth\", which is not a parameter" in warnings[-1]
+    assert not window.set_step_formulas(1, {"radius": "w * 3"})  # too big for the box's edge
+    assert warnings[-1].startswith("Step 2 (")
+    assert not window.set_parameters([{"name": "w", "formula": "100", "note": ""}])
+    assert warnings[-1].startswith("Step 2 (") and "Radius would be 25" not in warnings[-1]
+    assert summary(window.document.scene) == before
+    assert window.history_steps()[1]["call"]["formulas"] == {"radius": "w / 4"}
+    for text in warnings:
+        assert_plain(text)
+
+
+def test_a_typed_number_ends_a_formula(window, monkeypatch):
+    rounded_box_with(window)
+    assert window.set_step_formulas(1, {"radius": "3"})
+    call = window.history_steps()[1]["call"]
+    assert "formulas" not in call and call["args"]["radius"] == 3.0
+    window.set_step_formulas(1, {"radius": "w / 4"})
+    # Change... with the number left as it was keeps the formula ...
+    monkeypatch.setattr(history_actions, "run_form", lambda *a, **k: {"radius": 2.0})
+    window.ask_step_change(1)
+    assert window.history_steps()[1]["call"]["formulas"] == {"radius": "w / 4"}
+    # ... and a new number ends it.
+    monkeypatch.setattr(history_actions, "run_form", lambda *a, **k: {"radius": 1.5})
+    assert window.ask_step_change(1)
+    call = window.history_steps()[1]["call"]
+    assert "formulas" not in call and call["args"]["radius"] == 1.5
+    assert window.statusBar().currentMessage() == window.FORMULA_ENDED
+
+
+def test_formulas_are_saved_with_the_project(window, tmp_path):
+    rounded_box_with(window)
+    file = tmp_path / "formulas.mesh"
+    window.save_to(file)
+    assert load_project(file).history["steps"][1]["call"]["formulas"] == {"radius": "w / 4"}
+    window.open_from(file)
+    assert window.set_parameters([{"name": "w", "formula": "4", "note": ""}])
+    assert window.history_steps()[1]["call"]["args"]["radius"] == 1.0
+
+
+def test_using_parameters_from_the_history_window(window, monkeypatch):
+    window.start_history()
+    box = add(window)
+    window.round_edge(box.id, face_towards(box, (0, 0, 1)), (10.0, 0.0, 20.0), 1.0)
+    assert not window.ask_step_formulas(1)
+    assert window.statusBar().currentMessage() == window.NO_PARAMETERS
+    assert not window.ask_step_formulas(0)
+    assert window.statusBar().currentMessage() == window.STEP_FIXED
+    window.set_parameters([{"name": "w", "formula": "8", "note": ""}])
+    seen = {}
+
+    def fake_form(parent, title, fields, note=None):
+        seen.update(title=title, fields=fields, note=note)
+        return {"radius": "w / 8"}
+
+    monkeypatch.setattr(history_actions, "run_form", fake_form)
+    dialog = history_actions.HistoryDialog(window)
+    assert not dialog.formulas_button.isHidden()
+    dialog.steps.setCurrentRow(1)
+    dialog.formulas()
+    assert seen["title"] == "Use Parameters in Round an Edge"
+    assert seen["fields"] == [("radius", "Radius (mm)", "1", {})]
+    assert window.history_steps()[1]["call"]["formulas"] == {"radius": "w / 8"}
+    for text in (seen["title"], seen["note"], window.FORMULA_ENDED, window.NO_PARAMETERS,
+                 dialog.formulas_button.text()):
+        assert_plain(text)
+    dialog.deleteLater()
+
+
 def test_a_change_that_cannot_be_worked_out_changes_nothing(window, warnings):
     scene = round_then_pattern(window)
     before = summary(scene)

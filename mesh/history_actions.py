@@ -36,6 +36,11 @@ NOT_KEPT_NOTE = (
     "here, ready to be changed or removed."
 )
 STEP_NOTE = "The project is worked out again from this step on, with these settings."
+FORMULAS_NOTE = (
+    "Type a number, or a formula of your parameters (such as width / 2). A setting given by a "
+    "formula follows the parameters: change them and the project is worked out again. A count "
+    "is rounded to a whole number. Changing the setting in Change... ends its formula."
+)
 
 
 def _filled(fields, values: dict):
@@ -144,7 +149,7 @@ class HistoryDialog(QDialog):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("History")
-        self.resize(680, 420)
+        self.resize(800, 420)
         layout = QVBoxLayout(self)
         self.note = QLabel(self)
         self.note.setWordWrap(True)
@@ -158,6 +163,8 @@ class HistoryDialog(QDialog):
         self.start_button.clicked.connect(self.start)
         self.change_button = QPushButton("Change...", self)
         self.change_button.clicked.connect(self.change)
+        self.formulas_button = QPushButton("Use Parameters...", self)
+        self.formulas_button.clicked.connect(self.formulas)
         self.skip_button = QPushButton("Skip", self)
         self.skip_button.clicked.connect(self.skip)
         self.up_button = QPushButton("Move Up", self)
@@ -168,8 +175,8 @@ class HistoryDialog(QDialog):
         self.remove_button.clicked.connect(self.remove)
         self.stop_button = QPushButton("Stop Keeping It", self)
         self.stop_button.clicked.connect(self.stop)
-        for button in (self.start_button, self.change_button, self.skip_button, self.up_button,
-                       self.down_button, self.remove_button, self.stop_button):
+        for button in (self.start_button, self.change_button, self.formulas_button, self.skip_button,
+                       self.up_button, self.down_button, self.remove_button, self.stop_button):
             bar.addWidget(button)
         bar.addStretch(1)
         layout.addLayout(bar)
@@ -188,7 +195,7 @@ class HistoryDialog(QDialog):
         if steps:
             self.steps.setCurrentRow(min(max(row, 0), len(steps) - 1))
         self.start_button.setVisible(not kept)
-        for button in (self.change_button, self.skip_button, self.remove_button):
+        for button in (self.change_button, self.formulas_button, self.skip_button, self.remove_button):
             button.setVisible(kept)
             button.setEnabled(bool(steps))
         for button in (self.up_button, self.down_button):
@@ -222,6 +229,12 @@ class HistoryDialog(QDialog):
             self.window.ask_step_change(row)
             self.refresh()
 
+    def formulas(self) -> None:
+        row = self._row()
+        if row is not None:
+            self.window.ask_step_formulas(row)
+            self.refresh()
+
     def skip(self) -> None:
         row = self._row()
         if row is not None:
@@ -248,6 +261,8 @@ class HistoryActions:
     HISTORY_STARTED = "From now on, every change is kept in the history (Modify > History)."
     HISTORY_STOPPED = "The history is no longer kept. The parts stay as they are."
     STEP_FIXED = "That step has no settings to change. It can be removed."
+    FORMULA_ENDED = "That setting no longer follows a formula."
+    NO_PARAMETERS = "There are no parameters yet: Modify > Change Parameters."
 
     def history_steps(self) -> list:
         """The steps of the history kept, each with what it changed."""
@@ -316,6 +331,7 @@ class HistoryActions:
                     done.append(copy.deepcopy(step))  # kept as it was, ready to be used again
                     continue
                 try:
+                    step = {**step, "call": self._worked_call(step["call"], known)}
                     effect = self._replay_step(scratch, step, warned)
                     parameters.apply_links(scratch.scene.shapes, known)
                 except (history.HistoryError, parameters.ParameterError) as exc:
@@ -337,6 +353,22 @@ class HistoryActions:
         result.history = {"base": kept["base"], "steps": done}
         result.select([i for i in self.document.scene.selection])
         return result
+
+    def _worked_call(self, call, known: dict):
+        """`call` with the settings its formulas give, worked out from the
+        parameters' values `known` through the tool's own form."""
+        if call is None or not call.get("formulas"):
+            return call
+        found = editors().get(call["method"])
+        if found is None:
+            return call
+        _title, fields_of, back = found
+        fields = fields_of(call["args"])
+        values = {f[0]: f[2] for f in fields}
+        values.update(history.formula_values(fields, call["formulas"], known))
+        worked = copy.deepcopy(call)
+        worked["args"].update(history.plain(back(values, call["args"])))
+        return worked
 
     def _replay_step(self, scratch, step, warned) -> dict:
         """Do one step again on `scratch`; what it changed this time."""
@@ -381,14 +413,82 @@ class HistoryActions:
 
     # --- Changing the history -----------------------------------------------------------
 
-    def change_history_step(self, index: int, settings: dict) -> bool:
+    def change_history_step(self, index: int, settings: dict, ended=()) -> bool:
         """Give step `index` (from 0) new settings and work the project out
-        again."""
+        again. The formulas of the form fields `ended` end: those settings
+        stay as typed."""
         steps = copy.deepcopy(self.history_steps())
         if not 0 <= index < len(steps) or steps[index]["call"] is None:
             return False
-        steps[index]["call"]["args"].update(history.plain(settings))
-        return self._rework("Cannot change the step", "change a step", steps)
+        call = steps[index]["call"]
+        call["args"].update(history.plain(settings))
+        formulas = {k: v for k, v in call.get("formulas", {}).items() if k not in ended}
+        call.pop("formulas", None)
+        if formulas:
+            call["formulas"] = formulas
+        if not self._rework("Cannot change the step", "change a step", steps):
+            return False
+        if ended:
+            self.statusBar().showMessage(self.FORMULA_ENDED)
+        return True
+
+    def step_formulas(self, index: int):
+        """(form title, fields) for typing step `index`'s numbers as
+        formulas: one text box per number of the tool's form, holding its
+        formula or its number. None if it has no settings to change."""
+        editor = self.step_editor(index)
+        if editor is None:
+            return None
+        title, fields, _back = editor
+        formulas = self.history_steps()[index]["call"].get("formulas", {})
+        return title, [(key, label, formulas.get(key, f"{value:g}"), {})
+                       for key, label, value, _options in history.number_fields(fields)]
+
+    def set_step_formulas(self, index: int, texts: dict) -> bool:
+        """Give step `index` (from 0) the numbers and formulas `texts` (form
+        field -> text) and work the project out again. A text that uses a
+        parameter becomes a formula; one that doesn't is a number."""
+        editor = self.step_editor(index)
+        if editor is None:
+            return False
+        _title, fields, back = editor
+        steps = copy.deepcopy(self.history_steps())
+        call = steps[index]["call"]
+        by_key = {f[0]: f for f in history.number_fields(fields)}
+        values = {f[0]: f[2] for f in fields}
+        formulas = dict(call.get("formulas", {}))
+        try:
+            known = parameters.values(self.document.scene.parameters)
+            for key, text in texts.items():
+                if key not in by_key:
+                    continue
+                text = str(text).strip()
+                if parameters.names_in(text):
+                    formulas[key] = text
+                else:
+                    formulas.pop(key, None)
+                    values[key] = history.checked_number(by_key[key], parameters.evaluate(text, {}))
+            values.update(history.formula_values(fields, formulas, known))
+        except parameters.ParameterError as exc:
+            self._warn("Cannot use these formulas", str(exc))
+            return False
+        call["args"].update(history.plain(back(values)))
+        call.pop("formulas", None)
+        if formulas:
+            call["formulas"] = formulas
+        return self._rework("Cannot use these formulas", "use parameters in a step", steps)
+
+    def ask_step_formulas(self, index: int) -> bool:
+        found = self.step_formulas(index)
+        if found is None:
+            self.statusBar().showMessage(self.STEP_FIXED)
+            return False
+        if not self.document.scene.parameters:
+            self.statusBar().showMessage(self.NO_PARAMETERS)
+            return False
+        title, fields = found
+        values = run_form(self, f"Use Parameters in {title}", fields, note=FORMULAS_NOTE)
+        return values is not None and self.set_step_formulas(index, values)
 
     def remove_history_step(self, index: int) -> bool:
         """Take step `index` (from 0) out and work the project out again."""
@@ -443,7 +543,14 @@ class HistoryActions:
             return False
         title, fields, back = editor
         values = run_form(self, f"Change {title}", fields, note=STEP_NOTE)
-        return values is not None and self.change_history_step(index, back(values))
+        if values is None:
+            return False
+        # A setting given by a formula, typed over, no longer follows it.
+        shown = {key: round(value, int((options or {}).get("decimals", 2))) if isinstance(value, float) else value
+                 for key, _label, value, options in fields}
+        formulas = self.history_steps()[index]["call"].get("formulas", {})
+        ended = [key for key in formulas if values.get(key) != shown.get(key)]
+        return self.change_history_step(index, back(values), ended)
 
     def do_history(self) -> None:
         dialog = HistoryDialog(self)
