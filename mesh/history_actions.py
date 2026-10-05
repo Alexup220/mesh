@@ -181,6 +181,7 @@ class HistoryDialog(QDialog):
             self.steps.setCurrentRow(min(max(row, 0), len(steps) - 1))
         self.start_button.setVisible(not kept)
         for button in (self.change_button, self.remove_button):
+            button.setVisible(kept)
             button.setEnabled(bool(steps))
         self.stop_button.setVisible(kept)
 
