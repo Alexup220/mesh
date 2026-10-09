@@ -1,7 +1,7 @@
 # mesh — known follow-ups
 
-Triaged at the end of the initial build (2026-09-10, branch `build-mesh`). Nothing
-here blocks use: the app builds, runs, and passes 187 tests. These are the things a
+First triaged at the end of the initial build (2026-09-10, branch `build-mesh`,
+187 tests then; 1887 now). Nothing here blocks use. These are the things a
 final whole-branch review and real hands-on use surfaced and deliberately deferred.
 
 ## Worth doing before this feels finished
@@ -20,10 +20,9 @@ final whole-branch review and real hands-on use surfaced and deliberately deferr
   display in yellow. On a 64-segment cylinder, sphere or torus the edges cover the
   surface, so a selected cylinder reads as a solid yellow blob rather than a shape
   with an outline. A silhouette outline or a highlight colour shift would read better.
-- **No icons anywhere.** The bottom bar and shape shelf are text-only, and
-  `mesh/resources/` does not exist. Deliberately skipped — icons need art.
-- **No first-run tutorial overlay.** Deliberately skipped: worth writing only after
-  watching someone actually get stuck.
+- **Icons and a first-run screen** were added with the QML front end: icons and
+  Insert thumbnails are drawn by `tools/make_assets.py` into `mesh/assets/`, and a
+  welcome screen shows on first start.
 
 ## Correctness risks worth closing
 
@@ -447,6 +446,14 @@ reflected. What differs from Fusion is how the pattern is chosen.
   of one component joins it; from parts of two different components, it
   joins neither. A hidden component stays hidden with Expert mode off,
   until Expert mode is turned on again to show it.
+
+## QML front end
+
+- **Escape doesn't close the theme editor.** `Keys.onEscapePressed` sits on the
+  editor's root item, but keyboard focus is held by its controls, so the key
+  never reaches it. The Cancel button works.
+- **`mesh --classic`** still starts the original widget window, which has the same
+  tools; its *Details* panel is the QML window's *Properties* panel.
 
 ## Platform notes
 

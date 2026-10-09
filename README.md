@@ -9,7 +9,8 @@ press **Group**, and save a printable STL. Everything is in millimetres.
 
     ~/mesh/bin/mesh
 
-`~/mesh/bin/mesh --classic` starts the original window instead.
+`~/mesh/bin/mesh --classic` starts the original window instead. It has the
+same tools; its *Details* panel is the *Properties* panel described below.
 
 ## The window
 
@@ -54,7 +55,7 @@ The first time mesh starts it shows a short welcome screen; it is under
 
 Everything here is in millimetres, and everything can be undone with `Ctrl+Z`.
 
-- **Fit (for holes).** Select a hole and pick a fit in the Details panel:
+- **Fit (for holes).** Select a hole and pick a fit in the Properties panel:
   *Exact*, *Press fit*, *Snug fit* or *Loose fit*. A fit adds a little room on
   every side of the hole so the part that goes in actually fits after printing:
   a 10 mm snug hole comes out 10.4 mm across. Change how much room each fit adds
@@ -64,7 +65,7 @@ Everything here is in millimetres, and everything can be undone with `Ctrl+Z`.
 - **Add hardware hole.** Ready-made holes for screws (plain, countersunk or
   counterbored, M2–M6), hex nut traps (M2–M6), heat-set insert pockets (M2–M5)
   and magnet pockets (10×2, 8×2, 6×2, 4×2 mm). Each is one hole you can move and
-  change; its size is a drop-down in the Details panel. The opening is at the
+  change; its size is a drop-down in the Properties panel. The opening is at the
   top, so put it into a top face (or use *Place on a face*). Heat-set insert and
   counterbore sizes vary by brand: check them against your hardware.
 - **Lay flat on a face** (`L`). Click a face of a part and it turns so that face
@@ -117,7 +118,7 @@ With Expert mode on:
   drawn in a second sketch, and **Loft** joins the outlines of two or more
   sketches with a skin. Each makes a new part or a hole. The sketch is used up
   unless you keep it; the part keeps a copy of its curves, so its distance or
-  angle stays editable in Details.
+  angle stays editable in Properties.
 
 ## Shortcuts
 
@@ -162,3 +163,80 @@ defaults `QT_QPA_PLATFORM` to `xcb` (i.e. runs through XWayland) before
 `QApplication` is created, unless it's already set in the environment. This
 is why the 3D view works under Hyprland/Wayland today; it can be revisited
 if a native-Wayland VTK backend becomes available for this Qt integration.
+
+## How this was made
+
+mesh was vibecoded. Alexup220, who owns this repository, described what
+they wanted in plain-language prompts (some of them drafted with a
+prompt-writing skill called prompt-master), and Claude, Anthropic's AI
+model, running as Claude Code, wrote essentially all of the code, the tests
+and the documentation, this section included. Alexup220 decided what to
+build, steered the design, ran the app on their own computers, reported
+what was wrong, and approved each change before it was merged. They did not
+write the code by hand.
+
+The Claude Code sessions were started from threads in claude.ai Projects.
+Some ran in Anthropic's cloud containers; others ran through Remote Control
+on Alexup220's own Linux laptop and desktop PC, where Claude could start the
+real app, drive it, and take screenshots of it.
+
+The git history shows this. Of the commits before this section, 149 are by
+"Claude" or "Claude Code"; the 5 under Alexup220's name are three GitHub merge
+commits and two commits Claude made on Alexup220's machine with their git
+identity, which carry a `Co-Authored-By: Claude` line.
+
+### How it was built, in order
+
+1. **The base app (2026-09-07 to 2026-09-10).** Claude wrote a design spec
+   ([docs/superpowers/specs/2026-09-07-mesh-design.md](docs/superpowers/specs/2026-09-07-mesh-design.md))
+   and a task-by-task plan from Alexup220's description, then built it one
+   task at a time with tests: shapes, holes and grouping, undo, the 3D view,
+   import and export, the print check. It ended with
+   [docs/FOLLOWUPS.md](docs/FOLLOWUPS.md), a list of known gaps that were
+   deliberately left for later.
+2. **[PR #1](https://github.com/Alexup220/mesh/pull/1), 12 beginner tools
+   (merged 2026-10-05).** Fits for holes, hardware holes, lay flat, place on
+   a face, hollow, split, rounded shapes, bottom chamfer, repeat, box with
+   lid, text and measure.
+3. **[PR #2](https://github.com/Alexup220/mesh/pull/2), Expert mode
+   (merged 2026-10-05).** A larger set of tools modelled on Autodesk Fusion,
+   built in phases 0 to 5: sketches and Create, Modify, patterns and mirror,
+   construction geometry and inspect tools, then parameters, history and
+   components.
+4. **[PR #3](https://github.com/Alexup220/mesh/pull/3), the QML interface
+   (merged 2026-10-09).** The ribbon, Insert panel, Scene, Properties and
+   History panels, Ctrl+K command search, six themes and a theme editor,
+   around the same 3D view. Bugs Alexup220 found by using it (clipped menus,
+   Ctrl+K search closing, a crash opening the theme editor from Ctrl+K) were
+   fixed in the same PR.
+
+Each step started from a design note in [docs/superpowers/](docs/superpowers/),
+written by Claude before the code.
+
+### What was checked
+
+- **Automated tests.** 1887 tests, run with `uv run pytest`, all passing
+  when PR #3 was merged. They run Qt off screen and do not draw the 3D view,
+  so they say nothing about how it looks.
+- **On-screen checks.** Claude started the app on Alexup220's machines,
+  drove it with scripted clicks and keys, and looked at screenshots. This
+  caught bugs the tests did not: the base build's 3D view was completely
+  black after the tests had passed, and PR #3's menu and crash bugs were
+  reproduced and confirmed fixed this way.
+- **Use.** Alexup220 used the app on their machines and reported problems,
+  which were then fixed.
+- **Review.** Code review was also done by Claude, in separate review
+  passes. No person has read through the code line by line.
+
+### What was not checked
+
+- **Printed parts.** The sizes of hardware holes (screws, nut traps,
+  heat-set inserts, magnets), the fit clearances and the thread profiles were
+  chosen by Claude from published standards and common values. They have
+  not been confirmed against real hardware or test prints. Check them on a small test print
+  before relying on them.
+- **Other systems.** mesh has only been run on Linux (Arch-based, Hyprland,
+  through XWayland). Windows and macOS have not been tried.
+- **Approximations.** mesh works on triangle meshes, not exact curved
+  surfaces. [docs/FOLLOWUPS.md](docs/FOLLOWUPS.md) lists where its results
+  differ from the tools they are modelled on, and the known bugs still open.
