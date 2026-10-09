@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
@@ -1062,6 +1062,22 @@ def make_window() -> MeshWindow:
     return MeshWindow(Settings.load(default_path()))
 
 
+ICON_DIR = Path(__file__).resolve().parent / "icons"
+ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
+
+
+def app_icon() -> QIcon:
+    """The mesh logo: an orange cube with printed layer lines.
+
+    Ready-made PNGs at each size, so the icon does not depend on Qt's SVG
+    plugin; mesh/icons/mesh.svg is the source they were drawn from.
+    """
+    icon = QIcon()
+    for size in ICON_SIZES:
+        icon.addFile(str(ICON_DIR / f"mesh-{size}.png"))
+    return icon
+
+
 def run(argv: list[str] | None = None) -> int:
     import os
 
@@ -1097,6 +1113,7 @@ def run(argv: list[str] | None = None) -> int:
     if classic:
         argv.remove("--classic")
     app = QApplication(argv)
+    app.setWindowIcon(app_icon())
     if classic:
         apply_theme(app)
         window = make_window()
