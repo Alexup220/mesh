@@ -206,6 +206,10 @@ class Document:
         self.scene = scene or Scene()
         self._undo: list[Scene] = []
         self._redo: list[Scene] = []
+        # What each undo and redo step was ("add", "group", ...), in step
+        # with _undo and _redo, for the window's visible history.
+        self.undo_labels: list[str] = []
+        self.redo_labels: list[str] = []
         # Bumped by every snapshot/undo/redo -- i.e. every point where the
         # scene identity actually changes. Callers that want to avoid
         # redoing expensive work (printcheck.check's manifold evaluation)
@@ -232,6 +236,9 @@ class Document:
         self._undo.append(copy.deepcopy(self.scene))
         del self._undo[:-HISTORY_LIMIT]
         self._redo.clear()
+        self.undo_labels.append(label)
+        del self.undo_labels[:-HISTORY_LIMIT]
+        self.redo_labels.clear()
         self.revision += 1
         self.action_before = self._undo[-1]
         if self.recording and self.scene.history is not None:
@@ -263,6 +270,8 @@ class Document:
         self._step_before = self.action_before = None
         self._redo.append(copy.deepcopy(self.scene))
         self.scene = self._undo.pop()
+        if self.undo_labels:
+            self.redo_labels.append(self.undo_labels.pop())
         self.revision += 1
         return True
 
@@ -272,6 +281,8 @@ class Document:
         self._step_before = self.action_before = None
         self._undo.append(copy.deepcopy(self.scene))
         self.scene = self._redo.pop()
+        if self.redo_labels:
+            self.undo_labels.append(self.redo_labels.pop())
         self.revision += 1
         return True
 

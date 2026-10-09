@@ -9,6 +9,42 @@ press **Group**, and save a printable STL. Everything is in millimetres.
 
     ~/mesh/bin/mesh
 
+`~/mesh/bin/mesh --classic` starts the original window instead.
+
+## The window
+
+- **Top:** the menu bar, and the ribbon below it with four tabs: *Create*,
+  *Modify*, *Inspect* and *Export*. Every button has an icon and a name;
+  hover over it to see what it does and its shortcut. With Expert mode on,
+  the ribbon and menus grow to hold the expert tools.
+- **Left:** the *Tools* palette (the click-on-a-part tools and everyday
+  edits) and the *Insert* panel. Click a thumbnail to add that shape to
+  the middle of the workplane, or drag it onto the 3D view to drop it
+  where you let go. Text and Box with lid ask for their sizes first.
+- **Middle:** the 3D view. Drag to turn it, Shift-drag to slide it, scroll
+  to zoom. The cube in the top right corner turns the view to the side you
+  click, and the strip above the view says which mode it is in.
+- **Right:** *Scene* lists every part (Ctrl- or Shift-click to pick more
+  than one), *History* lists every step you can undo (click one to go back
+  to it), and *Properties* shows the selected part's exact numbers.
+- **Bottom:** what the current tool wants you to do next, and the keys
+  worth knowing.
+
+Every panel can be moved, stacked, floated or closed (bring it back from
+**View → Panels**). The layout is remembered for next time, along with the
+window's size.
+
+**Ctrl+K** searches every command by name: type a few letters, then Enter.
+
+**Themes.** **View → Theme** switches between Dark, Light, Fusion Grey,
+Midnight Blue, High Contrast and Solarized straight away. **View → Theme
+Editor…** starts from any of them, lets you change each colour, and saves
+your own theme under a name of your choosing. Your themes are kept in
+`~/.config/mesh/themes/`, and the theme you last picked is remembered.
+
+The first time mesh starts it shows a short welcome screen; it is under
+**View → Welcome Screen** after that.
+
 ## Install the launcher
 
     ln -sf ~/mesh/bin/mesh ~/.local/bin/mesh
@@ -101,6 +137,7 @@ With Expert mode on:
 | `P` | Place next shape on a face |
 | `T` | Add text |
 | `M` | Measure |
+| `Ctrl+K` | Search commands |
 | `E` | Extrude (Expert mode) |
 | `Esc` | Stop the current tool |
 
@@ -108,6 +145,11 @@ With Expert mode on:
 
     uv sync
     uv run pytest
+
+The QML front end is `mesh/qml_app.py` (the window), `mesh/bridge.py` (what
+the QML panels read and call) and `mesh/qml/Mesh/` (the panels). Icons and
+Insert thumbnails are drawn by `uv run python tools/make_assets.py`; run it
+again after adding a command or a shape.
 
 ## Wayland note
 

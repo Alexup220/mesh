@@ -15,6 +15,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mesh.themes import DEFAULT_THEME
+
 FILE_NAME = "settings.json"
 
 
@@ -28,6 +30,13 @@ class Settings:
     # Show the larger set of modeling tools (see mesh.expert). Off on a
     # fresh install.
     expert_mode: bool = False
+    # The window's colour theme, by name (see mesh.themes). An unknown name
+    # falls back to the default theme when the window starts.
+    theme: str = DEFAULT_THEME
+    # Where the window's panels were docked and how big it was, as Qt
+    # wrote it (base64 text). Empty until the window is first closed, which
+    # is also how the window knows to show its welcome screen.
+    layout: str = ""
     # Where save() writes. None keeps the settings in memory only, which is
     # what a window built without settings (as in the tests) gets.
     path: Path | None = field(default=None, compare=False, repr=False)
@@ -41,7 +50,21 @@ class Settings:
             return settings
         if isinstance(raw, dict):
             settings.expert_mode = raw.get("expert_mode") is True
+            if isinstance(raw.get("theme"), str) and raw["theme"].strip():
+                settings.theme = raw["theme"].strip()
+            if isinstance(raw.get("layout"), str):
+                settings.layout = raw["layout"]
         return settings
+
+    def _to_dict(self) -> dict:
+        # The theme and layout are written only once they differ from a
+        # fresh install's, so a file that never had them stays as it was.
+        raw = {"expert_mode": bool(self.expert_mode)}
+        if self.theme != DEFAULT_THEME:
+            raw["theme"] = str(self.theme)
+        if self.layout:
+            raw["layout"] = str(self.layout)
+        return raw
 
     def save(self) -> bool:
         """Write the settings to `path`. Returns False, changing nothing on
@@ -51,7 +74,7 @@ class Settings:
         temporary = self.path.with_name(self.path.name + ".tmp")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary.write_text(json.dumps({"expert_mode": bool(self.expert_mode)}, indent=2))
+            temporary.write_text(json.dumps(self._to_dict(), indent=2))
             os.replace(temporary, self.path)
         except OSError:
             return False
