@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="mesh/icons/mesh.svg" width="128" alt="mesh logo: an orange cube with printed layer lines">
+</p>
+
 # mesh
 
 Easy 3D modeling for 3D printing.

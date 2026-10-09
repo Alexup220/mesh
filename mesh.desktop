@@ -5,4 +5,5 @@ Comment=Easy 3D modeling for 3D printing
 Exec=/home/alexup220/mesh/bin/mesh
 Terminal=false
 Categories=Graphics;3DGraphics;
+Icon=/home/alexup220/mesh/mesh/icons/mesh-256.png
 StartupNotify=true
