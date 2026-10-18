@@ -123,9 +123,9 @@ The model is checked by rendering it from the same fitted cameras
 
 ## Differences from the real product / things approximated
 
-* **The photos are not real photos.** Three of the five files are named
-  `Gemini_Generated_Image_...` and the other two are upscaled
-  (`gigapixel-...`). The 3/4 views do not agree with the front view in every
+* **The photos are not real photos.** The shop's own file names show that
+  three of the five (`ka_2`, `ka_3`, `ka_4`) are AI-generated images and the
+  other two are AI-upscaled. The 3/4 views do not agree with the front view in every
   detail (Asuna's especially), so an exact copy of "the" ring is not
   defined. The front of each ring (about 10 mm either side of the stone) is
   traced from `ka_0`, the clearest shot; the far sides only from the
